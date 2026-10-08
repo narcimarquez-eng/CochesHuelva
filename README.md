@@ -11,6 +11,10 @@ Carrera de coches por Huelva
 
 Controles: flechas o WASD, o los botones de la pantalla en el móvil. `M` abre el menú. Los límites de velocidad son solo informativos.
 
+## Instalar en el móvil
+
+Activa GitHub Pages en Settings → Pages, eligiendo la rama del juego y la carpeta raíz. Después abre `https://narcimarquez-eng.github.io/CochesHuelva/carreras_huelva.html` en Chrome y elige la opción de añadirlo a la pantalla de inicio. Hay que abrirlo desde esa URL: desde un archivo local no se puede instalar. El icono está en `icon.svg` y `icon-512.png`.
+
 ## Datos
 
 `zona-huelva.zip` incluye datos de OpenStreetMap (© colaboradores de OpenStreetMap, licencia ODbL) y del Catastro (Dirección General del Catastro). El juego solo usa `calles.geojson` y `casas.geojson`.
