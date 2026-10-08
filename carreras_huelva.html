@@ -268,9 +268,127 @@ function parsearCasas(geo) {
     const p = f.properties || {};
     let h = Number(p.altura_aprox_m);
     if (!(h > 0)) h = (Number(p.plantas) || 2) * 3;
-    edif.push({ pts, h: Math.min(h, 400), pared: colorValido(p.color_pared), tejado: p.tejado || '' });
+    edif.push({ pts, h: Math.min(h, 400), pared: colorValido(p.color_pared), zoc: colorValido(p.color_zocalo), carp: colorValido(p.color_carpinteria), tejado: p.tejado || '' });
   }
   return edif;
+}
+
+// --- fachadas: tipo de cada pared, puerta y colores (misma lógica que el paseo) ---
+const PAL_FACHADA = {
+  pared: [['#f6f4ee',30],['#f3f0e8',22],['#f8f6f1',12],['#efe9dc',8],['#ece3cf',8],['#e9d7ab',6],['#e4c47f',8],['#d9b067',6]],
+  zocalo: [['#8b867c',20],['#6c6963',14],['#8f3e2c',14],['#a8783e',10],['#c4a265',8],['#4b5058',8],['#a59f92',14],['#3f5168',6],['#2f2f2f',6]],
+  carpinteria: [['#2e4a39',22],['#5b3b26',22],['#7c512e',12],['#ece9e2',16],['#262626',12],['#5a2523',6],['#41627a',5],['#8a8f88',5]],
+  teja: ['#b1603b', '#a85a37', '#c2774c', '#9c5638'],
+  azotea: ['#e6e2d8', '#d9d4c8', '#cfc8bb'],
+};
+function hash2(i, j, s) {
+  let h = (Math.imul(i | 0, 374761393) + Math.imul(j | 0, 668265263) + Math.imul(s | 0, 982451653)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function elegirPonderado(arr, r) {
+  let t = 0;
+  for (const a of arr) t += a[1];
+  let x = r * t;
+  for (const a of arr) { x -= a[1]; if (x <= 0) return a[0]; }
+  return arr[0][0];
+}
+function hexA01(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+}
+function aHex(c) { return '#' + c.map(v => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, '0')).join(''); }
+
+function construirRejillaCalles(tramos) {
+  const celdas = new Map();
+  for (const t of tramos) for (let k = 0; k < t.pts.length - 1; k++) {
+    const [ax, az] = t.pts[k], [bx, bz] = t.pts[k + 1];
+    for (let cx = Math.floor(Math.min(ax, bx) / TAM_CELDA); cx <= Math.floor(Math.max(ax, bx) / TAM_CELDA); cx++)
+      for (let cz = Math.floor(Math.min(az, bz) / TAM_CELDA); cz <= Math.floor(Math.max(az, bz) / TAM_CELDA); cz++) {
+        const clave = cx + ',' + cz;
+        let arr = celdas.get(clave);
+        if (!arr) { arr = []; celdas.set(clave, arr); }
+        arr.push(ax, az, bx, bz);
+      }
+  }
+  return celdas;
+}
+function cercaDeCalle(celdas, x, z, R) {
+  const R2 = R * R;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      const arr = celdas.get(cx + ',' + cz);
+      if (!arr) continue;
+      for (let i = 0; i < arr.length; i += 4) if (distSeg2(x, z, arr[i], arr[i + 1], arr[i + 2], arr[i + 3]) < R2) return true;
+    }
+  return false;
+}
+function dentroDeOtraCasa(edif, rejilla, x, z, self) {
+  const lista = rejilla.get(Math.floor(x / TAM_CELDA) + ',' + Math.floor(z / TAM_CELDA));
+  if (!lista) return false;
+  for (const j of lista) if (j !== self && enPoligono(edif[j].pts, x, z)) return true;
+  return false;
+}
+
+// Para cada casa: tipo de cada pared (0 medianera, 1 patio o campo, 2 calle), puerta y colores
+function prepararCasas(edif, rejilla, tramos) {
+  const calles = construirRejillaCalles(tramos);
+  edif.forEach((e, idx) => {
+    const r = e.pts, n = r.length;
+    e.lados = [];
+    let u = 0, mayor = -1, mayorL = 0;
+    for (let i = 0; i < n; i++) {
+      const p = r[i], q = r[(i + 1) % n];
+      const dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
+      let nx = l ? dz / l : 0, nz = l ? -dx / l : 0;
+      const mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2;
+      if (enPoligono(r, mx + nx * 0.5, mz + nz * 0.5)) { nx = -nx; nz = -nz; }   // normal hacia fuera
+      let tipo = 0;
+      if (l >= 0.9) {
+        let dentro = 0;
+        for (const fr of [0.2, 0.5, 0.8]) if (dentroDeOtraCasa(edif, rejilla, p[0] + dx * fr + nx * 0.7, p[1] + dz * fr + nz * 0.7, idx)) dentro++;
+        if (dentro < 2) tipo = cercaDeCalle(calles, mx + nx * 3, mz + nz * 3, 8) ? 2 : 1;
+      }
+      if (l > mayorL) { mayorL = l; mayor = i; }
+      e.lados.push({ u0: u, len: l, nx, nz, tipo });
+      u += l;
+    }
+    // puerta: en la pared de calle más larga; si no hay, en la más larga
+    let de = -1, mejorSc = 0;
+    e.lados.forEach((s, i) => {
+      if (s.tipo === 0) return;
+      const sc = (s.tipo === 2 ? 1 : 0.25) * Math.min(s.len, 22);
+      if (sc > mejorSc) { mejorSc = sc; de = i; }
+    });
+    if (de < 0) de = mayor;
+    e.puertaLado = -1; e.puertaU = -1e4;
+    if (de >= 0 && e.lados[de].len >= 1.3) {
+      const s = e.lados[de], sp = s.tipo === 2 ? 3.3 : 5.0;
+      const nC = Math.max(1, Math.floor(s.len / sp + 0.25)), w = s.len / nC;
+      const ci = Math.min(nC - 1, Math.floor(hash2(idx, 3, 17) * nC));
+      e.puertaLado = de; e.puertaU = s.u0 + (ci + 0.5) * w;
+    }
+    // colores: los del Catastro si los hay; si no, de la paleta (como el paseo)
+    e.off = hash2(idx, 9, 1) * 997;
+    e.ws = e.lados.map((s, i) => Math.floor(hash2(idx, i, 41) * 2000));
+    const s1 = hash2(idx, 1, 31), s2 = hash2(idx, 2, 31), s3 = hash2(idx, 3, 31), s4 = hash2(idx, 4, 31);
+    e.zh = 0.65 + 0.55 * s3;
+    if (e.pared) {
+      e.colPared = e.pared;
+      if (e.zoc) e.colZoc = e.zoc;
+      else { e.colZoc = aHex(hexA01(e.pared).map((v, k) => v * 0.8 * 0.75 + [0.42, 0.42, 0.4][k] * 0.25)); e.zh = 0.35; }
+      e.colCarp = e.carp || elegirPonderado(PAL_FACHADA.carpinteria, s4);
+    } else {
+      e.colPared = elegirPonderado(PAL_FACHADA.pared, s1);
+      e.colZoc = elegirPonderado(PAL_FACHADA.zocalo, s2);
+      e.colCarp = elegirPonderado(PAL_FACHADA.carpinteria, s4);
+    }
+    const pc = hexA01(e.colPared);
+    e.rec = pc[0] > 0.8 && pc[2] > 0.75 && hash2(idx, 5, 31) < 0.3 ? 1 : 0;   // recercados en paredes claras
+    e.teja = e.tejado === 'teja árabe';
+    e.colTecho = e.teja ? PAL_FACHADA.teja[Math.floor(s2 * 4) % 4] : PAL_FACHADA.azotea[Math.floor(s3 * 3) % 3];
+  });
 }
 
 // --- rejilla espacial para colisiones ---
@@ -367,16 +485,8 @@ function iniciarRender() {
 }
 
 // --- mallas ---
-function hexRGB(h) {
-  const n = parseInt(h.slice(1), 16);
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
-}
-function tono(i) {
-  const v = (((i * 2654435761) >>> 0) % 1000) / 1000;
-  return [0.78 + 0.16 * v, 0.72 + 0.16 * v, 0.6 + 0.2 * (1 - v)];
-}
 function mallaCarreteras(tramos) {
-  const pos = [], col = [];
+  const pos = [], col = [], nor = [];
   const colorDe = t => {
     switch (tipoBase(t.tipo)) {
       case 'motorway': return [0.3, 0.3, 0.33];
@@ -394,39 +504,167 @@ function mallaCarreteras(tramos) {
       if (L < 1e-6) continue;
       const nx = -dz / L * t.ancho / 2, nz = dx / L * t.ancho / 2;
       const p0 = [ax + nx, az + nz], p1 = [ax - nx, az - nz], p2 = [bx - nx, bz - nz], p3 = [bx + nx, bz + nz];
-      pos.push(p0[0], y, p0[1], p1[0], y, p1[1], p2[0], y, p2[1], p0[0], y, p0[1], p2[0], y, p2[1], p3[0], y, p3[1]);
-      for (let v = 0; v < 6; v++) col.push(c[0], c[1], c[2]);
+      pos.push(p0[0], y, p0[1], p2[0], y, p2[1], p1[0], y, p1[1], p0[0], y, p0[1], p3[0], y, p3[1], p2[0], y, p2[1]);   // antihorario visto desde arriba
+      for (let v = 0; v < 6; v++) { col.push(c[0], c[1], c[2]); nor.push(0, 1, 0); }   // sin normal la luz da NaN y la calle sale negra
     }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
 }
-function mallaEdificios(edif) {
-  const pos = [], col = [];
-  edif.forEach((e, i) => {
-    const pts = e.pts, h = e.h, n = pts.length;
-    const pared = e.pared ? hexRGB(e.pared) : tono(i);
-    const techo = e.tejado === 'teja árabe' ? [0.66, 0.38, 0.26] : [0.62, 0.62, 0.6];
-    for (let k = 0; k < n; k++) {
-      const a = pts[k], b = pts[(k + 1) % n];
-      pos.push(a[0], 0, a[1], b[0], 0, b[1], b[0], h, b[1], a[0], 0, a[1], b[0], h, b[1], a[0], h, a[1]);
-      for (let v = 0; v < 6; v++) col.push(pared[0], pared[1], pared[2]);
+// --- edificios: paredes con ventanas, puerta, zócalo y marcos, dibujados en el sombreado (como el paseo) ---
+const FRAGMENTO_FACHADA = `#include <color_fragment>
+  float fwu=fwidth(vWw.x),fwv=fwidth(vWw.y);
+  if(vWw.z>0.5){
+    float u=vWw.x,v=vWw.y,H=vWw.z;
+    float aa=clamp(1.0-max(fwu,fwv)*2.2,0.0,1.0);
+    vec3 base=diffuseColor.rgb;
+    float n1=hh(floor(vec2(u,v)*1.5)),n2=hh(floor(vec2(u,v)*0.2+7.0));
+    vec3 col=base*mix(1.0,0.95+0.08*n1,aa)*(0.97+0.05*n2);
+    float zh=vZc.a*4.0;
+    col*=1.0-0.07*(1.0-smoothstep(zh,zh+1.3,v));
+    col=mix(col,vZc.rgb*(0.93+0.1*n1),1.0-step(zh,v));
+    col*=1.0-0.3*(1.0-smoothstep(0.0,0.035,abs(v-zh)))*aa*step(0.2,zh);
+    float cor=step(H-0.34,v)*step(v,H-0.1);
+    col=mix(col,base*1.03,cor);
+    col*=1.0-0.2*step(H-0.5,v)*step(v,H-0.34)*smoothstep(H-0.5,H-0.34,v)*aa;
+    float fx=floor(vFa.x+0.5),type=mod(fx,4.0),ws=floor(fx/4.0);
+    if(type>0.5){
+      float u0=vFa.z,u1=vFa.w,L=u1-u0,doorU=vFa.y;
+      float sp=type>1.5?3.3:5.0,nC=max(1.0,floor(L/sp+0.25)),s=L/nC;
+      float ci=clamp(floor((u-u0)/s),0.0,nC-1.0),cu=u0+(ci+0.5)*s,du=u-cu;
+      float fl=floor(max(v,0.0)/3.1),fv=v-fl*3.1;
+      float r1=hh(vec2(ws*1.37+ci*7.0,fl+3.0)),r2=hh(vec2(ws*0.71+ci*3.0+11.0,fl+19.0)),r3=hh(vec2(ws*2.13+ci*5.0+29.0,fl+7.0));
+      vec3 carp=vCp.rgb;
+      float hasDoor=step(-9000.0,doorU);
+      float doorCol=hasDoor*step(abs(cu-doorU),0.05);
+      float dW=min(1.15,s*0.8),dH=2.3;
+      float dx=u-doorU;
+      float inDoor=hasDoor*step(abs(dx),dW*0.5)*step(0.0,v)*step(v,dH);
+      bool ground=fl<0.5;
+      float ww=ground?1.1:1.0,wh=ground?1.4:1.35,sill=ground?1.0:0.85;
+      float bal=(type>1.5&&!ground&&r1<0.5)?1.0:0.0;
+      if(bal>0.5){ww=1.05;wh=2.15;sill=0.06;}
+      ww=min(ww,s*0.7);
+      float okW=step(1.6,L)*step(fl*3.1+sill+wh,H-0.45)*(1.0-doorCol*(ground?1.0:0.0))*(type<1.5?step(0.45,r2):1.0)*step(0.35,fl*3.1+sill);
+      vec2 wq=vec2(du/ww+0.5,(fv-sill)/wh);
+      float inW=okW*step(0.0,wq.x)*step(wq.x,1.0)*step(0.0,wq.y)*step(wq.y,1.0);
+      if(vCp.a>0.5){float rw=0.16;vec3 rcc=mix(vec3(0.6,0.38,0.12),vec3(0.52,0.31,0.09),hh(vec2(ws,1.0)));
+        float inR=okW*step(abs(du),ww*0.5+rw)*step(sill-rw,fv)*step(fv,sill+wh+rw)*(1.0-inW);
+        float inRD=hasDoor*step(abs(dx),dW*0.5+rw)*step(0.0,v)*step(v,dH+rw)*(1.0-inDoor);
+        col=mix(col,rcc,max(inR,inRD)*(0.4+0.6*aa));}
+      float slab=okW*step(abs(du),ww*0.5+(bal>0.5?0.22:0.08))*step(sill-(bal>0.5?0.14:0.07),fv)*step(fv,sill)*(1.0-inW);
+      col=mix(col,vec3(0.78,0.77,0.74),slab*(0.4+0.6*aa));
+      col*=1.0-0.18*okW*step(abs(du),ww*0.5+(bal>0.5?0.22:0.08))*step(sill-(bal>0.5?0.45:0.25),fv)*step(fv,sill-(bal>0.5?0.14:0.07))*aa;
+      if(inW>0.5){
+        vec2 wp=vec2(wq.x*ww,wq.y*wh);
+        float fr=0.07,frame=1.0-step(fr,wp.x)*step(wp.x,ww-fr)*step(fr,wp.y)*step(wp.y,wh-fr);
+        float mull=1.0-step(0.025,abs(wp.x-ww*0.5));
+        vec3 glassC=mix(vec3(0.05,0.065,0.08),vec3(0.2,0.26,0.32),wq.y*0.75)*(0.8+0.4*r3);
+        float pf=ground?0.15+0.6*r2:0.08+0.8*r1*r2;
+        float blind=step(1.0-pf,wq.y);
+        float aS=clamp(1.0-fwv*14.0*1.6,0.0,1.0),aB=clamp(1.0-fwu/0.12*1.6,0.0,1.0);
+        vec3 blindC=mix(carp,vec3(0.74,0.7,0.6),step(0.55,r3))*(0.92+0.16*(step(0.5,fract(wp.y*14.0))-0.5)*aS);
+        vec3 wc=mix(glassC,blindC,blind);
+        wc=mix(wc,carp*0.95,max(frame,mull*(1.0-blind))*(0.3+0.7*aa));
+        wc*=1.0-0.45*(1.0-smoothstep(0.0,0.14,wh-wp.y))-0.3*(1.0-smoothstep(0.0,0.09,wp.x));
+        if(type>1.5&&ground){float bar=clamp(step(0.86,fract(wp.x/0.12))+step(abs(wp.y-wh*0.12),0.025)+step(abs(wp.y-wh*0.88),0.025),0.0,1.0);wc=mix(wc,vec3(0.035),mix(0.2,bar*0.95,aB));}
+        if(bal>0.5){float rail=step(wp.y,1.0)*clamp(step(0.82,fract(wp.x/0.11))+step(abs(wp.y-1.0),0.03),0.0,1.0);wc=mix(wc,vec3(0.04),step(wp.y,1.0)*mix(0.25,rail*0.95/max(step(wp.y,1.0),0.001),aB));}
+        col=mix(col,wc,0.35+0.65*aa);
+      }
+      if(inDoor>0.5){vec2 dp=vec2(dx+dW*0.5,v);
+        vec3 dc=carp*(0.9+0.1*n1);
+        float fr2=1.0-step(0.07,dp.x)*step(dp.x,dW-0.07)*step(0.0,dp.y)*step(dp.y,dH-0.07);
+        float leaf=1.0-step(0.02,abs(dp.x-dW*0.5));
+        float pan=step(0.17,fract((dp.y-0.1)/0.55))*step(0.15,fract(dp.x/(dW*0.5)))*step(fract(dp.x/(dW*0.5)),0.85);
+        dc*=mix(0.8,1.0,pan);dc=mix(dc,carp*0.65,max(fr2,leaf));
+        float mont=step(dH-0.45,dp.y)*step(dp.y,dH-0.1)*step(0.12,dp.x)*step(dp.x,dW-0.12);
+        dc=mix(dc,vec3(0.06,0.08,0.1),mont);
+        dc*=1.0-0.4*(1.0-smoothstep(0.0,0.12,dH-dp.y));
+        col=mix(col,dc,0.4+0.6*aa);}
     }
-    let tris = [];
-    try { tris = THREE.ShapeUtils.triangulateShape(pts.map(p => new THREE.Vector2(p[0], p[1])), []); } catch (err) { tris = []; }
-    for (const t of tris) for (const idx of t) {
-      const p = pts[idx];
-      pos.push(p[0], h, p[1]);
-      col.push(techo[0], techo[1], techo[2]);
+    diffuseColor.rgb=col;
+  }`;
+
+function materialFachadas() {
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  m.onBeforeCompile = sh => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vWw = aW; vZc = aZ; vCp = aC; vFa = aF;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa;
+float hh(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}`)
+      .replace('#include <color_fragment>', FRAGMENTO_FACHADA);
+  };
+  return m;
+}
+
+function mallaEdificios(edif) {
+  // Triángulos de cada tejado: se calculan antes para reservar la memoria de una vez
+  const tejados = edif.map(e => {
+    try { return THREE.ShapeUtils.triangulateShape(e.pts.map(p => new THREE.Vector2(p[0], p[1])), []); }
+    catch (err) { return []; }
+  });
+  let V = 0, I = 0;
+  edif.forEach((e, k) => {
+    for (const s of e.lados) if (s.len >= 0.02) { V += 4; I += 6; }
+    V += e.pts.length; I += tejados[k].length * 3;
+  });
+  const P = new Float32Array(V * 3), N = new Float32Array(V * 3), W = new Float32Array(V * 3), F = new Float32Array(V * 4);
+  const C = new Uint8Array(V * 3), Z = new Uint8Array(V * 4), K = new Uint8Array(V * 4), X = new Uint32Array(I);   // colores en bytes: menos memoria
+  let v = 0, t = 0;
+  const pon = (x, y, z, nx, ny, nz, c, w, zc, kc, fc) => {
+    const a = v * 3, b = v * 4;
+    P[a] = x; P[a + 1] = y; P[a + 2] = z;
+    N[a] = nx; N[a + 1] = ny; N[a + 2] = nz;
+    for (let k = 0; k < 3; k++) C[a + k] = Math.round(c[k] * 255);
+    W[a] = w[0]; W[a + 1] = w[1]; W[a + 2] = w[2];
+    for (let k = 0; k < 4; k++) { Z[b + k] = Math.round(zc[k] * 255); K[b + k] = Math.round(kc[k] * 255); F[b + k] = fc[k]; }
+    return v++;
+  };
+  const tri = (a, b, c) => { X[t++] = a; X[t++] = b; X[t++] = c; };
+  const SUELO = -0.3;   // las paredes bajan un poco por debajo del suelo para no dejar huecos
+  edif.forEach((e, k) => {
+    const n = e.pts.length, H = e.h, off = e.off;
+    const pared = hexA01(e.colPared), zc = [...hexA01(e.colZoc), e.zh / 4], kc = [...hexA01(e.colCarp), e.rec];
+    e.lados.forEach((s, j) => {
+      if (s.len < 0.02) return;
+      const p = e.pts[j], q = e.pts[(j + 1) % n];
+      const u0 = s.u0 + off, u1 = s.u0 + s.len + off;
+      const fc = s.tipo > 0 ? [s.tipo + 4 * e.ws[j], j === e.puertaLado ? e.puertaU + off : -1e4, u0, u1] : [0, -1e4, 0, 0];
+      const a = pon(p[0], SUELO, p[1], s.nx, 0, s.nz, pared, [u0, SUELO, H], zc, kc, fc);
+      pon(q[0], SUELO, q[1], s.nx, 0, s.nz, pared, [u1, SUELO, H], zc, kc, fc);
+      pon(q[0], H, q[1], s.nx, 0, s.nz, pared, [u1, H, H], zc, kc, fc);
+      pon(p[0], H, p[1], s.nx, 0, s.nz, pared, [u0, H, H], zc, kc, fc);
+      tri(a, a + 2, a + 1); tri(a, a + 3, a + 2);
+    });
+    // tejado plano del color de teja o de azotea
+    const techo = hexA01(e.colTecho), primero = v, cero = [0, 0, 0, 0], cero3 = [0, 0, 0];
+    for (let i = 0; i < n; i++) pon(e.pts[i][0], H, e.pts[i][1], 0, 1, 0, techo, cero3, cero, cero, cero);
+    for (const tr of tejados[k]) {
+      let [a, b, c] = [primero + tr[0], primero + tr[1], primero + tr[2]];
+      const ux = P[b * 3] - P[a * 3], uz = P[b * 3 + 2] - P[a * 3 + 2], vx = P[c * 3] - P[a * 3], vz = P[c * 3 + 2] - P[a * 3 + 2];
+      if (uz * vx - ux * vz < 0) [b, c] = [c, b];   // que mire hacia arriba
+      tri(a, b, c);
     }
   });
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  geo.computeVertexNormals();
-  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  geo.setAttribute('position', new THREE.BufferAttribute(P, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(C, 3, true));
+  geo.setAttribute('aW', new THREE.BufferAttribute(W, 3));
+  geo.setAttribute('aZ', new THREE.BufferAttribute(Z, 4, true));
+  geo.setAttribute('aC', new THREE.BufferAttribute(K, 4, true));
+  geo.setAttribute('aF', new THREE.BufferAttribute(F, 4));
+  geo.setIndex(new THREE.BufferAttribute(X, 1));
+  return new THREE.Mesh(geo, materialFachadas());
 }
 function construirCoche(color) {
   const g = new THREE.Group();
@@ -477,6 +715,7 @@ async function cargarZona(archivo) {
   $('estado').textContent = 'Construyendo la zona…';
   await new Promise(r => setTimeout(r, 0));
   zona = { tramos, G, edif, rejilla: construirRejilla(edif) };
+  prepararCasas(edif, zona.rejilla, tramos);
   construirMallaZona();
   $('btnNueva').disabled = false;
   mostrarMenu(`Zona cargada: ${tramos.length} tramos conducibles, ${edif.length} casas.`);
