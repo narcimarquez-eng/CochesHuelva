@@ -29,6 +29,9 @@
   #controles button{width:84px;height:84px;font-size:30px;padding:0;border-radius:50%;background:rgba(255,255,255,.35);color:#fff;touch-action:none}
   #controles button.pulsado{background:rgba(255,255,255,.75);color:#222}
   #estado{min-height:20px;color:#ffd166}
+  #coches{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  #coches button{font-size:15px;padding:8px 14px;background:#4a5a6a;color:#fff}
+  #coches button.activo{background:#f5b041;color:#1b1b1b}
 </style>
 </head>
 <body>
@@ -49,12 +52,15 @@
   <p>Prototipo. Carga el zip de la zona (el que exporta el paseo). Los límites de velocidad son solo informativos: puedes ir más deprisa.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
   <div id="estado"></div>
+  <div id="coches"><button data-coche="basico" class="activo">Coche básico</button><button data-coche="concept">CarConcept</button><button data-coche="toy">ToyCar</button></div>
   <button id="btnNueva" disabled>Nueva carrera</button>
   <p style="font-size:13px;opacity:.7">Teclas: flechas o WASD. M abre el menú.</p>
   <p style="font-size:12px;opacity:.6">Datos: © colaboradores de OpenStreetMap (ODbL) · Dirección General del Catastro</p>
+  <p style="font-size:12px;opacity:.6">Modelos: CarConcept © Eric Chadwick (Darmstadt Graphics Group), CC BY 4.0 · ToyCar © Guido Odendahl y Eric Chadwick, CC0</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="vendor/GLTFLoader.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 /*CORE-START*/
@@ -683,6 +689,43 @@ function construirCoche(color) {
   }
   return g;
 }
+// --- coches: el básico (caja roja) y modelos GLB, que se descargan al elegirlos ---
+const CATALOGO_COCHES = {
+  basico: {},
+  concept: { archivo: 'modelos/carconcept.glb', giro: 0 },   // su frontal ya mira a +Z, hacia donde avanza el juego
+  toy: { archivo: 'modelos/toycar.glb', giro: 0 },
+};
+let cocheElegido = 'basico';
+const cochesCargados = {};
+// Escala, gira y apoya el modelo: 4,2 m de largo, centrado en el coche y con las ruedas sobre el suelo
+function prepararModeloCoche(modelo, giro) {
+  modelo.rotation.y = giro;
+  modelo.updateMatrixWorld(true);
+  let caja = new THREE.Box3().setFromObject(modelo);
+  modelo.scale.setScalar(4.2 / caja.getSize(new THREE.Vector3()).z);
+  modelo.updateMatrixWorld(true);
+  caja = new THREE.Box3().setFromObject(modelo);
+  const c = caja.getCenter(new THREE.Vector3());
+  modelo.position.set(-c.x, -caja.min.y, -c.z);
+  return modelo;
+}
+function cargarCoche(clave) {
+  if (!cochesCargados[clave]) {
+    cochesCargados[clave] = clave === 'basico'
+      ? Promise.resolve(construirCoche(0xe74c3c))
+      : new Promise((res, rej) => new THREE.GLTFLoader().load(CATALOGO_COCHES[clave].archivo,
+          g => res(prepararModeloCoche(g.scene, CATALOGO_COCHES[clave].giro)), undefined, rej));
+  }
+  return cochesCargados[clave];
+}
+async function montarCoche(clave) {
+  let modelo;
+  try { modelo = await cargarCoche(clave); }
+  catch (err) { modelo = await cargarCoche('basico'); }   // si no se puede descargar, se usa el básico
+  cocheMesh.clear();
+  cocheMesh.add(modelo);
+}
+
 function construirMallaZona() {
   if (mallaZona) scene.remove(mallaZona);
   mallaZona = new THREE.Group();
@@ -691,7 +734,7 @@ function construirMallaZona() {
   suelo.position.y = -0.05;
   mallaZona.add(suelo, mallaCarreteras(zona.tramos), mallaEdificios(zona.edif));
   scene.add(mallaZona);
-  if (!cocheMesh) { cocheMesh = construirCoche(0xe74c3c); scene.add(cocheMesh); }
+  if (!cocheMesh) { cocheMesh = new THREE.Group(); scene.add(cocheMesh); }
 }
 
 // --- carga del zip de la zona ---
@@ -772,8 +815,10 @@ function pintarCheckpoints() {
     m.material.opacity = hecho ? 0.12 : 0.45;
   });
 }
-function nuevaCarrera() {
+async function nuevaCarrera() {
   if (!zona) return;
+  $('estado').textContent = 'Cargando el coche…';
+  await montarCoche(cocheElegido);
   const rng = mulberry32((Date.now() & 0xffffff) || 1);
   const plan = planearVuelta(zona.G, rng, 1200, 3500);
   if (!plan) { mostrarMenu('No he encontrado un circuito. Pulsa otra vez.'); return; }
@@ -802,6 +847,11 @@ function nuevaCarrera() {
   estado = 'cuenta';
 }
 $('btnNueva').addEventListener('click', nuevaCarrera);
+document.querySelectorAll('#coches button').forEach(b => b.addEventListener('click', () => {
+  cocheElegido = b.dataset.coche;
+  document.querySelectorAll('#coches button').forEach(x => x.classList.toggle('activo', x === b));
+  cargarCoche(cocheElegido).catch(() => {});   // empieza a descargarlo ya
+}));
 
 function actualizarCarrera(ahora) {
   const cp = carrera.cps[carrera.siguiente];

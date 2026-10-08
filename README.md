@@ -15,6 +15,15 @@ Controles: flechas o WASD, o los botones de la pantalla en el móvil. `M` abre e
 
 Activa GitHub Pages en Settings → Pages, eligiendo la rama del juego y la carpeta raíz. Después abre `https://narcimarquez-eng.github.io/CochesHuelva/carreras_huelva.html` en Chrome y elige la opción de añadirlo a la pantalla de inicio. Hay que abrirlo desde esa URL: desde un archivo local no se puede instalar. El icono está en `icon.svg` y `icon-512.png`.
 
+## Coches
+
+En la pantalla de inicio se elige el coche: el básico (una caja roja), CarConcept o ToyCar. Los dos modelos están optimizados y vienen de los modelos de ejemplo de Khronos glTF:
+
+- CarConcept, © Eric Chadwick (Darmstadt Graphics Group), licencia CC BY 4.0.
+- ToyCar, © Guido Odendahl y Eric Chadwick, licencia CC0.
+
+`vendor/GLTFLoader.js` es el cargador de GLTF de three.js r128 (licencia MIT).
+
 ## Datos
 
 `zona-huelva.zip` incluye datos de OpenStreetMap (© colaboradores de OpenStreetMap, licencia ODbL) y del Catastro (Dirección General del Catastro). El juego solo usa `calles.geojson` y `casas.geojson`.
