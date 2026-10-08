@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Carreras por Huelva · prototipo</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#9fd0f0;font-family:system-ui,-apple-system,sans-serif;user-select:none;-webkit-user-select:none;touch-action:none}
+  #hud{position:fixed;left:12px;top:12px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.7);pointer-events:none;line-height:1.35}
+  #vel{font-size:44px;font-weight:700}
+  #vel small{font-size:16px;font-weight:400;margin-left:4px}
+  #limite{font-size:14px;padding:3px 8px;border-radius:6px;background:rgba(0,0,0,.45);display:inline-block}
+  #limite.excede{background:#c0392b}
+  #fuera{font-size:14px;color:#ffd166;min-height:18px}
+  #carrera{position:fixed;right:12px;top:56px;color:#fff;text-align:right;text-shadow:0 1px 3px rgba(0,0,0,.7);pointer-events:none;line-height:1.5;font-size:15px}
+  #aviso{position:fixed;left:0;right:0;top:32%;text-align:center;color:#fff;font-size:44px;font-weight:700;text-shadow:0 2px 6px rgba(0,0,0,.8);pointer-events:none}
+  #pantalla{position:fixed;inset:0;background:rgba(10,20,30,.8);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;text-align:center;box-sizing:border-box}
+  #pantalla h1{margin:0;font-size:26px}
+  #pantalla p{margin:0;max-width:440px;line-height:1.4;opacity:.9}
+  button{font:inherit;font-size:17px;padding:12px 20px;border-radius:10px;border:0;background:#f5b041;color:#1b1b1b;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.45}
+  #btnMenu{position:fixed;right:12px;top:12px;padding:6px 12px;font-size:14px;background:rgba(255,255,255,.8)}
+  #controles{position:fixed;left:0;right:0;bottom:14px;display:flex;justify-content:space-between;align-items:flex-end;padding:0 14px;pointer-events:none}
+  #controles .grupo{display:flex;gap:12px;pointer-events:auto}
+  #controles button{width:84px;height:84px;font-size:30px;padding:0;border-radius:50%;background:rgba(255,255,255,.35);color:#fff;touch-action:none}
+  #controles button.pulsado{background:rgba(255,255,255,.75);color:#222}
+  #estado{min-height:20px;color:#ffd166}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div id="vel">0<small>km/h</small></div>
+  <div id="limite">Límite: —</div>
+  <div id="fuera"></div>
+</div>
+<div id="carrera"></div>
+<div id="aviso"></div>
+<button id="btnMenu">Menú</button>
+<div id="controles">
+  <div class="grupo"><button data-c="izq">◀</button><button data-c="der">▶</button></div>
+  <div class="grupo"><button data-c="freno">■</button><button data-c="acel">▲</button></div>
+</div>
+<div id="pantalla">
+  <h1>Carreras por Huelva</h1>
+  <p>Prototipo. Carga el zip de la zona (el que exporta el paseo). Los límites de velocidad son solo informativos: puedes ir más deprisa.</p>
+  <input type="file" id="archivo" accept=".zip" style="color:#fff">
+  <div id="estado"></div>
+  <button id="btnNueva" disabled>Nueva carrera</button>
+  <p style="font-size:13px;opacity:.7">Teclas: flechas o WASD. M abre el menú.</p>
+  <p style="font-size:12px;opacity:.6">Datos: © colaboradores de OpenStreetMap (ODbL) · Dirección General del Catastro</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+/*CORE-START*/
+// ---------- Lógica pura (sin Three.js): proyección, calles, grafo, rutas, colisiones ----------
+const ORIGEN = { lat: 37.2599535, lon: -6.9401955 };   // centro de la zona (LEEME.txt)
+const K_LAT = 110540;
+const K_LON = 111320 * Math.cos(ORIGEN.lat * Math.PI / 180);
+const TAM_CELDA = 25;
+const RADIO_COCHE = 1.5;
+const CONDUCIBLES = new Set(['motorway','motorway_link','trunk','trunk_link','primary','primary_link',
+  'secondary','secondary_link','tertiary','tertiary_link','unclassified','residential','living_street','service']);
+const ANCHO_TIPO = { motorway: 11, trunk: 10, primary: 9, secondary: 8, tertiary: 7, unclassified: 6, residential: 6, living_street: 5, service: 4 };
+const VEL_TIPO = { motorway: 120, trunk: 90, primary: 50, secondary: 50, tertiary: 50, unclassified: 40, residential: 30, living_street: 20, service: 20 };
+
+function proyectar(lon, lat) { return [(lon - ORIGEN.lon) * K_LON, -(lat - ORIGEN.lat) * K_LAT]; } // [x este, z sur]
+function tipoBase(t) { return t.replace('_link', ''); }
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function distSeg2(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz;
+  let t = L > 0 ? ((px - ax) * dx + (pz - az) * dz) / L : 0;
+  t = Math.max(0, Math.min(1, t));
+  const qx = ax + dx * t - px, qz = az + dz * t - pz;
+  return qx * qx + qz * qz;
+}
+
+function enPoligono(pts, x, z) {
+  let dentro = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][0], zi = pts[i][1], xj = pts[j][0], zj = pts[j][1];
+    if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) dentro = !dentro;
+  }
+  return dentro;
+}
+
+// --- calles ---
+function parsearCalles(geo) {
+  const tramos = [];
+  for (const f of geo.features) {
+    const g = f.geometry, p = f.properties || {};
+    if (!g || g.type !== 'LineString' || !CONDUCIBLES.has(p.tipo)) continue;
+    const bt = tipoBase(p.tipo);
+    const ancho = typeof p.ancho_calzada_m === 'number' ? p.ancho_calzada_m : (ANCHO_TIPO[bt] || 6);
+    let vel = parseInt(String(p['osm:maxspeed'] ?? ''), 10);
+    if (!(vel > 0)) vel = VEL_TIPO[bt] || 30;
+    tramos.push({
+      id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho, velocidad: vel,
+      unSentido: !!p.sentido_unico,
+      pts: g.coordinates.map(c => proyectar(c[0], c[1])),
+    });
+  }
+  return tramos;
+}
+
+// --- grafo: nodos = extremos de tramos; aristas respetan sentido único ---
+function construirGrafo(tramos) {
+  const indice = new Map(), nodos = [];
+  const nodoDe = p => {
+    const k = p[0].toFixed(2) + '|' + p[1].toFixed(2);
+    let i = indice.get(k);
+    if (i === undefined) { i = nodos.length; indice.set(k, i); nodos.push({ x: p[0], z: p[1], adj: [], comp: false }); }
+    return i;
+  };
+  tramos.forEach((t, s) => {
+    t.a = nodoDe(t.pts[0]);
+    t.b = nodoDe(t.pts[t.pts.length - 1]);
+    let len = 0;
+    for (let k = 1; k < t.pts.length; k++) len += Math.hypot(t.pts[k][0] - t.pts[k - 1][0], t.pts[k][1] - t.pts[k - 1][1]);
+    t.len = len;
+    nodos[t.a].adj.push({ to: t.b, seg: s, fwd: true, len });
+    if (!t.unSentido) nodos[t.b].adj.push({ to: t.a, seg: s, fwd: false, len });
+  });
+  // componente conectada más grande (ignorando sentido)
+  const padre = nodos.map((_, i) => i);
+  const raiz = i => { while (padre[i] !== i) { padre[i] = padre[padre[i]]; i = padre[i]; } return i; };
+  for (const t of tramos) { const ra = raiz(t.a), rb = raiz(t.b); padre[ra] = rb; }
+  const tam = new Map();
+  for (let i = 0; i < nodos.length; i++) { const r = raiz(i); tam.set(r, (tam.get(r) || 0) + 1); }
+  let mayor = -1, mejor = -1;
+  for (const [r, n] of tam) if (n > mejor) { mejor = n; mayor = r; }
+  for (let i = 0; i < nodos.length; i++) nodos[i].comp = raiz(i) === mayor;
+  return { nodos, tramos };
+}
+
+// --- Dijkstra con montículo binario ---
+function heapArriba(h, i) {
+  while (i > 0) { const p = (i - 1) >> 1; if (h[p][0] <= h[i][0]) break; [h[p], h[i]] = [h[i], h[p]]; i = p; }
+}
+function heapAbajo(h, i) {
+  for (;;) {
+    const l = 2 * i + 1, r = l + 1; let m = i;
+    if (l < h.length && h[l][0] < h[m][0]) m = l;
+    if (r < h.length && h[r][0] < h[m][0]) m = r;
+    if (m === i) break;
+    [h[m], h[i]] = [h[i], h[m]]; i = m;
+  }
+}
+function dijkstra(G, origen, destino) {
+  const n = G.nodos.length;
+  const dist = new Float64Array(n).fill(Infinity);
+  const prev = new Int32Array(n).fill(-1);
+  const prevArista = new Array(n);
+  dist[origen] = 0;
+  const heap = [[0, origen]];
+  while (heap.length) {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) { heap[0] = last; heapAbajo(heap, 0); }
+    const d = top[0], u = top[1];
+    if (d > dist[u]) continue;
+    if (u === destino) break;
+    for (const e of G.nodos[u].adj) {
+      const nd = d + e.len;
+      if (nd < dist[e.to]) {
+        dist[e.to] = nd; prev[e.to] = u; prevArista[e.to] = e;
+        heap.push([nd, e.to]); heapArriba(heap, heap.length - 1);
+      }
+    }
+  }
+  if (!isFinite(dist[destino])) return null;
+  const camino = [];
+  for (let v = destino; v !== origen; v = prev[v]) camino.push(prevArista[v]);
+  camino.reverse();
+  return { camino, longitud: dist[destino] };
+}
+
+function polilinea(G, camino) {
+  const out = [];
+  for (const e of camino) {
+    const pts = G.tramos[e.seg].pts;
+    const src = e.fwd ? pts : pts.slice().reverse();
+    for (let k = out.length ? 1 : 0; k < src.length; k++) out.push(src[k]);
+  }
+  return out;
+}
+
+// --- circuito: 3 checkpoints alrededor de un punto de salida y vuelta al origen ---
+function planearVuelta(G, rng, longitudMin, longitudMax) {
+  const comp = [];
+  for (let i = 0; i < G.nodos.length; i++) if (G.nodos[i].comp && G.nodos[i].adj.length) comp.push(i);
+  if (comp.length < 10) return null;
+  const masCercano = (x, z) => {
+    let mejor = comp[0], md = Infinity;
+    for (const i of comp) { const n = G.nodos[i]; const d = (n.x - x) ** 2 + (n.z - z) ** 2; if (d < md) { md = d; mejor = i; } }
+    return mejor;
+  };
+  for (let intento = 0; intento < 80; intento++) {
+    const s = comp[Math.floor(rng() * comp.length)];
+    const S = G.nodos[s];
+    const R = 200 + rng() * 300;
+    const a0 = rng() * Math.PI * 2;
+    const nodos = [s];
+    for (let k = 0; k < 3; k++) {
+      const a = a0 + k * 2 * Math.PI / 3 + (rng() - 0.5) * 0.5;
+      const r = R * (0.8 + rng() * 0.4);
+      nodos.push(masCercano(S.x + Math.cos(a) * r, S.z + Math.sin(a) * r));
+    }
+    nodos.push(s);
+    let valido = true;
+    for (let k = 1; k < nodos.length; k++) if (nodos[k] === nodos[k - 1]) { valido = false; break; }
+    if (!valido) continue;
+    const piernas = [];
+    let longitud = 0;
+    for (let k = 0; k < nodos.length - 1 && valido; k++) {
+      const r = dijkstra(G, nodos[k], nodos[k + 1]);
+      if (!r) valido = false; else { piernas.push(r); longitud += r.longitud; }
+    }
+    if (!valido || longitud < longitudMin || longitud > longitudMax) continue;
+    const ruta = [];
+    piernas.forEach((p, idx) => {
+      const pl = polilinea(G, p.camino);
+      for (let k = idx ? 1 : 0; k < pl.length; k++) ruta.push(pl[k]);
+    });
+    // rumbo inicial: primer punto de la ruta a más de 10 m
+    let h = 0;
+    for (const p of ruta) {
+      const dx = p[0] - S.x, dz = p[1] - S.z;
+      if (Math.hypot(dx, dz) > 10) { h = Math.atan2(dx, dz); break; }
+    }
+    return {
+      checkpoints: nodos.slice(1).map(i => ({ x: G.nodos[i].x, z: G.nodos[i].z })), // [A, B, C, meta]
+      inicio: { x: S.x, z: S.z, h },
+      ruta, longitud,
+    };
+  }
+  return null;
+}
+
+// --- casas (edificios) ---
+function colorValido(c) {
+  return typeof c === 'string' && /^#?[0-9a-f]{6}$/i.test(c) ? (c[0] === '#' ? c : '#' + c) : null;
+}
+function parsearCasas(geo) {
+  const edif = [];
+  for (const f of geo.features) {
+    const g = f.geometry;
+    if (!g || g.type !== 'Polygon') continue;
+    const pts = g.coordinates[0].map(c => proyectar(c[0], c[1]));
+    if (pts.length > 1) {
+      const a = pts[0], b = pts[pts.length - 1];
+      if (a[0] === b[0] && a[1] === b[1]) pts.pop();
+    }
+    if (pts.length < 3) continue;
+    const p = f.properties || {};
+    let h = Number(p.altura_aprox_m);
+    if (!(h > 0)) h = (Number(p.plantas) || 2) * 3;
+    edif.push({ pts, h: Math.min(h, 400), pared: colorValido(p.color_pared), tejado: p.tejado || '' });
+  }
+  return edif;
+}
+
+// --- rejilla espacial para colisiones ---
+function construirRejilla(edif) {
+  const celdas = new Map();
+  edif.forEach((e, i) => {
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of e.pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+    e.bbox = [x0, z0, x1, z1];
+    for (let cx = Math.floor(x0 / TAM_CELDA); cx <= Math.floor(x1 / TAM_CELDA); cx++)
+      for (let cz = Math.floor(z0 / TAM_CELDA); cz <= Math.floor(z1 / TAM_CELDA); cz++) {
+        const k = cx + ',' + cz;
+        let arr = celdas.get(k);
+        if (!arr) { arr = []; celdas.set(k, arr); }
+        arr.push(i);
+      }
+  });
+  return celdas;
+}
+
+function choca(edif, rejilla, x, z, R) {
+  const c0x = Math.floor((x - R) / TAM_CELDA), c1x = Math.floor((x + R) / TAM_CELDA);
+  const c0z = Math.floor((z - R) / TAM_CELDA), c1z = Math.floor((z + R) / TAM_CELDA);
+  const vistos = new Set();
+  for (let cx = c0x; cx <= c1x; cx++) for (let cz = c0z; cz <= c1z; cz++) {
+    const lista = rejilla.get(cx + ',' + cz);
+    if (!lista) continue;
+    for (const i of lista) {
+      if (vistos.has(i)) continue;
+      vistos.add(i);
+      const e = edif[i], b = e.bbox;
+      if (x + R < b[0] || x - R > b[2] || z + R < b[1] || z - R > b[3]) continue;
+      if (enPoligono(e.pts, x, z)) return true;
+      const pts = e.pts, R2 = R * R;
+      for (let k = 0, m = pts.length - 1; k < pts.length; m = k++) {
+        if (distSeg2(x, z, pts[m][0], pts[m][1], pts[k][0], pts[k][1]) < R2) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// distancia² de un punto a un tramo de calle (para saber en qué calle estás)
+function distanciaTramo2(tramo, x, z) {
+  let best = Infinity; const p = tramo.pts;
+  for (let k = 0; k < p.length - 1; k++) {
+    const d = distSeg2(x, z, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+/*CORE-END*/
+
+/*RENDER-START*/
+// ---------- Render, física del coche, carrera y menús ----------
+const $ = id => document.getElementById(id);
+const VMAX = 75;      // m/s (270 km/h): tope del coche básico
+const VUELTAS = 3;
+
+let renderer, scene, camara, reloj;
+let zona = null;                 // { tramos, G, edif, rejilla }
+let mallaZona = null;            // grupo con suelo, calles y casas
+let cocheMesh = null;
+let coche = null;                // { x, z, h, v, dir }
+let carrera = null;              // { cps, meshes, siguiente, vueltas, tVuelta, tiempos, longitud }
+let rutaLinea = null;
+let estado = 'menu';             // menu | cuenta | corriendo | fin
+let cuenta = 0, tInicio = 0;
+let avisoTexto = '', avisoHasta = 0;
+let tramoActual = null, dTramo2 = Infinity, ultimoBusqueda = 0;
+const controles = { acel: false, freno: false, izq: false, der: false };
+const TECLAS = { ArrowUp: 'acel', KeyW: 'acel', ArrowDown: 'freno', KeyS: 'freno', ArrowLeft: 'izq', KeyA: 'izq', ArrowRight: 'der', KeyD: 'der' };
+
+function iniciarRender() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.insertBefore(renderer.domElement, document.body.firstChild);
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x9fd0f0);
+  scene.fog = new THREE.Fog(0x9fd0f0, 900, 3400);
+  camara = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 4000);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x556644, 0.9));
+  const sol = new THREE.DirectionalLight(0xffffff, 0.75);
+  sol.position.set(300, 500, 200);
+  scene.add(sol);
+  reloj = new THREE.Clock();
+  addEventListener('resize', () => {
+    renderer.setSize(innerWidth, innerHeight);
+    camara.aspect = innerWidth / innerHeight;
+    camara.updateProjectionMatrix();
+  });
+  requestAnimationFrame(bucle);
+}
+
+// --- mallas ---
+function hexRGB(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+function tono(i) {
+  const v = (((i * 2654435761) >>> 0) % 1000) / 1000;
+  return [0.78 + 0.16 * v, 0.72 + 0.16 * v, 0.6 + 0.2 * (1 - v)];
+}
+function mallaCarreteras(tramos) {
+  const pos = [], col = [];
+  const colorDe = t => {
+    switch (tipoBase(t.tipo)) {
+      case 'motorway': return [0.3, 0.3, 0.33];
+      case 'trunk': case 'primary': return [0.36, 0.36, 0.4];
+      case 'secondary': case 'tertiary': return [0.4, 0.4, 0.43];
+      default: return [0.47, 0.47, 0.49];
+    }
+  };
+  const y = 0.05;
+  for (const t of tramos) {
+    const c = colorDe(t);
+    for (let k = 0; k < t.pts.length - 1; k++) {
+      const ax = t.pts[k][0], az = t.pts[k][1], bx = t.pts[k + 1][0], bz = t.pts[k + 1][1];
+      const dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz);
+      if (L < 1e-6) continue;
+      const nx = -dz / L * t.ancho / 2, nz = dx / L * t.ancho / 2;
+      const p0 = [ax + nx, az + nz], p1 = [ax - nx, az - nz], p2 = [bx - nx, bz - nz], p3 = [bx + nx, bz + nz];
+      pos.push(p0[0], y, p0[1], p1[0], y, p1[1], p2[0], y, p2[1], p0[0], y, p0[1], p2[0], y, p2[1], p3[0], y, p3[1]);
+      for (let v = 0; v < 6; v++) col.push(c[0], c[1], c[2]);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+}
+function mallaEdificios(edif) {
+  const pos = [], col = [];
+  edif.forEach((e, i) => {
+    const pts = e.pts, h = e.h, n = pts.length;
+    const pared = e.pared ? hexRGB(e.pared) : tono(i);
+    const techo = e.tejado === 'teja árabe' ? [0.66, 0.38, 0.26] : [0.62, 0.62, 0.6];
+    for (let k = 0; k < n; k++) {
+      const a = pts[k], b = pts[(k + 1) % n];
+      pos.push(a[0], 0, a[1], b[0], 0, b[1], b[0], h, b[1], a[0], 0, a[1], b[0], h, b[1], a[0], h, a[1]);
+      for (let v = 0; v < 6; v++) col.push(pared[0], pared[1], pared[2]);
+    }
+    let tris = [];
+    try { tris = THREE.ShapeUtils.triangulateShape(pts.map(p => new THREE.Vector2(p[0], p[1])), []); } catch (err) { tris = []; }
+    for (const t of tris) for (const idx of t) {
+      const p = pts[idx];
+      pos.push(p[0], h, p[1]);
+      col.push(techo[0], techo[1], techo[2]);
+    }
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+}
+function construirCoche(color) {
+  const g = new THREE.Group();
+  const carroceria = new THREE.Mesh(new THREE.BoxGeometry(2, 0.7, 4.2), new THREE.MeshLambertMaterial({ color }));
+  carroceria.position.y = 0.7;
+  const cabina = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.6, 2.0), new THREE.MeshLambertMaterial({ color: 0x222831 }));
+  cabina.position.set(0, 1.3, -0.2);
+  g.add(carroceria, cabina);
+  const ruedaGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 12);
+  ruedaGeo.rotateZ(Math.PI / 2);
+  const ruedaMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  for (const [x, z] of [[-1.05, 1.4], [1.05, 1.4], [-1.05, -1.4], [1.05, -1.4]]) {
+    const r = new THREE.Mesh(ruedaGeo, ruedaMat);
+    r.position.set(x, 0.4, z);
+    g.add(r);
+  }
+  return g;
+}
+function construirMallaZona() {
+  if (mallaZona) scene.remove(mallaZona);
+  mallaZona = new THREE.Group();
+  const suelo = new THREE.Mesh(new THREE.PlaneGeometry(14000, 14000), new THREE.MeshLambertMaterial({ color: 0x7a9f5a }));
+  suelo.rotation.x = -Math.PI / 2;
+  suelo.position.y = -0.05;
+  mallaZona.add(suelo, mallaCarreteras(zona.tramos), mallaEdificios(zona.edif));
+  scene.add(mallaZona);
+  if (!cocheMesh) { cocheMesh = construirCoche(0xe74c3c); scene.add(cocheMesh); }
+}
+
+// --- carga del zip de la zona ---
+async function cargarZona(archivo) {
+  $('estado').textContent = 'Leyendo el zip…';
+  const zip = await JSZip.loadAsync(archivo);
+  const leer = async nombre => {
+    const f = zip.file(nombre);
+    if (!f) throw new Error('falta ' + nombre + ' en el zip');
+    return JSON.parse(await f.async('string'));
+  };
+  const calles = await leer('calles.geojson');
+  $('estado').textContent = 'Procesando calles…';
+  await new Promise(r => setTimeout(r, 0));
+  const tramos = parsearCalles(calles);
+  const G = construirGrafo(tramos);
+  $('estado').textContent = 'Cargando casas…';
+  await new Promise(r => setTimeout(r, 0));
+  const casas = await leer('casas.geojson');
+  const edif = parsearCasas(casas);
+  $('estado').textContent = 'Construyendo la zona…';
+  await new Promise(r => setTimeout(r, 0));
+  zona = { tramos, G, edif, rejilla: construirRejilla(edif) };
+  construirMallaZona();
+  $('btnNueva').disabled = false;
+  mostrarMenu(`Zona cargada: ${tramos.length} tramos conducibles, ${edif.length} casas.`);
+}
+
+$('archivo').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try { await cargarZona(f); }
+  catch (err) { $('estado').textContent = 'Error: ' + err.message; }
+});
+
+// --- menús y avisos ---
+function mostrarMenu(texto) {
+  estado = 'menu';
+  $('pantalla').style.display = 'flex';
+  $('estado').textContent = texto || '';
+}
+function ocultarMenu() { $('pantalla').style.display = 'none'; }
+function mostrarAviso(texto, seg = 1.6) { avisoTexto = texto; avisoHasta = performance.now() / 1000 + seg; }
+function formato(s) {
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return `${m}:${r.toFixed(2).padStart(5, '0')}`;
+}
+
+// --- controles ---
+addEventListener('keydown', e => {
+  if (e.code === 'KeyM') { mostrarMenu(estado === 'menu' ? $('estado').textContent : 'Menú'); return; }
+  const c = TECLAS[e.code];
+  if (c) { controles[c] = true; e.preventDefault(); }
+});
+addEventListener('keyup', e => { const c = TECLAS[e.code]; if (c) controles[c] = false; });
+document.querySelectorAll('#controles button').forEach(b => {
+  const c = b.dataset.c;
+  const on = ev => { ev.preventDefault(); controles[c] = true; b.classList.add('pulsado'); };
+  const off = ev => { ev.preventDefault(); controles[c] = false; b.classList.remove('pulsado'); };
+  b.addEventListener('pointerdown', on);
+  b.addEventListener('pointerup', off);
+  b.addEventListener('pointerleave', off);
+  b.addEventListener('pointercancel', off);
+});
+$('btnMenu').addEventListener('click', () => mostrarMenu('Menú'));
+
+// --- carrera ---
+function limpiarCarrera() {
+  if (carrera) carrera.meshes.forEach(m => { scene.remove(m); m.material.dispose(); });
+  if (rutaLinea) { scene.remove(rutaLinea); rutaLinea.geometry.dispose(); rutaLinea.material.dispose(); }
+  carrera = null; rutaLinea = null;
+}
+function pintarCheckpoints() {
+  carrera.meshes.forEach((m, i) => {
+    const hecho = i < carrera.siguiente;
+    m.material.color.setHex(i === carrera.siguiente ? 0xffd166 : (i === carrera.cps.length - 1 ? 0x2ecc71 : 0xffffff));
+    m.material.opacity = hecho ? 0.12 : 0.45;
+  });
+}
+function nuevaCarrera() {
+  if (!zona) return;
+  const rng = mulberry32((Date.now() & 0xffffff) || 1);
+  const plan = planearVuelta(zona.G, rng, 1200, 3500);
+  if (!plan) { mostrarMenu('No he encontrado un circuito. Pulsa otra vez.'); return; }
+  limpiarCarrera();
+  ocultarMenu();
+  const geoCp = new THREE.CylinderGeometry(4, 4, 16, 14);
+  carrera = {
+    cps: plan.checkpoints, siguiente: 0, vueltas: 0, tVuelta: 0, tiempos: [], longitud: plan.longitud,
+    meshes: plan.checkpoints.map(cp => {
+      const m = new THREE.Mesh(geoCp, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45 }));
+      m.position.set(cp.x, 8, cp.z);
+      scene.add(m);
+      return m;
+    }),
+  };
+  const puntos = plan.ruta.map(p => new THREE.Vector3(p[0], 0.3, p[1]));
+  rutaLinea = new THREE.Line(new THREE.BufferGeometry().setFromPoints(puntos), new THREE.LineBasicMaterial({ color: 0xffd166 }));
+  scene.add(rutaLinea);
+  pintarCheckpoints();
+  coche = { x: plan.inicio.x, z: plan.inicio.z, h: plan.inicio.h, v: 0, dir: 0 };
+  actualizarMalla();
+  const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
+  camara.position.set(coche.x - fx * 13, 6, coche.z - fz * 13);
+  camara.lookAt(coche.x + fx * 6, 1.2, coche.z + fz * 6);
+  cuenta = 3;
+  estado = 'cuenta';
+}
+$('btnNueva').addEventListener('click', nuevaCarrera);
+
+function actualizarCarrera(ahora) {
+  const cp = carrera.cps[carrera.siguiente];
+  if (Math.hypot(coche.x - cp.x, coche.z - cp.z) > 25) return;
+  if (carrera.siguiente === carrera.cps.length - 1) {
+    const vuelta = ahora - carrera.tVuelta;
+    carrera.tiempos.push(vuelta);
+    carrera.vueltas++;
+    carrera.tVuelta = ahora;
+    carrera.siguiente = 0;
+    mostrarAviso(`Vuelta ${carrera.vueltas}: ${formato(vuelta)}`);
+    if (carrera.vueltas >= VUELTAS) terminar(ahora);
+  } else {
+    carrera.siguiente++;
+  }
+  pintarCheckpoints();
+}
+function terminar(ahora) {
+  estado = 'fin';
+  const total = ahora - tInicio;
+  const lista = carrera.tiempos.map((t, i) => `V${i + 1}: ${formato(t)}`).join(' · ');
+  mostrarMenu(`Carrera terminada en ${formato(total)}. ${lista}. Pulsa Nueva carrera.`);
+}
+
+// --- física del coche básico ---
+function fisica(dt) {
+  const c = coche;
+  const objetivoDir = (controles.izq ? 1 : 0) - (controles.der ? 1 : 0);
+  c.dir += (objetivoDir - c.dir) * Math.min(1, dt * 8);
+  if (controles.acel) c.v += 22 * (1 - Math.max(c.v, 0) / VMAX) * dt;
+  if (controles.freno) c.v = c.v > 0.5 ? c.v - 28 * dt : Math.max(c.v - 8 * dt, -12);
+  const ds = (0.6 + 0.0012 * c.v * c.v) * dt;     // rozamiento + arrastre
+  if (Math.abs(c.v) <= ds) c.v = 0; else c.v -= Math.sign(c.v) * ds;
+  const vAbs = Math.abs(c.v);
+  const sentido = c.v >= 0 ? 1 : -1;
+  c.h += c.dir * 1.9 * Math.min(vAbs / 8, 1) * (1 - 0.5 * Math.min(vAbs / VMAX, 1)) * sentido * dt;
+  const recorrido = c.v * dt;
+  const pasos = Math.max(1, Math.ceil(Math.abs(recorrido) / 0.4));
+  const paso = recorrido / pasos;
+  for (let i = 0; i < pasos; i++) {
+    const nx = c.x + Math.sin(c.h) * paso, nz = c.z + Math.cos(c.h) * paso;
+    let choque = false;
+    if (!choca(zona.edif, zona.rejilla, nx, c.z, RADIO_COCHE)) c.x = nx; else choque = true;
+    if (!choca(zona.edif, zona.rejilla, c.x, nz, RADIO_COCHE)) c.z = nz; else choque = true;
+    if (choque) c.v *= 0.5;   // resbala a lo largo del muro, pero pierde velocidad
+  }
+}
+
+function actualizarMalla() {
+  cocheMesh.position.set(coche.x, 0, coche.z);
+  cocheMesh.rotation.y = coche.h;
+}
+function actualizarCamara(dt) {
+  const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
+  const objetivo = new THREE.Vector3(coche.x - fx * 13, 5.5 + Math.min(Math.abs(coche.v) / 15, 2), coche.z - fz * 13);
+  camara.position.lerp(objetivo, 1 - Math.exp(-6 * dt));
+  camara.lookAt(coche.x + fx * 6, 1.2, coche.z + fz * 6);
+}
+
+// --- HUD ---
+function buscarTramo() {
+  let mejor = null, md = Infinity;
+  for (const t of zona.tramos) {
+    const d = distanciaTramo2(t, coche.x, coche.z);
+    if (d < md) { md = d; mejor = t; }
+  }
+  tramoActual = mejor; dTramo2 = md;
+}
+function actualizarHUD(ahora) {
+  const kmh = Math.round(Math.abs(coche.v) * 3.6);
+  $('vel').innerHTML = kmh + '<small>km/h</small>';
+  if (ahora - ultimoBusqueda > 0.25) { ultimoBusqueda = ahora; buscarTramo(); }
+  if (tramoActual) {
+    const t = tramoActual;
+    const enCalzada = Math.sqrt(dTramo2) <= t.ancho / 2 + 1.5;
+    const el = $('limite');
+    el.textContent = `Límite ${t.velocidad} km/h (informativo)${t.nombre ? ' · ' + t.nombre : ''}`;
+    el.classList.toggle('excede', kmh > t.velocidad);
+    $('fuera').textContent = enCalzada ? '' : 'Fuera de la calzada';
+  }
+  if (carrera) {
+    const cp = carrera.cps[carrera.siguiente];
+    const dist = Math.round(Math.hypot(coche.x - cp.x, coche.z - cp.z));
+    const t = estado === 'corriendo' ? ahora - tInicio : 0;
+    $('carrera').innerHTML =
+      `Vuelta ${Math.min(carrera.vueltas + 1, VUELTAS)} / ${VUELTAS}<br>` +
+      `${formato(t)}<br>` +
+      `Próximo checkpoint: ${dist} m`;
+  }
+  $('aviso').textContent = ahora < avisoHasta ? avisoTexto : '';
+}
+
+// --- bucle principal ---
+function bucle() {
+  requestAnimationFrame(bucle);
+  const dt = Math.min(0.05, reloj.getDelta());
+  const ahora = performance.now() / 1000;
+  if (estado === 'cuenta') {
+    cuenta -= dt;
+    if (cuenta > 0) mostrarAviso(String(Math.ceil(cuenta)), 1.1);
+    else {
+      estado = 'corriendo';
+      tInicio = ahora;
+      carrera.tVuelta = ahora;
+      mostrarAviso('¡YA!', 0.9);
+    }
+  }
+  if (estado === 'corriendo') { fisica(dt); actualizarCarrera(ahora); }
+  if (coche) {
+    actualizarMalla();
+    actualizarCamara(dt);
+    actualizarHUD(ahora);
+  }
+  renderer.render(scene, camara);
+}
+
+iniciarRender();
+mostrarMenu('Carga el zip de la zona para empezar.');
+/*RENDER-END*/
+</script>
+</body>
+</html>
