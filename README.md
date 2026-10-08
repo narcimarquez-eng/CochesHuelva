@@ -9,7 +9,9 @@ Carrera de coches por Huelva
 2. La zona se carga sola desde `zona-huelva.zip`, que va junto al juego (es la zona exportada por «Paseo por el relieve»). Si abres el HTML desde el disco y no la encuentra, elige el zip con el selector.
 3. Pulsa **Nueva carrera**: 3 vueltas a un circuito generado sobre las calles de la zona.
 
-Controles: flechas o WASD, o los botones de la pantalla en el móvil. `M` abre el menú. Los límites de velocidad son solo informativos.
+La zona tiene aceras y bordillos, árboles en parques y praderas, agua (ríos, lagos, humedales y piscinas), quitamiedos en las curvas de las vías rápidas y rotondas con isleta. Si el coche sube a la acera da un bote, va más despacio y el volante responde menos.
+
+Controles: flechas o WASD. En el móvil, la ruleta de la pantalla gira el coche y los botones ▲ (acelerar) y ■ (frenar) están abajo. `M` abre el menú. Los límites de velocidad son solo informativos.
 
 ## Instalar en el móvil
 
@@ -26,4 +28,4 @@ En la pantalla de inicio se elige el coche: el básico (una caja roja), CarConce
 
 ## Datos
 
-`zona-huelva.zip` incluye datos de OpenStreetMap (© colaboradores de OpenStreetMap, licencia ODbL) y del Catastro (Dirección General del Catastro). El juego solo usa `calles.geojson` y `casas.geojson`.
+`zona-huelva.zip` incluye datos de OpenStreetMap (© colaboradores de OpenStreetMap, licencia ODbL) y del Catastro (Dirección General del Catastro). El juego usa `calles.geojson` y `casas.geojson`, `mapa.geojson` (usos del suelo: parques, praderas, cultivos, agua) y `datos/osm.json` (piscinas y rotondas). Si faltan los dos últimos, la zona carga igual, sin ese paisaje.
