@@ -625,14 +625,13 @@ function partirPorCalles(linea, calles) {
 }
 // Quitamiedos en el lado de fuera de cada curva (giro acumulado de más de 20 grados).
 // No van en las rotondas ni a menos de 20 m de un cruce, para no tapar la calle que sale de él.
-function generarQuitamiedos(tramos, rotondas) {
-  const calles = construirRejillaCalles(tramos), rejCruces = construirRejillaPuntos(puntosDeCruce(tramos));
-  const enRotonda = t => rotondas.some(r => t.pts.every(p => Math.abs(Math.hypot(p[0] - r.cx, p[1] - r.cz) - r.r) < 8));
+function generarQuitamiedos(tramos, rotondas, cruces) {
+  const calles = construirRejillaCalles(tramos), rejCruces = construirRejillaPuntos(cruces);
   const rieles = [];
   for (const t of tramos) {
     if (!TIPOS_CON_QUITAMIEDOS.has(t.tipo)) continue;
     const p = t.pts, n = p.length;
-    if (n < 3 || enRotonda(t)) continue;
+    if (n < 3 || enRotonda(t, rotondas)) continue;
     const lejos = k => !chocaPuntos(rejCruces, p[k][0], p[k][1], 20);
     let i = 1;
     while (i < n - 1) {
@@ -705,7 +704,7 @@ function generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng) {
     const r = c.anillo;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-    const objetivo = Math.min(3000, Math.round(Math.abs(areaAnillo(r)) / (c.capa === 'parque o jardín' ? 110 : 900)));
+    const objetivo = Math.min(3000, Math.round(Math.abs(areaAnillo(r)) / (c.capa === 'parque o jardín' ? 150 : 900)));
     let n = 0;
     for (let k = 0; k < objetivo * 15 && n < objetivo; k++) {
       const x = x0 + rng() * (x1 - x0), z = z0 + rng() * (z1 - z0);
@@ -722,6 +721,132 @@ function generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng) {
   }
   return arboles;
 }
+// --- ortofoto (PNOA, en Web Mercator EPSG:3857): paso entre metros locales y la imagen ---
+const R_MERC = 6378137;
+function mercatorDeLocal(x, z) {
+  const lon = ORIGEN.lon + x / K_LON, lat = ORIGEN.lat - z / K_LAT;
+  return [R_MERC * lon * Math.PI / 180, R_MERC * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
+}
+function localDeMercator(X, Y) {
+  const lon = X / R_MERC * 180 / Math.PI, lat = (2 * Math.atan(Math.exp(Y / R_MERC)) - Math.PI / 2) * 180 / Math.PI;
+  return [(lon - ORIGEN.lon) * K_LON, -(lat - ORIGEN.lat) * K_LAT];
+}
+// Archivo de georreferencia (.jgw): A, D, B, E, C, F. C y F son el centro del píxel de arriba a la izquierda
+function leerJgw(texto) {
+  const v = texto.trim().split(/\s+/).map(Number);
+  return { A: v[0], D: v[1], B: v[2], E: v[3], C: v[4], F: v[5] };
+}
+// Coordenadas de textura (u, v) de un punto de Web Mercator en la imagen (v hacia arriba, como en three.js)
+function uvOrtofoto(X, Y, g, W, H) {
+  const dx = X - g.C, dy = Y - g.F, det = g.A * g.E - g.B * g.D;
+  const col = (g.E * dx - g.B * dy) / det, fila = (g.A * dy - g.D * dx) / det;
+  return [(col + 0.5) / W, 1 - (fila + 0.5) / H];
+}
+
+// --- polilíneas: distancias a lo largo de la calle, puntos y trozos ---
+function acumulados(pts) {
+  const cum = [0];
+  for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+  return cum;
+}
+// Punto y dirección (unitaria) de una polilínea a la distancia d desde su inicio
+function enPolilinea(pts, cum, d) {
+  let k = 1;
+  while (k < pts.length - 1 && cum[k] < d) k++;
+  const L = cum[k] - cum[k - 1] || 1, u = Math.min(1, Math.max(0, (d - cum[k - 1]) / L));
+  const dx = pts[k][0] - pts[k - 1][0], dz = pts[k][1] - pts[k - 1][1], l = Math.hypot(dx, dz) || 1;
+  return { x: pts[k - 1][0] + dx * u, z: pts[k - 1][1] + dz * u, tx: dx / l, tz: dz / l };
+}
+// Trozo de una polilínea entre las distancias d0 y d1
+function subPolilinea(pts, cum, d0, d1) {
+  const a = enPolilinea(pts, cum, d0), b = enPolilinea(pts, cum, d1), out = [[a.x, a.z]];
+  for (let k = 1; k < pts.length - 1; k++) if (cum[k] > d0 && cum[k] < d1) out.push(pts[k]);
+  out.push([b.x, b.z]);
+  return out;
+}
+// ¿Es la calle un arco de rotonda? (todos sus puntos sobre el anillo de una rotonda)
+function enRotonda(t, rotondas) {
+  return rotondas.some(r => t.pts.every(p => Math.abs(Math.hypot(p[0] - r.cx, p[1] - r.cz) - r.r) < 8));
+}
+const AUTOVIAS = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link']);
+
+// --- marcas de la calzada: franjas {pts, s0, s1} (como las de la calzada), sin marcas en las rotondas ---
+// Línea central discontinua (calles de dos sentidos de 6,4 m o más), líneas de borde continuas (primarias y
+// secundarias) y, en los cruces, pasos de cebra
+function generarMarcas(tramos, rotondas, cruces) {
+  const rejCruces = construirRejillaPuntos(cruces), marcas = [];
+  for (const t of tramos) {
+    if (t.ancho < 6 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) continue;
+    const p = t.pts, cum = acumulados(p), L = cum[cum.length - 1];
+    const a = chocaPuntos(rejCruces, p[0][0], p[0][1], 0.5) ? 12 : 0;   // sin marcas junto al cruce
+    const b = chocaPuntos(rejCruces, p[p.length - 1][0], p[p.length - 1][1], 0.5) ? L - 12 : L;
+    if (b - a < 4) continue;
+    if (t.ancho >= 6.4 && !t.unSentido && !AUTOVIAS.has(t.tipo)) {
+      for (let d = a; d + 3 <= b; d += 9) marcas.push({ pts: subPolilinea(p, cum, d, d + 3), s0: -0.06, s1: 0.06 });
+    }
+    if (['primary', 'secondary'].includes(tipoBase(t.tipo))) {
+      const o = t.ancho / 2 - 0.35, tr = subPolilinea(p, cum, a, b);
+      marcas.push({ pts: tr, s0: o - 0.06, s1: o + 0.06 }, { pts: tr, s0: -o - 0.06, s1: -o + 0.06 });
+    }
+  }
+  return marcas;
+}
+// Pasos de cebra: a 11 m de cada cruce, en las calles de 6 m o más. Las rayas van en el sentido de la calle
+// y están separadas un metro a lo ancho de la calzada
+function generarPasosCebra(tramos, rotondas, cruces) {
+  const clave = p => p[0].toFixed(1) + '|' + p[1].toFixed(1), llegan = new Map(), marcas = [];
+  for (const t of tramos) for (const [p, inicio] of [[t.pts[0], true], [t.pts[t.pts.length - 1], false]]) {
+    const k = clave(p);
+    if (!llegan.has(k)) llegan.set(k, []);
+    llegan.get(k).push({ t, inicio });
+  }
+  for (const c of cruces) for (const { t, inicio } of llegan.get(clave(c)) || []) {
+    if (t.ancho < 6 || AUTOVIAS.has(t.tipo) || enRotonda(t, rotondas)) continue;
+    const cum = acumulados(t.pts), L = cum[cum.length - 1];
+    if (L < 16) continue;
+    const e = enPolilinea(t.pts, cum, inicio ? 11 : L - 11), n = Math.max(4, Math.floor((t.ancho - 0.6) / 1));
+    for (let k = 0; k < n; k++) {
+      const s = k - (n - 1) / 2;
+      marcas.push({ pts: [[e.x - e.tx * 1.8, e.z - e.tz * 1.8], [e.x + e.tx * 1.8, e.z + e.tz * 1.8]], s0: s - 0.25, s1: s + 0.25 });
+    }
+  }
+  return marcas;
+}
+
+// --- mobiliario: farolas cada 36 m en el centro de la acera (de un lado y de otro); árboles de alineación ---
+// Cada farola es {x, z, th}: th es el giro (rad) del brazo, que apunta hacia la calzada
+function generarFarolas(tramos, rotondas, cruces, arboles) {
+  const rejCruces = construirRejillaPuntos(cruces), rejArboles = construirRejillaPuntos(arboles), calles = construirRejillaCalles(tramos), farolas = [];
+  tramos.forEach((t, i) => {
+    if (!(t.acera > 0) || t.ancho < 6 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) return;
+    if (t.ancho >= 9 && t.acera >= 2.2) return;   // en las avenidas van árboles, no farolas
+    const cum = acumulados(t.pts), L = cum[cum.length - 1];
+    const lado = i % 2 ? 1 : -1, off = lado * (t.ancho / 2 + t.acera / 2);
+    for (let d = 14; d < L - 14; d += 36) {
+      const e = enPolilinea(t.pts, cum, d), x = e.x - e.tz * off, z = e.z + e.tx * off;
+      if (chocaPuntos(rejCruces, x, z, 16) || cercaDeCalle(calles, x, z, 2.5) || chocaPuntos(rejArboles, x, z, 1.5)) continue;   // ni en la calzada ni sobre un árbol
+      farolas.push({ x, z, th: Math.atan2(e.tx * lado, e.tz * lado) });
+    }
+  });
+  return farolas;
+}
+// Árboles de alineación: en las avenidas (calzada de 9 m o más, aceras de 2,2 m o más), cada 14 m en el centro de la acera
+function generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, rejAguas) {
+  const rejCruces = construirRejillaPuntos(cruces), calles = construirRejillaCalles(tramos), arboles = [];
+  for (const t of tramos) {
+    if (!(t.acera >= 2.2) || t.ancho < 9 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) continue;
+    const cum = acumulados(t.pts), L = cum[cum.length - 1];
+    for (const lado of [-1, 1]) for (let d = 12; d < L - 12; d += 14) {
+      const e = enPolilinea(t.pts, cum, d), off = lado * (t.ancho / 2 + t.acera / 2);
+      const x = e.x - e.tz * off, z = e.z + e.tx * off;
+      if (chocaPuntos(rejCruces, x, z, 16) || cercaDeCalle(calles, x, z, 3.5) || choca(aguas, rejAguas, x, z, 2) ||
+          dentroDeOtraCasa(edif, rejilla, x, z, -1)) continue;
+      arboles.push([x, z]);
+    }
+  }
+  return arboles;
+}
+
 // Todo lo que se dibuja y choca fuera de las calles y de las casas
 function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng) {
   const capas = parsearMapa(mapaGeo);
@@ -729,20 +854,28 @@ function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng) {
   const aguas = construirAguas(capas, piscinas);
   const rejAguas = construirRejilla(aguas);
   const rejCalles = construirRejillaCalles(tramos);
-  const rieles = generarQuitamiedos(tramos, rotondas);
+  const cruces = puntosDeCruce(tramos);
+  const rieles = generarQuitamiedos(tramos, rotondas, cruces);
   const islas = prepararIslas(rotondas).filter(isla => !cercaDeCalle(rejCalles, isla.cx, isla.cz, isla.ri));   // sin isleta si una calle pasa por ella
   const arboles = generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng);
+  arboles.push(...generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, rejAguas));
   for (const isla of islas) for (let k = 0; k < 3; k++) {   // tres árboles en cada isleta, si caben
     const a = k * 2 * Math.PI / 3 + 0.4, x = isla.cx + Math.cos(a) * isla.ri * 0.5, z = isla.cz + Math.sin(a) * isla.ri * 0.5;
     if (!cercaDeCalle(rejCalles, x, z, 3) && !dentroDeOtraCasa(edif, rejilla, x, z, -1) && !choca(aguas, rejAguas, x, z, 1)) arboles.push([x, z]);
   }
-  return { capas, aguas, rejAguas, rejCalles, rieles, rejRieles: construirRejillaCalles(rieles), islas, arboles, rejArboles: construirRejillaPuntos(arboles) };
+  const farolas = generarFarolas(tramos, rotondas, cruces, arboles).filter(f => !choca(aguas, rejAguas, f.x, f.z, 1) && !dentroDeOtraCasa(edif, rejilla, f.x, f.z, -1));
+  const marcas = generarMarcas(tramos, rotondas, cruces).concat(generarPasosCebra(tramos, rotondas, cruces));
+  return {
+    capas, aguas, rejAguas, rejCalles, rieles, rejRieles: construirRejillaCalles(rieles), islas,
+    arboles, rejArboles: construirRejillaPuntos(arboles),
+    farolas, rejFarolas: construirRejillaPuntos(farolas.map(f => [f.x, f.z])), marcas,
+  };
 }
-// ¿Choca un coche de radio R con algo que no sea una casa? (agua, quitamiedos, árboles, isletas).
+// ¿Choca un coche de radio R con algo que no sea una casa? (agua, quitamiedos, árboles, farolas, isletas).
 // Sobre una calle no cuenta el agua: ahí hay puentes.
 function chocaMundo(m, x, z, R) {
   return (!cercaDeCalle(m.rejCalles, x, z, 6) && choca(m.aguas, m.rejAguas, x, z, R)) || cercaDeCalle(m.rejRieles, x, z, R) ||
-    chocaPuntos(m.rejArboles, x, z, R + 0.3) || chocaIslas(m.islas, x, z, R);
+    chocaPuntos(m.rejArboles, x, z, R + 0.3) || chocaPuntos(m.rejFarolas, x, z, R + 0.15) || chocaIslas(m.islas, x, z, R);
 }
 // Caja de la zona (para pintar el suelo), con margen
 function calcularCaja(tramos, edif) {
@@ -806,35 +939,96 @@ const COLOR_CALZADA = t => {
     default: return [0.47, 0.47, 0.49];
   }
 };
-// Calzada, aceras y bordillos de cada calle (anchos del zip). Caminos de tierra sin aceras.
-function mallaCarreteras(tramos) {
-  const pos = [], col = [], nor = [];
-  // franja horizontal entre los desplazamientos s0 y s1 respecto al eje (antihoraria vista desde arriba)
-  const franjaH = (pts, s0, s1, y, c) => {
-    const vertice = v => { pos.push(v[0], y, v[1]); col.push(c[0], c[1], c[2]); nor.push(0, 1, 0); };
-    const normal = k => { const dx = pts[k + 1][0] - pts[k][0], dz = pts[k + 1][1] - pts[k][1], L = Math.hypot(dx, dz); return L < 1e-6 ? null : [-dz / L, dx / L]; };
-    for (let k = 0; k < pts.length - 1; k++) {
-      const n = normal(k);
-      if (!n) continue;
-      const [ax, az] = pts[k], [bx, bz] = pts[k + 1];
-      const A0 = [ax + n[0] * s0, az + n[1] * s0], A1 = [ax + n[0] * s1, az + n[1] * s1];
-      const B0 = [bx + n[0] * s0, bz + n[1] * s0], B1 = [bx + n[0] * s1, bz + n[1] * s1];
-      for (const v of [A0, B1, B0, A0, A1, B1]) vertice(v);
+// --- texturas de calzada y aceras, dibujadas aquí (sin imágenes externas) ---
+const TU_ASFALTO = 6, TU_ADOQUIN = 2;   // metros que ocupa una repetición de cada textura
+let texturaCalzada_ = null, texturaAdoquin_ = null;
+function lienzoTextura(tam, pintar) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = tam;
+  pintar(cv.getContext('2d'), tam);
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+function texturaAsfalto() {   // asfalto con grano
+  return texturaCalzada_ || (texturaCalzada_ = lienzoTextura(256, (g, n) => {
+    g.fillStyle = '#c4c4c4'; g.fillRect(0, 0, n, n);
+    const r = mulberry32(3);
+    for (let i = 0; i < 9000; i++) {
+      const v = Math.floor(r() * 255);
+      g.fillStyle = `rgba(${v},${v},${v},${(0.08 + r() * 0.2).toFixed(2)})`;
+      g.fillRect(Math.floor(r() * n), Math.floor(r() * n), 1 + (r() < 0.25 ? 1 : 0), 1);
     }
-    // en cada vértice, un cuadrilátero une la franja de un tramo con la del siguiente: no quedan huecos en las curvas.
-    // Sus triángulos se ordenan para que miren hacia arriba (si no, se verían oscuros, como caras traseras)
-    const hacia_arriba = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) < 0 ? [a, b, c] : [a, c, b];
-    for (let k = 1; k < pts.length - 1; k++) {
-      const n0 = normal(k - 1), n1 = normal(k);
-      if (!n0 || !n1) continue;
-      const P = pts[k];
-      const B0 = [P[0] + n0[0] * s0, P[1] + n0[1] * s0], B1 = [P[0] + n0[0] * s1, P[1] + n0[1] * s1];
-      const A0 = [P[0] + n1[0] * s0, P[1] + n1[1] * s0], A1 = [P[0] + n1[0] * s1, P[1] + n1[1] * s1];
-      for (const v of [...hacia_arriba(B0, A0, A1), ...hacia_arriba(B0, A1, B1)]) vertice(v);
+  }));
+}
+function texturaAdoquin() {   // losetas de 0,5 m con juntas
+  return texturaAdoquin_ || (texturaAdoquin_ = lienzoTextura(256, (g, n) => {
+    g.fillStyle = '#7f7a70'; g.fillRect(0, 0, n, n);
+    const r = mulberry32(11), c = n / 4;
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      const v = 196 + Math.floor(r() * 36);
+      g.fillStyle = `rgb(${v},${v - 4},${v - 10})`;
+      g.fillRect(i * c + 2, j * c + 2, c - 4, c - 4);
+      for (let k = 0; k < 40; k++) {
+        const w = Math.floor(r() * 255);
+        g.fillStyle = `rgba(${w},${w},${w},0.12)`;
+        g.fillRect(i * c + 2 + Math.floor(r() * (c - 4)), j * c + 2 + Math.floor(r() * (c - 4)), 1, 1);
+      }
     }
+  }));
+}
+
+// Malla que se va llenando por trozos: posición, color, normal y coordenadas de textura por vértice
+function nuevaMalla() {
+  const m = { pos: [], col: [], nor: [], uv: [] };
+  m.v = (x, y, z, c, u, w, nx = 0, ny = 1, nz = 0) => {
+    m.pos.push(x, y, z); m.col.push(c[0], c[1], c[2]); m.nor.push(nx, ny, nz); m.uv.push(u, w);
   };
+  m.geo = () => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(m.pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(m.col, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(m.nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(m.uv, 2));
+    return g;
+  };
+  return m;
+}
+// Franja horizontal entre los desplazamientos s0 y s1 respecto al eje de una polilínea, a la altura y.
+// Las coordenadas de textura van por metros recorridos (u) y por metros a lo ancho (v), con repetición de tu y tv
+function bandasH(m, pts, s0, s1, y, c, tu = 1, tv = 1) {
+  const cum = acumulados(pts);
+  const V = (x, z, s, d) => m.v(x, y, z, c, d / tu, s / tv);
+  const normal = k => { const dx = pts[k + 1][0] - pts[k][0], dz = pts[k + 1][1] - pts[k][1], L = Math.hypot(dx, dz); return L < 1e-6 ? null : [-dz / L, dx / L]; };
+  for (let k = 0; k < pts.length - 1; k++) {
+    const n = normal(k);
+    if (!n) continue;
+    const [ax, az] = pts[k], [bx, bz] = pts[k + 1], da = cum[k], db = cum[k + 1];
+    const A0 = [ax + n[0] * s0, az + n[1] * s0], A1 = [ax + n[0] * s1, az + n[1] * s1];
+    const B0 = [bx + n[0] * s0, bz + n[1] * s0], B1 = [bx + n[0] * s1, bz + n[1] * s1];
+    V(A0[0], A0[1], s0, da); V(B1[0], B1[1], s1, db); V(B0[0], B0[1], s0, db);
+    V(A0[0], A0[1], s0, da); V(A1[0], A1[1], s1, da); V(B1[0], B1[1], s1, db);
+  }
+  // en cada vértice, un cuadrilátero une la franja de un tramo con la del siguiente (no quedan huecos en las curvas);
+  // se ordena para que mire hacia arriba (si no, se vería oscuro, como cara trasera)
+  const orientar = t => (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[1][1] - t[0][1]) * (t[2][0] - t[0][0]) < 0 ? t : [t[0], t[2], t[1]];
+  for (let k = 1; k < pts.length - 1; k++) {
+    const n0 = normal(k - 1), n1 = normal(k);
+    if (!n0 || !n1) continue;
+    const P = pts[k], d = cum[k];
+    const B0 = [P[0] + n0[0] * s0, P[1] + n0[1] * s0, s0], B1 = [P[0] + n0[0] * s1, P[1] + n0[1] * s1, s1];
+    const A0 = [P[0] + n1[0] * s0, P[1] + n1[1] * s0, s0], A1 = [P[0] + n1[0] * s1, P[1] + n1[1] * s1, s1];
+    for (const tri of [[B0, A0, A1], [B0, A1, B1]]) for (const [x, z, s] of orientar(tri)) V(x, z, s, d);
+  }
+}
+
+// Calzada, aceras, bordillos y arcenes de cada calle (anchos del zip). Caminos de tierra sin aceras.
+function mallaCarreteras(tramos) {
+  const calzada = nuevaMalla(), aceras = nuevaMalla(), bordillos = nuevaMalla();
+  const ACERA = [0.5, 0.48, 0.45], CANTO = [0.62, 0.6, 0.57], BORDILLO = [0.36, 0.34, 0.32], ARCEN = [0.42, 0.41, 0.39];
   // cara vertical (bordillo) en el desplazamiento s, de y0 a y1; mira hacia el centro de la calle
-  const caraV = (pts, s, y0, y1, c) => {
+  const caraV = (m, pts, s, y0, y1, c) => {
     const sg = s >= 0 ? -1 : 1;
     for (let k = 0; k < pts.length - 1; k++) {
       const ax = pts[k][0], az = pts[k][1], bx = pts[k + 1][0], bz = pts[k + 1][1];
@@ -844,39 +1038,106 @@ function mallaCarreteras(tramos) {
       const P0 = [ax + nx * s, y0, az + nz * s], P1 = [ax + nx * s, y1, az + nz * s];
       const Q0 = [bx + nx * s, y0, bz + nz * s], Q1 = [bx + nx * s, y1, bz + nz * s];
       const tr = sg < 0 ? [P0, P1, Q0, P1, Q1, Q0] : [P0, Q0, P1, P1, Q0, Q1];
-      for (const v of tr) { pos.push(v[0], v[1], v[2]); col.push(c[0], c[1], c[2]); nor.push(sg * nx, 0, sg * nz); }
+      for (const v of tr) m.v(v[0], v[1], v[2], c, 0, 0, sg * nx, 0, sg * nz);
     }
   };
-  const ACERA = [0.5, 0.48, 0.45], BORDILLO = [0.36, 0.34, 0.32];   // la luz los aclara: no hace falta que sean claros
   for (const t of tramos) {
     const h = t.ancho / 2;
     const tierra = /tierra|grava/.test(t.dib), adoquin = /adoqu/.test(t.dib);
     const asfalto = tierra ? [0.5, 0.42, 0.3] : adoquin ? [0.52, 0.5, 0.47] : COLOR_CALZADA(t);
-    franjaH(t.pts, -h, h, 0.05, asfalto);
+    bandasH(calzada, t.pts, -h, h, 0.05, asfalto, TU_ASFALTO, TU_ASFALTO);
     if (t.acera > 0 && !tierra) {
-      franjaH(t.pts, h, h + t.acera, 0.15, ACERA);
-      franjaH(t.pts, -h - t.acera, -h, 0.15, ACERA);
-      caraV(t.pts, h, 0.05, 0.15, BORDILLO);
-      caraV(t.pts, -h, 0.05, 0.15, BORDILLO);
+      bandasH(aceras, t.pts, h + 0.2, h + t.acera, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
+      bandasH(aceras, t.pts, -h - t.acera, -h - 0.2, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
+      bandasH(aceras, t.pts, h, h + 0.2, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);   // canto claro del bordillo
+      bandasH(aceras, t.pts, -h - 0.2, -h, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);
+      caraV(bordillos, t.pts, h, 0.05, 0.15, BORDILLO);
+      caraV(bordillos, t.pts, -h, 0.05, 0.15, BORDILLO);
+    } else if (/con arcén/.test(t.dib)) {   // arcén: franja junto a la calzada, sin acera
+      bandasH(calzada, t.pts, h, h + 1.2, 0.045, ARCEN, TU_ASFALTO, TU_ASFALTO);
+      bandasH(calzada, t.pts, -h - 1.2, -h, 0.045, ARCEN, TU_ASFALTO, TU_ASFALTO);
     }
+  }
+  const grupo = new THREE.Group();
+  const matCalzada = new THREE.MeshLambertMaterial({ map: texturaAsfalto(), vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const matAceras = new THREE.MeshLambertMaterial({ map: texturaAdoquin(), vertexColors: true, side: THREE.DoubleSide });
+  const matBordillos = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  grupo.add(new THREE.Mesh(calzada.geo(), matCalzada), new THREE.Mesh(aceras.geo(), matAceras), new THREE.Mesh(bordillos.geo(), matBordillos));
+  return grupo;
+}
+
+// Marcas viales: línea central, bordes y pasos de cebra (franjas blancas sobre la calzada)
+function mallaMarcas(marcas) {
+  const m = nuevaMalla(), BLANCO = [0.95, 0.95, 0.92];
+  for (const k of marcas) bandasH(m, k.pts, k.s0, k.s1, 0.07, BLANCO);
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  return new THREE.Mesh(m.geo(), mat);
+}
+
+// Farolas: poste, brazo y luminaria como instancias (una llamada de dibujo por parte)
+function mallaFarolas(farolas) {
+  const grupo = new THREE.Group();
+  const n = farolas.length;
+  if (!n) return grupo;
+  const metal = new THREE.MeshLambertMaterial({ color: 0x5d6368 });
+  const poste = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.07, 0.09, 6, 6, 1, true).translate(0, 3, 0), metal, n);
+  const brazo = new THREE.InstancedMesh(new THREE.BoxGeometry(1.3, 0.1, 0.1).translate(0.65, 5.8, 0), metal, n);
+  const luz = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 0.12, 0.3).translate(1.3, 5.72, 0), new THREE.MeshLambertMaterial({ color: 0xe6e8e4 }), n);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0);
+  farolas.forEach((f, i) => {
+    m.compose(new THREE.Vector3(f.x, 0, f.z), q.setFromAxisAngle(eje, f.th), new THREE.Vector3(1, 1, 1));
+    poste.setMatrixAt(i, m); brazo.setMatrixAt(i, m); luz.setMatrixAt(i, m);
+  });
+  for (const im of [poste, brazo, luz]) { im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; grupo.add(im); }
+  return grupo;
+}
+
+// Ortofoto (PNOA) de la zona: una malla sobre el rectángulo que cubre la imagen; cada vértice lleva su punto exacto de la foto
+function mallaFoto(foto) {
+  const { g, W, H } = foto;
+  const esquinas = [[-0.5, -0.5], [W - 0.5, -0.5], [-0.5, H - 0.5], [W - 0.5, H - 0.5]]
+    .map(([c, f]) => localDeMercator(g.A * c + g.B * f + g.C, g.D * c + g.E * f + g.F));
+  const x0 = Math.min(...esquinas.map(e => e[0])), x1 = Math.max(...esquinas.map(e => e[0]));
+  const z0 = Math.min(...esquinas.map(e => e[1])), z1 = Math.max(...esquinas.map(e => e[1]));
+  const NX = 48, NZ = 48, pos = [], uv = [], idx = [];
+  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
+    const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ;
+    const [X, Y] = mercatorDeLocal(x, z), [u, v] = uvOrtofoto(X, Y, g, W, H);
+    pos.push(x, -0.1, z); uv.push(u, v);
+  }
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+    const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: foto.textura, side: THREE.DoubleSide }));
+}
+// Suelo: la ortofoto donde hay; fuera de ella, el color medio de la foto (o el verde de siempre si no hay foto)
+function construirTerreno(caja, capas, foto) {
+  const grupo = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.PlaneGeometry(14000, 14000), foto
+    ? new THREE.MeshBasicMaterial({ color: foto.media })
+    : new THREE.MeshLambertMaterial({ color: SUELO_BASE }));
+  base.rotation.x = -Math.PI / 2;
+  base.position.y = -1.2;
+  grupo.add(base, construirSuelo(caja, capas, foto ? foto.media : SUELO_BASE));
+  if (foto) grupo.add(mallaFoto(foto));
+  return grupo;
 }
 
 // Suelo pintado con los usos del mapa (praderas, parques, cultivos, agua) sobre la caja de la zona.
 // La luz del juego lo deja muy claro: se oscurece un poco para que los cultivos no salgan blancos
 const LUZ_SUELO = 0.72;
-function construirSuelo(caja, capas) {
+function construirSuelo(caja, capas, colorBase) {
   const [x0, z0, x1, z1] = caja;
   const W = x1 - x0, H = z1 - z0, esc = 2048 / Math.max(W, H);
   const cv = document.createElement('canvas');
   cv.width = Math.round(W * esc); cv.height = Math.round(H * esc);
   const g = cv.getContext('2d');
-  g.fillStyle = SUELO_BASE; g.fillRect(0, 0, cv.width, cv.height);
+  g.fillStyle = colorBase; g.fillRect(0, 0, cv.width, cv.height);
   const px = x => (x - x0) * esc, py = z => (z - z0) * esc;
   for (const capa of ['cultivo', 'pradera', 'humedal', 'zona urbana', 'parque o jardín', 'cauce', 'agua']) {
     for (const c of capas) {
@@ -892,13 +1153,13 @@ function construirSuelo(caja, capas) {
   tex.anisotropy = 4;
   const suelo = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshLambertMaterial({ map: tex, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO) }));
   suelo.rotation.x = -Math.PI / 2;
-  suelo.position.set((x0 + x1) / 2, -0.05, (z0 + z1) / 2);
+  suelo.position.set((x0 + x1) / 2, -0.6, (z0 + z1) / 2);
   return suelo;
 }
 
 // Agua: superficie que ondula; el coche no entra en ella
 const materialAgua = new THREE.ShaderMaterial({
-  side: THREE.DoubleSide,
+  side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
   uniforms: { uTiempo: { value: 0 } },
   vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
   fragmentShader: `uniform float uTiempo; varying vec3 vP;
@@ -1207,13 +1468,31 @@ function construirMallaZona() {
   if (mallaZona) scene.remove(mallaZona);
   mallaZona = new THREE.Group();
   const m = zona.mundo;
-  const base = new THREE.Mesh(new THREE.PlaneGeometry(14000, 14000), new THREE.MeshLambertMaterial({ color: new THREE.Color(SUELO_BASE).multiplyScalar(LUZ_SUELO) }));
-  base.rotation.x = -Math.PI / 2;
-  base.position.y = -0.1;
-  mallaZona.add(base, construirSuelo(zona.caja, m.capas), mallaCarreteras(zona.tramos), mallaEdificios(zona.edif));
-  mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaQuitamiedos(m.rieles), mallaIslas(m.islas));
+  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos), mallaMarcas(m.marcas), mallaEdificios(zona.edif));
+  mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas));
   scene.add(mallaZona);
   if (!cocheMesh) { cocheMesh = new THREE.Group(); scene.add(cocheMesh); }
+}
+
+// Foto aérea (ortofoto.jpg, con su ortofoto.jgw): suelo de satélite. Sin ella, el suelo se pinta con los usos del mapa
+async function cargarFoto(zip) {
+  const fichero = zip.file('ortofoto.jpg'), mundo = zip.file('ortofoto.jgw');
+  if (!fichero || !mundo) return null;
+  const img = new Image();
+  img.src = URL.createObjectURL(await fichero.async('blob'));
+  await img.decode();
+  const cv = document.createElement('canvas'), n = 32;
+  cv.width = cv.height = n;
+  const g = cv.getContext('2d');
+  g.drawImage(img, 0, 0, n, n);
+  const px = g.getImageData(0, 0, n, n).data;
+  let r = 0, v = 0, b = 0;
+  for (let k = 0; k < px.length; k += 4) { r += px[k]; v += px[k + 1]; b += px[k + 2]; }
+  const hex = c => Math.round(c / (n * n)).toString(16).padStart(2, '0');
+  const textura = new THREE.Texture(img);
+  textura.needsUpdate = true;
+  textura.anisotropy = 4;
+  return { textura, g: leerJgw(await mundo.async('string')), W: img.naturalWidth, H: img.naturalHeight, media: '#' + hex(r) + hex(v) + hex(b) };
 }
 
 // --- carga del zip de la zona ---
@@ -1245,6 +1524,9 @@ async function cargarZona(archivo) {
   const osm = await opcional('datos/osm.json', { elements: [] });
   zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242));
   zona.caja = calcularCaja(tramos, edif);
+  $('estado').textContent = 'Cargando la foto aérea…';
+  await new Promise(r => setTimeout(r, 0));
+  zona.foto = await cargarFoto(zip);
   construirMallaZona();
   $('btnNueva').disabled = false;
   mostrarMenu(`Zona cargada: ${tramos.length} tramos conducibles, ${edif.length} casas, ${zona.mundo.arboles.length} árboles.`);
