@@ -9,13 +9,32 @@ Carrera de coches por Huelva
 2. La zona se carga sola desde `zona-huelva.zip`, que va junto al juego (es la zona exportada por «Paseo por el relieve»). Si abres el HTML desde el disco y no la encuentra, elige el zip con el selector.
 3. Pulsa **Nueva carrera**: 3 vueltas a un circuito generado sobre las calles de la zona.
 
-En la carrera hay tráfico: coches que circulan por la derecha de las calles y que frenan al jugador como un muro, y peatones por las aceras. La ruta se marca con flechas amarillas pintadas en la calzada, solo el tramo hasta el siguiente checkpoint.
+En la carrera hay tráfico: coches que circulan por la derecha de las calles, frenan si tienen a alguien delante (y pitan si el jugador les corta el paso) y encienden los pilotos al frenar. Si chocas con uno, los dos rebotan según la velocidad y el ángulo del golpe; el de tráfico sale despedido, gira, se queda parado con las luces de emergencia y luego vuelve a su carril. Los peatones van por las aceras y se apartan de un salto si el coche se les echa encima. La ruta se marca con flechas amarillas pintadas en la calzada, solo las del tramo actual (del último checkpoint al siguiente) y desde el coche en adelante. El siguiente checkpoint es una columna de luz; los demás solo muestran un aro en el suelo, y arriba a la derecha una flecha indica hacia dónde queda.
 
-El suelo es la ortofoto aérea de la zona (la del paseo), con sus calles, campos y ríos. Encima se dibujan las calles con asfalto, aceras de losetas, bordillos, marcas viales, pasos de cebra, farolas y árboles en las avenidas, árboles en parques y praderas, agua (ríos, lagos, humedales y piscinas), quitamiedos en las curvas de las vías rápidas y rotondas con isleta. Si el coche sube a la acera da un bote, va más despacio y el volante responde menos. Las aceras y los bordillos se cortan donde entran en la calzada de otra calle (cruces, calzadas dobles), y la calzada y las aceras usan texturas de asfalto y adoquín (`texturas/`) generadas con Blender para este proyecto.
+El suelo es la ortofoto aérea de la zona (la del paseo), con sus calles, campos y ríos. Encima se dibujan las calles con asfalto, aceras de losetas, bordillos, rigolas, marcas viales, pasos de cebra, farolas y árboles en las avenidas, árboles en parques y praderas, agua (ríos, lagos, humedales y piscinas), quitamiedos de doble onda con postes y captafaros en las curvas de las vías rápidas y rotondas con isleta. Hay cielo con degradado y sol, y en el ordenador sombras de edificios, árboles y coches alrededor del jugador (en el móvil no, para que vaya fluido). Los edificios se dibujan por bloques de 300 m para que solo se pinten los que se ven. Las aceras y los bordillos se cortan donde entran en la calzada de otra calle (cruces, calzadas dobles), y la calzada y las aceras usan texturas de asfalto y adoquín (`texturas/`) generadas con Blender para este proyecto.
 
-Controles: flechas o WASD. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro. En el móvil, la ruleta de la pantalla gira el coche y los botones ▲ (acelerar) y ■ (frenar) están abajo. `M` abre el menú. Los límites de velocidad son solo informativos.
+### Choques
 
-El coche tiene caja automática de seis marchas. Arriba a la izquierda se ven la marcha y el tacómetro: la caja sube hacia las 6200 rpm y baja al acelerar a fondo con pocas vueltas o al frenar hasta casi parar. Para ir marcha atrás, para del todo y pisa el freno medio segundo; otro frenazo parado vuelve a marcha adelante. La física es la de un turismo de unos 150 CV: de 0 a 100 km/h en unos 8 s, frenada de 100 a 0 en unos 45 m y punta de unos 200 km/h. El volante responde menos a más velocidad, y en las curvas rápidas el coche pierde velocidad si el asfalto no aguanta el giro.
+El coche choca con tres círculos a lo largo de su eje (morro, centro y cola), así que entra por sitios estrechos y los golpes en una esquina lo hacen girar. Cada cosa responde a su manera: las casas y los árboles lo paran y rebota un poco; el quitamiedos lo desvía y lo deja seguir rozando, con chispas; el agua no deja pasar. Subir a la acera de lado y despacio da un bote y la conducción se pone dura (no pasa de 25 km/h); embestir el bordillo de frente y deprisa hace que rebote hacia la calzada. Los golpes fuertes sacuden la cámara y tiñen de rojo los bordes de la pantalla.
+
+### Conducción y sonido
+
+La carrocería cabecea al acelerar y frenar y se inclina en las curvas. Si el asfalto no aguanta el giro, el coche derrapa hacia fuera; al frenar fuerte, derrapar o salir a fondo, los neumáticos chirrían, echan humo y dejan marcas negras en el asfalto, y las luces de freno se encienden. Con la velocidad se abre el ángulo de la cámara.
+
+Todo el sonido se sintetiza en el navegador (Web Audio, sin archivos): el motor sigue las vueltas y el gas (con el corte de inyección y el bajón al cambiar de marcha), la admisión, la rodadura y el aire, el chirrido de las ruedas, el roce de chapa, los golpes (metálicos contra el quitamiedos y las farolas, de madera contra los árboles, con cristales contra otro coche), los botes en el bordillo, las bocinas del tráfico, la cuenta atrás y los checkpoints. El botón 🔊 (o la tecla `N`) lo quita y lo recuerda.
+
+### Controles
+
+Teclado: flechas o WASD. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro; la de dentro va a la altura de un asiento alto para ver bien la calle. `M` abre el menú.
+
+En el móvil, abajo a la izquierda hay una **ruleta**: se gira con el dedo alrededor del centro (140° a cada lado es el giro completo), vibra a cada muesca, un arco ámbar marca cuánto giras y al soltarla vuelve sola al centro. A la derecha están los pedales **GAS** y **FRENO**, grandes y de colores, y el botón **D/R** de la marcha. Los límites de velocidad son solo informativos.
+
+El coche tiene caja automática de seis marchas. Arriba a la izquierda se ven la marcha y el tacómetro: la caja sube hacia las 6200 rpm y baja al acelerar a fondo con pocas vueltas o al frenar hasta casi parar. Para ir **marcha atrás** hay dos maneras:
+
+- Parado, mantén el freno (↓ o **FRENO**): a las tres décimas entra la R y el freno empuja hacia atrás (y el acelerador frena). Para volver, pisa el acelerador: frena, y parado pone la marcha adelante.
+- Con el coche casi parado, toca **D/R** (o la tecla `R`): con la R así puesta, el acelerador va hacia atrás y el freno frena, como en un coche automático. Otro toque vuelve a la D.
+
+La física es la de un turismo de unos 150 CV: de 0 a 100 km/h en unos 8 s, frenada de 100 a 0 en unos 45 m y punta de unos 200 km/h. El volante responde menos a más velocidad.
 
 ## Instalar en el móvil
 
