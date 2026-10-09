@@ -1,0 +1,82 @@
+[
+  {
+    "id": "peaton-1",
+    "nombre": "Hombre barbudo",
+    "archivo": "modelos/peatones/peaton-1.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/blocky-characters",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 1.75
+  },
+  {
+    "id": "peaton-2",
+    "nombre": "Persona con camiseta roja",
+    "archivo": "modelos/peatones/peaton-2.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/blocky-characters",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 1.75
+  },
+  {
+    "id": "peaton-3",
+    "nombre": "Persona con top morado",
+    "archivo": "modelos/peatones/peaton-3.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/blocky-characters",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 1.75
+  },
+  {
+    "id": "peaton-4",
+    "nombre": "Persona con camiseta turquesa",
+    "archivo": "modelos/peatones/peaton-4.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/blocky-characters",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 1.75
+  },
+  {
+    "id": "peaton-5",
+    "nombre": "Hombre mayor con gafas",
+    "archivo": "modelos/peatones/peaton-5.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/blocky-characters",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 1.75
+  },
+  {
+    "id": "peaton-6",
+    "nombre": "Agente uniformado",
+    "archivo": "modelos/peatones/peaton-6.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/blocky-characters",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 1.75
+  },
+  {
+    "id": "peaton-7",
+    "nombre": "Persona con chaqueta roja",
+    "archivo": "modelos/peatones/peaton-7.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/blocky-characters",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 1.75
+  },
+  {
+    "id": "peaton-8",
+    "nombre": "Persona de traje",
+    "archivo": "modelos/peatones/peaton-8.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/blocky-characters",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 1.75
+  }
+]

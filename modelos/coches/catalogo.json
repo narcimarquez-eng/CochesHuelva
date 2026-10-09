@@ -1,0 +1,98 @@
+[
+  {
+    "id": "sedan",
+    "nombre": "Berlina",
+    "archivo": "modelos/coches/sedan.glb",
+    "autor": "Kenney (www.kenney.nl)",
+    "fuente": "https://kenney.nl/assets/car-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 2032,
+    "largo_m": 4.2,
+    "ancho_m": 2.471,
+    "alto_m": 2.141
+  },
+  {
+    "id": "hatch",
+    "nombre": "Hatchback",
+    "archivo": "modelos/coches/hatch.glb",
+    "autor": "Kenney (www.kenney.nl)",
+    "fuente": "https://kenney.nl/assets/car-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 2088,
+    "largo_m": 4.2,
+    "ancho_m": 1.916,
+    "alto_m": 1.621
+  },
+  {
+    "id": "deportivo",
+    "nombre": "Deportivo",
+    "archivo": "modelos/coches/deportivo.glb",
+    "autor": "Kenney (www.kenney.nl)",
+    "fuente": "https://kenney.nl/assets/car-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 2088,
+    "largo_m": 4.2,
+    "ancho_m": 2.141,
+    "alto_m": 1.812
+  },
+  {
+    "id": "suv",
+    "nombre": "SUV",
+    "archivo": "modelos/coches/suv.glb",
+    "autor": "Kenney (www.kenney.nl)",
+    "fuente": "https://kenney.nl/assets/car-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 2474,
+    "largo_m": 4.2,
+    "ancho_m": 2.333,
+    "alto_m": 2.022
+  },
+  {
+    "id": "suv-lujo",
+    "nombre": "SUV de lujo",
+    "archivo": "modelos/coches/suv-lujo.glb",
+    "autor": "Kenney (www.kenney.nl)",
+    "fuente": "https://kenney.nl/assets/car-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 2086,
+    "largo_m": 4.2,
+    "ancho_m": 2.211,
+    "alto_m": 1.916
+  },
+  {
+    "id": "taxi",
+    "nombre": "Taxi",
+    "archivo": "modelos/coches/taxi.glb",
+    "autor": "Kenney (www.kenney.nl)",
+    "fuente": "https://kenney.nl/assets/car-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 2072,
+    "largo_m": 4.2,
+    "ancho_m": 2.291,
+    "alto_m": 2.291
+  },
+  {
+    "id": "policia",
+    "nombre": "Patrulla",
+    "archivo": "modelos/coches/policia.glb",
+    "autor": "Kenney (www.kenney.nl)",
+    "fuente": "https://kenney.nl/assets/car-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 2304,
+    "largo_m": 4.2,
+    "ancho_m": 2.032,
+    "alto_m": 1.761
+  },
+  {
+    "id": "furgoneta",
+    "nombre": "Furgoneta",
+    "archivo": "modelos/coches/furgoneta.glb",
+    "autor": "Kenney (www.kenney.nl)",
+    "fuente": "https://kenney.nl/assets/car-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 2082,
+    "largo_m": 4.2,
+    "ancho_m": 2.291,
+    "alto_m": 2.062
+  }
+]

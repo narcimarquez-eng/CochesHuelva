@@ -1,0 +1,15 @@
+{
+  "name": "Carreras por Huelva",
+  "short_name": "Carreras",
+  "description": "Carrera de coches por Huelva",
+  "lang": "es",
+  "start_url": "./carreras_huelva.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a141e",
+  "theme_color": "#1f2a36",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

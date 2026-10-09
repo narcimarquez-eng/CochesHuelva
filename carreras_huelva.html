@@ -1,0 +1,3242 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Carreras por Huelva · prototipo</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f2a36">
+<style>
+  :root{--panel:rgba(12,18,26,.62);--borde:rgba(255,255,255,.22);--ambar:#f5b041}
+  html,body{margin:0;height:100%;overflow:hidden;background:#c4def0;font-family:system-ui,-apple-system,sans-serif;user-select:none;-webkit-user-select:none;touch-action:none}
+  .panel{background:var(--panel);border:1px solid var(--borde);border-radius:14px;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+  #hud{position:fixed;left:10px;top:10px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;line-height:1.3;padding:8px 12px;z-index:4}
+  #vel{font-size:46px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+  #vel small{font-size:15px;font-weight:500;margin-left:4px;letter-spacing:0;opacity:.85}
+  #motor{display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 6px}
+  #marcha{font-size:22px;font-weight:800;min-width:30px;text-align:center;background:rgba(255,255,255,.14);border-radius:7px;padding:0 6px}
+  #marcha.cambia{background:var(--ambar);color:#1b1b1b}
+  #marcha.atras{background:#e74c3c;color:#fff}
+  #rpm{position:relative;width:140px;height:10px;border-radius:5px;background:rgba(255,255,255,.15);overflow:hidden}
+  #rpm::after{content:"";position:absolute;left:88%;top:0;bottom:0;width:2px;background:#e74c3c}
+  #rpmBarra{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#27ae60,#2ecc71)}
+  #rpmBarra.alto{background:linear-gradient(90deg,#2ecc71,#f1c40f)}
+  #rpmBarra.corte{background:linear-gradient(90deg,#f1c40f,#e74c3c)}
+  #rpmTexto{min-width:66px;opacity:.85;font-variant-numeric:tabular-nums}
+  #limite{font-size:13px;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,.12);display:inline-block;max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #limite.excede{background:#c0392b}
+  #fuera{font-size:13px;color:#ffd166;min-height:17px}
+  #carrera{position:fixed;right:10px;top:62px;color:#fff;text-align:right;text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;line-height:1.45;font-size:15px;padding:8px 12px;z-index:4;font-variant-numeric:tabular-nums}
+  #carrera:empty{display:none}
+  #flechaCp{display:inline-block;color:var(--ambar);font-size:18px;margin-left:6px;transition:transform .08s linear}
+  #aviso{position:fixed;left:0;right:0;top:30%;text-align:center;color:#fff;font-size:48px;font-weight:800;text-shadow:0 3px 10px rgba(0,0,0,.85);pointer-events:none;z-index:6}
+  #aviso.pop{animation:pop .35s ease-out}
+  @keyframes pop{0%{transform:scale(1.5);opacity:0}60%{transform:scale(.95);opacity:1}100%{transform:scale(1)}}
+  #destello{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,rgba(255,255,255,0) 45%,rgba(200,30,20,.55) 100%);opacity:0;z-index:3}
+  #pantalla{position:fixed;inset:0;background:rgba(10,20,30,.82);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;text-align:center;box-sizing:border-box;z-index:10;overflow:auto}
+  #pantalla h1{margin:0;font-size:28px}
+  #pantalla p{margin:0;max-width:460px;line-height:1.4;opacity:.9}
+  button{font:inherit;font-size:17px;padding:12px 20px;border-radius:10px;border:0;background:var(--ambar);color:#1b1b1b;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.45}
+  #arriba{position:fixed;right:10px;top:10px;display:flex;gap:8px;z-index:5}
+  #arriba button{padding:8px 13px;font-size:14px;background:rgba(12,18,26,.7);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:10px}
+  #salpicadero{display:none;position:fixed;left:0;right:0;bottom:0;height:17%;pointer-events:none;border-radius:50% 50% 0 0/22% 22% 0 0;background:linear-gradient(180deg,rgba(18,20,24,0) 0%,rgba(30,33,39,.94) 30%,#15171b 100%);box-shadow:inset 0 10px 18px rgba(0,0,0,.5)}
+  body.dentro #salpicadero{display:block}
+  #controles{position:fixed;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;justify-content:space-between;align-items:flex-end;padding:0 14px;pointer-events:none;z-index:5}
+  #controles .grupo{display:flex;gap:12px;align-items:flex-end;pointer-events:auto}
+  .pedal{width:88px;height:116px;padding:0;border-radius:22px;border:3px solid rgba(255,255,255,.92);color:#fff;font-size:14px;font-weight:800;letter-spacing:.6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;box-shadow:0 5px 16px rgba(0,0,0,.55);touch-action:none;text-shadow:0 1px 2px rgba(0,0,0,.5);transition:transform .06s,filter .06s}
+  .pedal svg{width:38px;height:38px}
+  #btnGas{background:linear-gradient(180deg,rgba(46,170,90,.92),rgba(22,110,55,.92))}
+  #btnFreno{height:96px;background:linear-gradient(180deg,rgba(215,60,50,.92),rgba(140,25,20,.92))}
+  .pedal.pulsado{transform:scale(.93);filter:brightness(1.35)}
+  #btnSentido{width:62px;height:62px;padding:0;border-radius:16px;font-size:26px;font-weight:900;background:rgba(12,18,26,.82);color:#fff;border:3px solid rgba(255,255,255,.92);box-shadow:0 5px 16px rgba(0,0,0,.55);touch-action:none;line-height:1}
+  #btnSentido small{display:block;font-size:10px;font-weight:700;letter-spacing:.5px;opacity:.85}
+  #btnSentido.atras{background:#d63a2c}
+  #ruleta{width:176px;height:176px;pointer-events:auto;touch-action:none;cursor:grab}
+  #ruleta svg{width:100%;height:100%;display:block;filter:drop-shadow(0 5px 12px rgba(0,0,0,.6))}
+  #estado{min-height:20px;color:#ffd166}
+  #coches{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:620px}
+  #coches button{font-size:15px;padding:8px 14px;background:#4a5a6a;color:#fff}
+  #coches button.activo{background:var(--ambar);color:#1b1b1b}
+  @media (max-height:520px){#ruleta{width:140px;height:140px}.pedal{width:74px;height:94px}#btnFreno{height:80px}#btnSentido{width:54px;height:54px}#vel{font-size:36px}}
+</style>
+</head>
+<body>
+<div id="hud" class="panel">
+  <div id="vel">0<small>km/h</small></div>
+  <div id="motor"><span id="marcha">1</span><div id="rpm"><div id="rpmBarra"></div></div><span id="rpmTexto">800 rpm</span></div>
+  <div id="limite">Límite: —</div>
+  <div id="fuera"></div>
+</div>
+<div id="carrera" class="panel"></div>
+<div id="aviso"></div>
+<div id="destello"></div>
+<div id="salpicadero"></div>
+<div id="arriba">
+  <button id="btnSonido" title="Activar o quitar el sonido (N)">🔊</button>
+  <button id="btnCamara" title="Cambiar de cámara (C)">Cámara</button>
+  <button id="btnMenu" title="Menú (M)">Menú</button>
+</div>
+<div id="controles">
+  <div id="ruleta" title="Gira la ruleta con el dedo para girar el coche">
+    <svg viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="48" fill="rgba(12,18,26,.72)" stroke="rgba(255,255,255,.92)" stroke-width="2.5"/>
+      <path id="ruletaArco" d="" fill="none" stroke="#f5b041" stroke-width="5" stroke-linecap="round"/>
+      <g id="ruletaGiro">
+        <circle cx="50" cy="50" r="38" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="9" stroke-dasharray="4.97 4.97"/>
+        <circle cx="50" cy="50" r="33" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1"/>
+        <path d="M50 12 L50 24 M88 50 L76 50 M50 88 L50 76 M12 50 L24 50" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="50" cy="13" r="6.5" fill="#f5b041" stroke="#1b1b1b" stroke-width="1.5"/>
+      </g>
+      <circle cx="50" cy="50" r="17" fill="rgba(30,36,46,.95)" stroke="rgba(255,255,255,.6)" stroke-width="1.5"/>
+      <path d="M38 50 l6 -5 v10 z M62 50 l-6 -5 v10 z" fill="#fff"/>
+    </svg>
+  </div>
+  <div class="grupo">
+    <button id="btnSentido" title="Marcha adelante (D) o atrás (R). Tecla R">D<small>MARCHA</small></button>
+    <button class="pedal" id="btnFreno" data-c="freno"><svg viewBox="0 0 40 40"><rect x="8" y="8" width="24" height="24" rx="5" fill="#fff"/></svg>FRENO</button>
+    <button class="pedal" id="btnGas" data-c="acel"><svg viewBox="0 0 40 40"><path d="M20 5 L35 31 H5 Z" fill="#fff"/></svg>GAS</button>
+  </div>
+</div>
+<div id="pantalla">
+  <h1>Carreras por Huelva</h1>
+  <p>Prototipo. Carga el zip de la zona (el que exporta el paseo). Los límites de velocidad son solo informativos: puedes ir más deprisa.</p>
+  <input type="file" id="archivo" accept=".zip" style="color:#fff">
+  <div id="estado"></div>
+  <div id="coches"></div>
+  <button id="btnNueva" disabled>Nueva carrera</button>
+  <p style="font-size:13px;opacity:.75">Teclas: flechas o WASD. Parado, mantén ↓ para ir marcha atrás y ↑ para volver adelante (o R). C cambia de cámara, N quita el sonido y M abre el menú.</p>
+  <p style="font-size:12px;opacity:.6">Datos: © colaboradores de OpenStreetMap (ODbL) · Dirección General del Catastro</p>
+  <p style="font-size:12px;opacity:.6">Modelos: CarConcept © Eric Chadwick (Darmstadt Graphics Group), CC BY 4.0 · ToyCar © Guido Odendahl y Eric Chadwick, CC0 · Galería © Kenney (kenney.nl), CC0</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="vendor/GLTFLoader.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+/*CORE-START*/
+// ---------- Lógica pura (sin Three.js): proyección, calles, grafo, rutas, colisiones ----------
+const ORIGEN = { lat: 37.2599535, lon: -6.9401955 };   // centro de la zona (LEEME.txt)
+const K_LAT = 110540;
+const K_LON = 111320 * Math.cos(ORIGEN.lat * Math.PI / 180);
+const TAM_CELDA = 25;
+const RADIO_COCHE = 1.5;
+const CONDUCIBLES = new Set(['motorway','motorway_link','trunk','trunk_link','primary','primary_link',
+  'secondary','secondary_link','tertiary','tertiary_link','unclassified','residential','living_street','service']);
+const ANCHO_TIPO = { motorway: 11, trunk: 10, primary: 9, secondary: 8, tertiary: 7, unclassified: 6, residential: 6, living_street: 5, service: 4 };
+const VEL_TIPO = { motorway: 120, trunk: 90, primary: 50, secondary: 50, tertiary: 50, unclassified: 40, residential: 30, living_street: 20, service: 20 };
+
+function proyectar(lon, lat) { return [(lon - ORIGEN.lon) * K_LON, -(lat - ORIGEN.lat) * K_LAT]; } // [x este, z sur]
+function tipoBase(t) { return t.replace('_link', ''); }
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function distSeg2(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz;
+  let t = L > 0 ? ((px - ax) * dx + (pz - az) * dz) / L : 0;
+  t = Math.max(0, Math.min(1, t));
+  const qx = ax + dx * t - px, qz = az + dz * t - pz;
+  return qx * qx + qz * qz;
+}
+
+function enPoligono(pts, x, z) {
+  let dentro = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][0], zi = pts[i][1], xj = pts[j][0], zj = pts[j][1];
+    if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) dentro = !dentro;
+  }
+  return dentro;
+}
+
+// --- calles ---
+function parsearCalles(geo) {
+  const tramos = [];
+  for (const f of geo.features) {
+    const g = f.geometry, p = f.properties || {};
+    if (!g || g.type !== 'LineString' || !CONDUCIBLES.has(p.tipo)) continue;
+    const bt = tipoBase(p.tipo);
+    const ancho = typeof p.ancho_calzada_m === 'number' ? p.ancho_calzada_m : (ANCHO_TIPO[bt] || 6);
+    let vel = parseInt(String(p['osm:maxspeed'] ?? ''), 10);
+    if (!(vel > 0)) vel = VEL_TIPO[bt] || 30;
+    tramos.push({
+      id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho, velocidad: vel,
+      acera: typeof p.ancho_acera_m === 'number' ? p.ancho_acera_m : 0,   // ancho de cada acera (0 si no hay)
+      dib: p.dibujada_como || '',                                         // calle con aceras, adoquín, camino de tierra…
+      unSentido: !!p.sentido_unico,
+      pts: g.coordinates.map(c => proyectar(c[0], c[1])),
+    });
+  }
+  return tramos;
+}
+
+// --- grafo: nodos = extremos de tramos; aristas respetan sentido único ---
+function construirGrafo(tramos) {
+  const indice = new Map(), nodos = [];
+  const nodoDe = p => {
+    const k = p[0].toFixed(2) + '|' + p[1].toFixed(2);
+    let i = indice.get(k);
+    if (i === undefined) { i = nodos.length; indice.set(k, i); nodos.push({ x: p[0], z: p[1], adj: [], comp: false }); }
+    return i;
+  };
+  tramos.forEach((t, s) => {
+    t.a = nodoDe(t.pts[0]);
+    t.b = nodoDe(t.pts[t.pts.length - 1]);
+    let len = 0;
+    for (let k = 1; k < t.pts.length; k++) len += Math.hypot(t.pts[k][0] - t.pts[k - 1][0], t.pts[k][1] - t.pts[k - 1][1]);
+    t.len = len;
+    nodos[t.a].adj.push({ to: t.b, seg: s, fwd: true, len });
+    if (!t.unSentido) nodos[t.b].adj.push({ to: t.a, seg: s, fwd: false, len });
+  });
+  // componente conectada más grande (ignorando sentido)
+  const padre = nodos.map((_, i) => i);
+  const raiz = i => { while (padre[i] !== i) { padre[i] = padre[padre[i]]; i = padre[i]; } return i; };
+  for (const t of tramos) { const ra = raiz(t.a), rb = raiz(t.b); padre[ra] = rb; }
+  const tam = new Map();
+  for (let i = 0; i < nodos.length; i++) { const r = raiz(i); tam.set(r, (tam.get(r) || 0) + 1); }
+  let mayor = -1, mejor = -1;
+  for (const [r, n] of tam) if (n > mejor) { mejor = n; mayor = r; }
+  for (let i = 0; i < nodos.length; i++) nodos[i].comp = raiz(i) === mayor;
+  return { nodos, tramos };
+}
+
+// --- Dijkstra con montículo binario ---
+function heapArriba(h, i) {
+  while (i > 0) { const p = (i - 1) >> 1; if (h[p][0] <= h[i][0]) break; [h[p], h[i]] = [h[i], h[p]]; i = p; }
+}
+function heapAbajo(h, i) {
+  for (;;) {
+    const l = 2 * i + 1, r = l + 1; let m = i;
+    if (l < h.length && h[l][0] < h[m][0]) m = l;
+    if (r < h.length && h[r][0] < h[m][0]) m = r;
+    if (m === i) break;
+    [h[m], h[i]] = [h[i], h[m]]; i = m;
+  }
+}
+function dijkstra(G, origen, destino) {
+  const n = G.nodos.length;
+  const dist = new Float64Array(n).fill(Infinity);
+  const prev = new Int32Array(n).fill(-1);
+  const prevArista = new Array(n);
+  dist[origen] = 0;
+  const heap = [[0, origen]];
+  while (heap.length) {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) { heap[0] = last; heapAbajo(heap, 0); }
+    const d = top[0], u = top[1];
+    if (d > dist[u]) continue;
+    if (u === destino) break;
+    for (const e of G.nodos[u].adj) {
+      const nd = d + e.len;
+      if (nd < dist[e.to]) {
+        dist[e.to] = nd; prev[e.to] = u; prevArista[e.to] = e;
+        heap.push([nd, e.to]); heapArriba(heap, heap.length - 1);
+      }
+    }
+  }
+  if (!isFinite(dist[destino])) return null;
+  const camino = [];
+  for (let v = destino; v !== origen; v = prev[v]) camino.push(prevArista[v]);
+  camino.reverse();
+  return { camino, longitud: dist[destino] };
+}
+
+function polilinea(G, camino) {
+  const out = [];
+  for (const e of camino) {
+    const pts = G.tramos[e.seg].pts;
+    const src = e.fwd ? pts : pts.slice().reverse();
+    for (let k = out.length ? 1 : 0; k < src.length; k++) out.push(src[k]);
+  }
+  return out;
+}
+
+// --- circuito: 3 checkpoints alrededor de un punto de salida y vuelta al origen ---
+// libre(x, z): opcional; si se da, el inicio y los 6 m de frente tienen que estar libres (ni casas, ni agua, ni árboles)
+function planearVuelta(G, rng, longitudMin, longitudMax, libre) {
+  const comp = [];
+  for (let i = 0; i < G.nodos.length; i++) if (G.nodos[i].comp && G.nodos[i].adj.length) comp.push(i);
+  if (comp.length < 10) return null;
+  const masCercano = (x, z) => {
+    let mejor = comp[0], md = Infinity;
+    for (const i of comp) { const n = G.nodos[i]; const d = (n.x - x) ** 2 + (n.z - z) ** 2; if (d < md) { md = d; mejor = i; } }
+    return mejor;
+  };
+  for (let intento = 0; intento < 80; intento++) {
+    const s = comp[Math.floor(rng() * comp.length)];
+    const S = G.nodos[s];
+    const R = 200 + rng() * 300;
+    const a0 = rng() * Math.PI * 2;
+    const nodos = [s];
+    for (let k = 0; k < 3; k++) {
+      const a = a0 + k * 2 * Math.PI / 3 + (rng() - 0.5) * 0.5;
+      const r = R * (0.8 + rng() * 0.4);
+      nodos.push(masCercano(S.x + Math.cos(a) * r, S.z + Math.sin(a) * r));
+    }
+    nodos.push(s);
+    let valido = true;
+    for (let k = 1; k < nodos.length; k++) if (nodos[k] === nodos[k - 1]) { valido = false; break; }
+    if (!valido) continue;
+    const piernas = [];
+    let longitud = 0;
+    for (let k = 0; k < nodos.length - 1 && valido; k++) {
+      const r = dijkstra(G, nodos[k], nodos[k + 1]);
+      if (!r) valido = false; else { piernas.push(r); longitud += r.longitud; }
+    }
+    if (!valido || longitud < longitudMin || longitud > longitudMax) continue;
+    const ruta = [];
+    piernas.forEach((p, idx) => {
+      const pl = polilinea(G, p.camino);
+      for (let k = idx ? 1 : 0; k < pl.length; k++) ruta.push(pl[k]);
+    });
+    // rumbo inicial: el de la calle, hacia el primer punto de la ruta a más de 3 m (un punto más lejos se sale de la curva)
+    let h = 0;
+    for (const p of ruta) {
+      const dx = p[0] - S.x, dz = p[1] - S.z;
+      if (Math.hypot(dx, dz) > 3) { h = Math.atan2(dx, dz); break; }
+    }
+    if (libre && (!libre(S.x, S.z) || !libre(S.x + Math.sin(h) * 3, S.z + Math.cos(h) * 3) || !libre(S.x + Math.sin(h) * 6, S.z + Math.cos(h) * 6))) continue;
+    return {
+      checkpoints: nodos.slice(1).map(i => ({ x: G.nodos[i].x, z: G.nodos[i].z })), // [A, B, C, meta]
+      inicio: { x: S.x, z: S.z, h },
+      ruta, longitud,
+      cortes: piernas.map((_, k) => piernas.slice(0, k + 1).reduce((a, p) => a + p.longitud, 0)),   // metros de ruta hasta cada checkpoint
+    };
+  }
+  return null;
+}
+
+// --- casas (edificios) ---
+function colorValido(c) {
+  return typeof c === 'string' && /^#?[0-9a-f]{6}$/i.test(c) ? (c[0] === '#' ? c : '#' + c) : null;
+}
+function parsearCasas(geo) {
+  const edif = [];
+  for (const f of geo.features) {
+    const g = f.geometry;
+    if (!g || g.type !== 'Polygon') continue;
+    const pts = g.coordinates[0].map(c => proyectar(c[0], c[1]));
+    if (pts.length > 1) {
+      const a = pts[0], b = pts[pts.length - 1];
+      if (a[0] === b[0] && a[1] === b[1]) pts.pop();
+    }
+    if (pts.length < 3) continue;
+    const p = f.properties || {};
+    let h = Number(p.altura_aprox_m);
+    if (!(h > 0)) h = (Number(p.plantas) || 2) * 3;
+    edif.push({ pts, h: Math.min(h, 400), pared: colorValido(p.color_pared), zoc: colorValido(p.color_zocalo), carp: colorValido(p.color_carpinteria), tejado: p.tejado || '' });
+  }
+  return edif;
+}
+
+// --- fachadas: tipo de cada pared, puerta y colores (misma lógica que el paseo) ---
+const PAL_FACHADA = {
+  pared: [['#f6f4ee',30],['#f3f0e8',22],['#f8f6f1',12],['#efe9dc',8],['#ece3cf',8],['#e9d7ab',6],['#e4c47f',8],['#d9b067',6]],
+  zocalo: [['#8b867c',20],['#6c6963',14],['#8f3e2c',14],['#a8783e',10],['#c4a265',8],['#4b5058',8],['#a59f92',14],['#3f5168',6],['#2f2f2f',6]],
+  carpinteria: [['#2e4a39',22],['#5b3b26',22],['#7c512e',12],['#ece9e2',16],['#262626',12],['#5a2523',6],['#41627a',5],['#8a8f88',5]],
+  teja: ['#b1603b', '#a85a37', '#c2774c', '#9c5638'],
+  azotea: ['#e6e2d8', '#d9d4c8', '#cfc8bb'],
+};
+function hash2(i, j, s) {
+  let h = (Math.imul(i | 0, 374761393) + Math.imul(j | 0, 668265263) + Math.imul(s | 0, 982451653)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function elegirPonderado(arr, r) {
+  let t = 0;
+  for (const a of arr) t += a[1];
+  let x = r * t;
+  for (const a of arr) { x -= a[1]; if (x <= 0) return a[0]; }
+  return arr[0][0];
+}
+function hexA01(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+}
+function aHex(c) { return '#' + c.map(v => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, '0')).join(''); }
+
+function construirRejillaCalles(tramos) {
+  const celdas = new Map();
+  for (const t of tramos) for (let k = 0; k < t.pts.length - 1; k++) {
+    const [ax, az] = t.pts[k], [bx, bz] = t.pts[k + 1];
+    for (let cx = Math.floor(Math.min(ax, bx) / TAM_CELDA); cx <= Math.floor(Math.max(ax, bx) / TAM_CELDA); cx++)
+      for (let cz = Math.floor(Math.min(az, bz) / TAM_CELDA); cz <= Math.floor(Math.max(az, bz) / TAM_CELDA); cz++) {
+        const clave = cx + ',' + cz;
+        let arr = celdas.get(clave);
+        if (!arr) { arr = []; celdas.set(clave, arr); }
+        arr.push(ax, az, bx, bz);
+      }
+  }
+  return celdas;
+}
+function cercaDeCalle(celdas, x, z, R) {
+  const R2 = R * R;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      const arr = celdas.get(cx + ',' + cz);
+      if (!arr) continue;
+      for (let i = 0; i < arr.length; i += 4) if (distSeg2(x, z, arr[i], arr[i + 1], arr[i + 2], arr[i + 3]) < R2) return true;
+    }
+  return false;
+}
+function dentroDeOtraCasa(edif, rejilla, x, z, self) {
+  for (const j of rejilla.get('*') || []) if (j !== self && enPoligono(edif[j].pts, x, z)) return true;
+  const lista = rejilla.get(Math.floor(x / TAM_CELDA) + ',' + Math.floor(z / TAM_CELDA));
+  if (!lista) return false;
+  for (const j of lista) if (j !== self && enPoligono(edif[j].pts, x, z)) return true;
+  return false;
+}
+
+// Para cada casa: tipo de cada pared (0 medianera, 1 patio o campo, 2 calle), puerta y colores
+function prepararCasas(edif, rejilla, tramos) {
+  const calles = construirRejillaCalles(tramos);
+  edif.forEach((e, idx) => {
+    const r = e.pts, n = r.length;
+    e.lados = [];
+    let u = 0, mayor = -1, mayorL = 0;
+    for (let i = 0; i < n; i++) {
+      const p = r[i], q = r[(i + 1) % n];
+      const dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
+      let nx = l ? dz / l : 0, nz = l ? -dx / l : 0;
+      const mx = (p[0] + q[0]) / 2, mz = (p[1] + q[1]) / 2;
+      if (enPoligono(r, mx + nx * 0.5, mz + nz * 0.5)) { nx = -nx; nz = -nz; }   // normal hacia fuera
+      let tipo = 0;
+      if (l >= 0.9) {
+        let dentro = 0;
+        for (const fr of [0.2, 0.5, 0.8]) if (dentroDeOtraCasa(edif, rejilla, p[0] + dx * fr + nx * 0.7, p[1] + dz * fr + nz * 0.7, idx)) dentro++;
+        if (dentro < 2) tipo = cercaDeCalle(calles, mx + nx * 3, mz + nz * 3, 8) ? 2 : 1;
+      }
+      if (l > mayorL) { mayorL = l; mayor = i; }
+      e.lados.push({ u0: u, len: l, nx, nz, tipo });
+      u += l;
+    }
+    // puerta: en la pared de calle más larga; si no hay, en la más larga
+    let de = -1, mejorSc = 0;
+    e.lados.forEach((s, i) => {
+      if (s.tipo === 0) return;
+      const sc = (s.tipo === 2 ? 1 : 0.25) * Math.min(s.len, 22);
+      if (sc > mejorSc) { mejorSc = sc; de = i; }
+    });
+    if (de < 0) de = mayor;
+    e.puertaLado = -1; e.puertaU = -1e4;
+    if (de >= 0 && e.lados[de].len >= 1.3) {
+      const s = e.lados[de], sp = s.tipo === 2 ? 3.3 : 5.0;
+      const nC = Math.max(1, Math.floor(s.len / sp + 0.25)), w = s.len / nC;
+      const ci = Math.min(nC - 1, Math.floor(hash2(idx, 3, 17) * nC));
+      e.puertaLado = de; e.puertaU = s.u0 + (ci + 0.5) * w;
+    }
+    // colores: los del Catastro si los hay; si no, de la paleta (como el paseo)
+    e.off = hash2(idx, 9, 1) * 997;
+    e.ws = e.lados.map((s, i) => Math.floor(hash2(idx, i, 41) * 2000));
+    const s1 = hash2(idx, 1, 31), s2 = hash2(idx, 2, 31), s3 = hash2(idx, 3, 31), s4 = hash2(idx, 4, 31);
+    e.zh = 0.65 + 0.55 * s3;
+    if (e.pared) {
+      e.colPared = e.pared;
+      if (e.zoc) e.colZoc = e.zoc;
+      else { e.colZoc = aHex(hexA01(e.pared).map((v, k) => v * 0.8 * 0.75 + [0.42, 0.42, 0.4][k] * 0.25)); e.zh = 0.35; }
+      e.colCarp = e.carp || elegirPonderado(PAL_FACHADA.carpinteria, s4);
+    } else {
+      e.colPared = elegirPonderado(PAL_FACHADA.pared, s1);
+      e.colZoc = elegirPonderado(PAL_FACHADA.zocalo, s2);
+      e.colCarp = elegirPonderado(PAL_FACHADA.carpinteria, s4);
+    }
+    const pc = hexA01(e.colPared);
+    e.rec = pc[0] > 0.8 && pc[2] > 0.75 && hash2(idx, 5, 31) < 0.3 ? 1 : 0;   // recercados en paredes claras
+    e.teja = e.tejado === 'teja árabe';
+    e.colTecho = e.teja ? PAL_FACHADA.teja[Math.floor(s2 * 4) % 4] : PAL_FACHADA.azotea[Math.floor(s3 * 3) % 3];
+  });
+}
+
+// --- rejilla espacial para colisiones ---
+// Los polígonos enormes (la ría, un lago grande) no se reparten por celdas: si no, ocupan miles de ellas.
+// Se guardan aparte, en la clave '*', y se miran siempre.
+function construirRejilla(edif) {
+  const celdas = new Map(), grandes = [];
+  edif.forEach((e, i) => {
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of e.pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+    e.bbox = [x0, z0, x1, z1];
+    if (x1 - x0 > 400 || z1 - z0 > 400) { grandes.push(i); return; }
+    for (let cx = Math.floor(x0 / TAM_CELDA); cx <= Math.floor(x1 / TAM_CELDA); cx++)
+      for (let cz = Math.floor(z0 / TAM_CELDA); cz <= Math.floor(z1 / TAM_CELDA); cz++) {
+        const k = cx + ',' + cz;
+        let arr = celdas.get(k);
+        if (!arr) { arr = []; celdas.set(k, arr); }
+        arr.push(i);
+      }
+  });
+  if (grandes.length) celdas.set('*', grandes);
+  return celdas;
+}
+
+function chocaPoligono(e, x, z, R) {
+  const b = e.bbox;
+  if (x + R < b[0] || x - R > b[2] || z + R < b[1] || z - R > b[3]) return false;
+  if (enPoligono(e.pts, x, z)) return true;
+  const pts = e.pts, R2 = R * R;
+  for (let k = 0, m = pts.length - 1; k < pts.length; m = k++) {
+    if (distSeg2(x, z, pts[m][0], pts[m][1], pts[k][0], pts[k][1]) < R2) return true;
+  }
+  return false;
+}
+function choca(edif, rejilla, x, z, R) {
+  for (const i of rejilla.get('*') || []) if (chocaPoligono(edif[i], x, z, R)) return true;
+  const c0x = Math.floor((x - R) / TAM_CELDA), c1x = Math.floor((x + R) / TAM_CELDA);
+  const c0z = Math.floor((z - R) / TAM_CELDA), c1z = Math.floor((z + R) / TAM_CELDA);
+  const vistos = new Set();
+  for (let cx = c0x; cx <= c1x; cx++) for (let cz = c0z; cz <= c1z; cz++) {
+    const lista = rejilla.get(cx + ',' + cz);
+    if (!lista) continue;
+    for (const i of lista) {
+      if (vistos.has(i)) continue;
+      vistos.add(i);
+      if (chocaPoligono(edif[i], x, z, R)) return true;
+    }
+  }
+  return false;
+}
+
+// distancia² de un punto a un tramo de calle (para saber en qué calle estás)
+function distanciaTramo2(tramo, x, z) {
+  let best = Infinity; const p = tramo.pts;
+  for (let k = 0; k < p.length - 1; k++) {
+    const d = distSeg2(x, z, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+// --- mundo: suelo por usos, agua, árboles, quitamiedos y rotondas (mapa.geojson y OpenStreetMap) ---
+const COLOR_SUELO = {   // color del suelo según la capa de mapa.geojson
+  'parque o jardín': '#4f8a3c', 'pradera': '#86b35a', 'cultivo': '#c4b47a', 'zona urbana': '#b5ae9c',
+  'agua': '#3c7fbd', 'cauce': '#3c7fbd', 'humedal': '#5d8f7a',
+};
+const SUELO_BASE = '#8ca36c';   // terreno sin capa: campo abierto
+const TIPOS_CON_QUITAMIEDOS = new Set(['primary', 'primary_link', 'secondary', 'secondary_link', 'trunk', 'trunk_link',
+  'motorway', 'motorway_link']);
+
+function quitarCierre(pts) {
+  if (pts.length > 3 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop();
+  return pts;
+}
+function areaAnillo(r) {   // área con signo (fórmula del cordón)
+  let a = 0;
+  for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; }
+  return a / 2;
+}
+function longitudPts(pts) {
+  let L = 0;
+  for (let k = 1; k < pts.length; k++) L += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+  return L;
+}
+// Franja de anchura w alrededor de una polilínea (para los ríos)
+function bufferLinea(pts, w) {
+  const izq = [], der = [], n = pts.length, h = w / 2;
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1;
+    const nx = -dz / l * h, nz = dx / l * h;
+    izq.push([pts[i][0] + nx, pts[i][1] + nz]);
+    der.push([pts[i][0] - nx, pts[i][1] - nz]);
+  }
+  return izq.concat(der.reverse());
+}
+// Normal izquierda unitaria en el vértice k (media de los dos tramos que lo rodean)
+function normalEn(p, k) {
+  const n = p.length;
+  let nx = 0, nz = 0;
+  if (k > 0) { const dx = p[k][0] - p[k - 1][0], dz = p[k][1] - p[k - 1][1], l = Math.hypot(dx, dz) || 1; nx += -dz / l; nz += dx / l; }
+  if (k < n - 1) { const dx = p[k + 1][0] - p[k][0], dz = p[k + 1][1] - p[k][1], l = Math.hypot(dx, dz) || 1; nx += -dz / l; nz += dx / l; }
+  const l = Math.hypot(nx, nz) || 1;
+  return [nx / l, nz / l];
+}
+// Giro (rad) en el vértice i: positivo si la calle gira hacia su izquierda
+function giroEn(p, i) {
+  const ax = p[i][0] - p[i - 1][0], az = p[i][1] - p[i - 1][1];
+  const bx = p[i + 1][0] - p[i][0], bz = p[i + 1][1] - p[i][1];
+  return Math.atan2(ax * bz - az * bx, ax * bx + az * bz);
+}
+// Ajuste de círculo (método de Kasa): centro y radio de unos puntos
+function ajustarCirculo(pts) {
+  const n = pts.length;
+  let mx = 0, mz = 0;
+  for (const p of pts) { mx += p[0]; mz += p[1]; }
+  mx /= n; mz /= n;
+  let suu = 0, svv = 0, suv = 0, suw = 0, svw = 0, sw = 0;
+  for (const p of pts) {
+    const u = p[0] - mx, v = p[1] - mz, w = u * u + v * v;
+    suu += u * u; svv += v * v; suv += u * v; suw += u * w; svw += v * w; sw += w;
+  }
+  const det = suu * svv - suv * suv;
+  if (Math.abs(det) < 1e-9) return null;
+  const a = 0.5 * (svv * suw - suv * svw) / det;
+  const b = 0.5 * (suu * svw - suv * suw) / det;
+  return { cx: a + mx, cz: b + mz, r: Math.sqrt(a * a + b * b + sw / n) };
+}
+// Agrupa los arcos de rotonda (ways de OSM) que pertenecen a la misma rotonda
+function agruparRotondas(arcos) {
+  const grupos = [];
+  for (const pts of arcos) {
+    const c = ajustarCirculo(pts);
+    if (!c || !(c.r >= 4 && c.r <= 30)) continue;
+    let g = grupos.find(g => Math.hypot(g.cx - c.cx, g.cz - c.cz) < 12 && Math.abs(g.r - c.r) < 6);
+    if (!g) { g = { cx: c.cx, cz: c.cz, r: c.r, n: 0 }; grupos.push(g); }
+    g.cx = (g.cx * g.n + c.cx) / (g.n + 1); g.cz = (g.cz * g.n + c.cz) / (g.n + 1); g.r = (g.r * g.n + c.r) / (g.n + 1); g.n++;
+  }
+  return grupos;
+}
+function extraerOSM(osm) {
+  const piscinas = [], arcos = [];
+  for (const e of (osm.elements || [])) {
+    if (e.type !== 'way' || !e.geometry) continue;
+    const t = e.tags || {};
+    const pts = quitarCierre(e.geometry.map(c => proyectar(c.lon, c.lat)));
+    if (t.leisure === 'swimming_pool' && pts.length >= 3) piscinas.push(pts);
+    if (t.junction === 'roundabout' && pts.length >= 3) arcos.push(pts);
+  }
+  return { piscinas, rotondas: agruparRotondas(arcos) };
+}
+function parsearMapa(geo) {
+  const capas = [];
+  for (const f of (geo.features || [])) {
+    const g = f.geometry, p = f.properties || {};
+    if (!g) continue;
+    const capa = p.capa || '';
+    if (g.type === 'Polygon' || g.type === 'MultiPolygon') {
+      for (const poli of (g.type === 'Polygon' ? [g.coordinates] : g.coordinates))
+        capas.push({ capa, anillo: quitarCierre(poli[0].map(c => proyectar(c[0], c[1]))) });
+    } else if (g.type === 'LineString') {
+      capas.push({ capa, linea: g.coordinates.map(c => proyectar(c[0], c[1])), ancho: p['osm:waterway'] === 'river' ? 12 : 5 });
+    }
+  }
+  return capas;
+}
+// Agua: lagos, humedales, piscinas y ríos (franjas), como polígonos para dibujarlos y para chocar con ellos
+function construirAguas(capas, piscinas) {
+  const aguas = [];
+  for (const c of capas) {
+    if ((c.capa === 'agua' || c.capa === 'humedal') && c.anillo && c.anillo.length >= 3) aguas.push({ pts: c.anillo, capa: c.capa });
+    if (c.capa === 'cauce' && c.linea && c.linea.length >= 2) aguas.push({ pts: bufferLinea(c.linea, c.ancho), capa: 'cauce' });
+  }
+  for (const p of piscinas) aguas.push({ pts: p, capa: 'piscina' });
+  return aguas;
+}
+// Puntos donde una calle se cruza o empalma con otra: tres o más calles en un mismo punto,
+// o un extremo a menos de 8 m de otra calle sin unirse a ella (una calle que termina junto a una vía rápida)
+function puntosDeCruce(tramos) {
+  const calles = construirRejillaCalles(tramos), llegan = new Map(), cruces = [], hechos = new Set();
+  const clave = p => p[0].toFixed(1) + '|' + p[1].toFixed(1);
+  for (const t of tramos) for (const p of [t.pts[0], t.pts[t.pts.length - 1]]) llegan.set(clave(p), (llegan.get(clave(p)) || 0) + 1);
+  for (const t of tramos) for (const p of [t.pts[0], t.pts[t.pts.length - 1]]) {
+    if (hechos.has(clave(p))) continue;
+    hechos.add(clave(p));
+    if (llegan.get(clave(p)) > 2 || otraCalleCerca(calles, p[0], p[1], 8)) cruces.push(p);
+  }
+  return cruces;
+}
+// ¿Hay alguna calle a menos de R metros que no pase por el propio punto?
+function otraCalleCerca(celdas, x, z, R) {
+  const R2 = R * R;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      const arr = celdas.get(cx + ',' + cz);
+      if (!arr) continue;
+      for (let i = 0; i < arr.length; i += 4) {
+        const d = distSeg2(x, z, arr[i], arr[i + 1], arr[i + 2], arr[i + 3]);
+        if (d > 1e-4 && d < R2) return true;
+      }
+    }
+  return false;
+}
+// Trozos de una línea que no pasan a menos de 2 m de otra calle (un paso elevado o una rampa no se corta)
+function partirPorCalles(linea, calles) {
+  const trozos = [];
+  let cur = [];
+  for (const q of linea) {
+    if (cercaDeCalle(calles, q[0], q[1], 3.5)) { if (cur.length >= 2) trozos.push(cur); cur = []; }
+    else cur.push(q);
+  }
+  if (cur.length >= 2) trozos.push(cur);
+  return trozos;
+}
+// Quitamiedos en el lado de fuera de cada curva (giro acumulado de más de 20 grados).
+// No van en las rotondas ni a menos de 20 m de un cruce, para no tapar la calle que sale de él.
+function generarQuitamiedos(tramos, rotondas, cruces) {
+  const calles = construirRejillaCalles(tramos), rejCruces = construirRejillaPuntos(cruces);
+  const rieles = [];
+  for (const t of tramos) {
+    if (!TIPOS_CON_QUITAMIEDOS.has(t.tipo)) continue;
+    const p = t.pts, n = p.length;
+    if (n < 3 || enRotonda(t, rotondas)) continue;
+    const lejos = k => !chocaPuntos(rejCruces, p[k][0], p[k][1], 20);
+    let i = 1;
+    while (i < n - 1) {
+      const g0 = giroEn(p, i);
+      if (Math.abs(g0) < 0.03 || !lejos(i)) { i++; continue; }
+      const signo = Math.sign(g0);
+      let j = i, total = 0;
+      while (j < n - 1 && lejos(j)) {
+        const g = giroEn(p, j);
+        if (Math.sign(g) !== signo || Math.abs(g) < 0.03) break;
+        total += g; j++;
+      }
+      if (Math.abs(total) >= 0.35) {
+        let ini = Math.max(0, i - 1), fin = Math.min(n - 1, j);
+        while (ini < i && !lejos(ini)) ini++;
+        while (fin > i && !lejos(fin)) fin--;
+        const off = -signo * (t.ancho / 2 + 0.9);
+        const linea = [];
+        for (let k = ini; k <= fin; k++) {
+          const nl = normalEn(p, k);
+          linea.push([p[k][0] + nl[0] * off, p[k][1] + nl[1] * off]);
+        }
+        // lado: signo de la normal izquierda del trazado que mira hacia la calzada
+        for (const trozo of partirPorCalles(linea, calles)) if (longitudPts(trozo) >= 8) rieles.push({ pts: trozo, lado: -Math.sign(off) });
+      }
+      i = Math.max(j, i + 1);
+    }
+  }
+  return rieles;
+}
+function construirRejillaPuntos(puntos) {
+  const celdas = new Map();
+  for (const p of puntos) {
+    const k = Math.floor(p[0] / TAM_CELDA) + ',' + Math.floor(p[1] / TAM_CELDA);
+    if (!celdas.has(k)) celdas.set(k, []);
+    celdas.get(k).push(p);
+  }
+  return celdas;
+}
+function chocaPuntos(celdas, x, z, R) {
+  const r2 = R * R;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      const lista = celdas.get(cx + ',' + cz);
+      if (lista) for (const [px, pz] of lista) if ((px - x) ** 2 + (pz - z) ** 2 < r2) return true;
+    }
+  return false;
+}
+function chocaIslas(islas, x, z, R) {
+  for (const i of islas) if ((i.cx - x) ** 2 + (i.cz - z) ** 2 < (i.ri + R) ** 2) return true;
+  return false;
+}
+// Isletas de las rotondas: radio interior del anillo menos la calzada y el bordillo
+function prepararIslas(rotondas) {
+  return rotondas.map(r => ({ cx: r.cx, cz: r.cz, ri: Math.max(2, r.r - 5) }));
+}
+// Árboles: en parques (denso) y praderas (disperso), fuera de calles, casas y agua
+function generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng) {
+  const calles = construirRejillaCalles(tramos);
+  const arboles = [], celdas = new Map();
+  const libre = (x, z) => {   // al menos 4 m de un árbol a otro
+    const cx = Math.floor(x / 4), cz = Math.floor(z / 4);
+    for (let i = -1; i <= 1; i++) for (let k = -1; k <= 1; k++) {
+      const lista = celdas.get((cx + i) + ',' + (cz + k));
+      if (lista && lista.some(([px, pz]) => (px - x) ** 2 + (pz - z) ** 2 < 16)) return false;
+    }
+    return true;
+  };
+  for (const c of capas) {
+    if (!c.anillo || (c.capa !== 'parque o jardín' && c.capa !== 'pradera')) continue;
+    const r = c.anillo;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const objetivo = Math.min(3000, Math.round(Math.abs(areaAnillo(r)) / (c.capa === 'parque o jardín' ? 150 : 900)));
+    let n = 0;
+    for (let k = 0; k < objetivo * 15 && n < objetivo; k++) {
+      const x = x0 + rng() * (x1 - x0), z = z0 + rng() * (z1 - z0);
+      if (!enPoligono(r, x, z)) continue;
+      if (cercaDeCalle(calles, x, z, 6)) continue;
+      if (dentroDeOtraCasa(edif, rejilla, x, z, -1)) continue;
+      if (choca(aguas, rejAguas, x, z, 2)) continue;
+      if (!libre(x, z)) continue;
+      const clave = Math.floor(x / 4) + ',' + Math.floor(z / 4);
+      if (!celdas.has(clave)) celdas.set(clave, []);
+      celdas.get(clave).push([x, z]);
+      arboles.push([x, z]); n++;
+    }
+  }
+  return arboles;
+}
+// --- ortofoto (PNOA, en Web Mercator EPSG:3857): paso entre metros locales y la imagen ---
+const R_MERC = 6378137;
+function mercatorDeLocal(x, z) {
+  const lon = ORIGEN.lon + x / K_LON, lat = ORIGEN.lat - z / K_LAT;
+  return [R_MERC * lon * Math.PI / 180, R_MERC * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))];
+}
+function localDeMercator(X, Y) {
+  const lon = X / R_MERC * 180 / Math.PI, lat = (2 * Math.atan(Math.exp(Y / R_MERC)) - Math.PI / 2) * 180 / Math.PI;
+  return [(lon - ORIGEN.lon) * K_LON, -(lat - ORIGEN.lat) * K_LAT];
+}
+// Archivo de georreferencia (.jgw): A, D, B, E, C, F. C y F son el centro del píxel de arriba a la izquierda
+function leerJgw(texto) {
+  const v = texto.trim().split(/\s+/).map(Number);
+  return { A: v[0], D: v[1], B: v[2], E: v[3], C: v[4], F: v[5] };
+}
+// Coordenadas de textura (u, v) de un punto de Web Mercator en la imagen (v hacia arriba, como en three.js)
+function uvOrtofoto(X, Y, g, W, H) {
+  const dx = X - g.C, dy = Y - g.F, det = g.A * g.E - g.B * g.D;
+  const col = (g.E * dx - g.B * dy) / det, fila = (g.A * dy - g.D * dx) / det;
+  return [(col + 0.5) / W, 1 - (fila + 0.5) / H];
+}
+
+// --- polilíneas: distancias a lo largo de la calle, puntos y trozos ---
+function acumulados(pts) {
+  const cum = [0];
+  for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+  return cum;
+}
+// Punto y dirección (unitaria) de una polilínea a la distancia d desde su inicio
+function enPolilinea(pts, cum, d) {
+  let k = 1;
+  while (k < pts.length - 1 && cum[k] < d) k++;
+  const L = cum[k] - cum[k - 1] || 1, u = Math.min(1, Math.max(0, (d - cum[k - 1]) / L));
+  const dx = pts[k][0] - pts[k - 1][0], dz = pts[k][1] - pts[k - 1][1], l = Math.hypot(dx, dz) || 1;
+  return { x: pts[k - 1][0] + dx * u, z: pts[k - 1][1] + dz * u, tx: dx / l, tz: dz / l };
+}
+// Trozo de una polilínea entre las distancias d0 y d1
+function subPolilinea(pts, cum, d0, d1) {
+  const a = enPolilinea(pts, cum, d0), b = enPolilinea(pts, cum, d1), out = [[a.x, a.z]];
+  for (let k = 1; k < pts.length - 1; k++) if (cum[k] > d0 && cum[k] < d1) out.push(pts[k]);
+  out.push([b.x, b.z]);
+  return out;
+}
+// ¿Es la calle un arco de rotonda? (todos sus puntos sobre el anillo de una rotonda)
+function enRotonda(t, rotondas) {
+  return rotondas.some(r => t.pts.every(p => Math.abs(Math.hypot(p[0] - r.cx, p[1] - r.cz) - r.r) < 8));
+}
+const AUTOVIAS = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link']);
+
+// --- marcas de la calzada: franjas {pts, s0, s1} (como las de la calzada), sin marcas en las rotondas ---
+// Línea central discontinua (calles de dos sentidos de 6,4 m o más), líneas de borde continuas (primarias y
+// secundarias) y, en los cruces, pasos de cebra
+function generarMarcas(tramos, rotondas, cruces) {
+  const rejCruces = construirRejillaPuntos(cruces), marcas = [];
+  for (const t of tramos) {
+    if (t.ancho < 6 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) continue;
+    const p = t.pts, cum = acumulados(p), L = cum[cum.length - 1];
+    const a = chocaPuntos(rejCruces, p[0][0], p[0][1], 0.5) ? 12 : 0;   // sin marcas junto al cruce
+    const b = chocaPuntos(rejCruces, p[p.length - 1][0], p[p.length - 1][1], 0.5) ? L - 12 : L;
+    if (b - a < 4) continue;
+    if (t.ancho >= 6.4 && !t.unSentido && !AUTOVIAS.has(t.tipo)) {
+      for (let d = a; d + 3 <= b; d += 9) marcas.push({ pts: subPolilinea(p, cum, d, d + 3), s0: -0.08, s1: 0.08 });
+    }
+    if (['primary', 'secondary'].includes(tipoBase(t.tipo))) {
+      const o = t.ancho / 2 - 0.35, tr = subPolilinea(p, cum, a, b);
+      marcas.push({ pts: tr, s0: o - 0.08, s1: o + 0.08 }, { pts: tr, s0: -o - 0.08, s1: -o + 0.08 });
+    }
+  }
+  return marcas;
+}
+// Pasos de cebra: a 11 m de cada cruce, en las calles de 6 m o más. Las rayas van en el sentido de la calle
+// y están separadas un metro a lo ancho de la calzada
+function generarPasosCebra(tramos, rotondas, cruces) {
+  const clave = p => p[0].toFixed(1) + '|' + p[1].toFixed(1), llegan = new Map(), marcas = [];
+  for (const t of tramos) for (const [p, inicio] of [[t.pts[0], true], [t.pts[t.pts.length - 1], false]]) {
+    const k = clave(p);
+    if (!llegan.has(k)) llegan.set(k, []);
+    llegan.get(k).push({ t, inicio });
+  }
+  for (const c of cruces) for (const { t, inicio } of llegan.get(clave(c)) || []) {
+    if (t.ancho < 6 || AUTOVIAS.has(t.tipo) || enRotonda(t, rotondas)) continue;
+    const cum = acumulados(t.pts), L = cum[cum.length - 1];
+    if (L < 16) continue;
+    const e = enPolilinea(t.pts, cum, inicio ? 11 : L - 11), n = Math.max(4, Math.floor((t.ancho - 0.6) / 1));
+    for (let k = 0; k < n; k++) {
+      const s = k - (n - 1) / 2;
+      marcas.push({ pts: [[e.x - e.tx * 1.8, e.z - e.tz * 1.8], [e.x + e.tx * 1.8, e.z + e.tz * 1.8]], s0: s - 0.25, s1: s + 0.25 });
+    }
+  }
+  return marcas;
+}
+
+// --- mobiliario: farolas cada 36 m en el centro de la acera (de un lado y de otro); árboles de alineación ---
+// Cada farola es {x, z, th}: th es el giro (rad) del brazo, que apunta hacia la calzada
+function generarFarolas(tramos, rotondas, cruces, arboles) {
+  const rejCruces = construirRejillaPuntos(cruces), rejArboles = construirRejillaPuntos(arboles), calles = construirRejillaCalles(tramos), farolas = [];
+  const enOtra = construirRejillaCalzadas(tramos);
+  tramos.forEach((t, i) => {
+    if (!(t.acera > 0) || t.ancho < 6 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) return;
+    if (t.ancho >= 9 && t.acera >= 2.2) return;   // en las avenidas van árboles, no farolas
+    const cum = acumulados(t.pts), L = cum[cum.length - 1];
+    const lado = i % 2 ? 1 : -1, off = lado * (t.ancho / 2 + t.acera / 2);
+    for (let d = 14; d < L - 14; d += 36) {
+      const e = enPolilinea(t.pts, cum, d), x = e.x - e.tz * off, z = e.z + e.tx * off;
+      if (chocaPuntos(rejCruces, x, z, 16) || cercaDeCalle(calles, x, z, 2.5) || chocaPuntos(rejArboles, x, z, 1.5) || enOtra(x, z, i)) continue;   // ni en la calzada ni sobre un árbol
+      farolas.push({ x, z, th: Math.atan2(e.tx * lado, e.tz * lado) });
+    }
+  });
+  return farolas;
+}
+// Árboles de alineación: en las avenidas (calzada de 9 m o más, aceras de 2,2 m o más), cada 14 m en el centro de la acera
+function generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, rejAguas) {
+  const rejCruces = construirRejillaPuntos(cruces), calles = construirRejillaCalles(tramos), arboles = [];
+  const enOtra = construirRejillaCalzadas(tramos);
+  for (let k = 0; k < tramos.length; k++) {
+    const t = tramos[k];
+    if (!(t.acera >= 2.2) || t.ancho < 9 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) continue;
+    const cum = acumulados(t.pts), L = cum[cum.length - 1];
+    for (const lado of [-1, 1]) for (let d = 12; d < L - 12; d += 14) {
+      const e = enPolilinea(t.pts, cum, d), off = lado * (t.ancho / 2 + t.acera / 2);
+      const x = e.x - e.tz * off, z = e.z + e.tx * off;
+      if (chocaPuntos(rejCruces, x, z, 16) || cercaDeCalle(calles, x, z, 3.5) || choca(aguas, rejAguas, x, z, 2) ||
+          dentroDeOtraCasa(edif, rejilla, x, z, -1) || enOtra(x, z, k)) continue;
+      arboles.push([x, z]);
+    }
+  }
+  return arboles;
+}
+
+// Todo lo que se dibuja y choca fuera de las calles y de las casas
+function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng) {
+  const capas = parsearMapa(mapaGeo);
+  const { piscinas, rotondas } = extraerOSM(osm);
+  const aguas = construirAguas(capas, piscinas);
+  const rejAguas = construirRejilla(aguas);
+  const rejCalles = construirRejillaCalles(tramos);
+  const cruces = puntosDeCruce(tramos);
+  const rieles = generarQuitamiedos(tramos, rotondas, cruces);
+  const islas = prepararIslas(rotondas).filter(isla => !cercaDeCalle(rejCalles, isla.cx, isla.cz, isla.ri));   // sin isleta si una calle pasa por ella
+  const arboles = generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng);
+  arboles.push(...generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, rejAguas));
+  for (const isla of islas) for (let k = 0; k < 3; k++) {   // tres árboles en cada isleta, si caben
+    const a = k * 2 * Math.PI / 3 + 0.4, x = isla.cx + Math.cos(a) * isla.ri * 0.5, z = isla.cz + Math.sin(a) * isla.ri * 0.5;
+    if (!cercaDeCalle(rejCalles, x, z, 3) && !dentroDeOtraCasa(edif, rejilla, x, z, -1) && !choca(aguas, rejAguas, x, z, 1)) arboles.push([x, z]);
+  }
+  const farolas = generarFarolas(tramos, rotondas, cruces, arboles).filter(f => !choca(aguas, rejAguas, f.x, f.z, 1) && !dentroDeOtraCasa(edif, rejilla, f.x, f.z, -1));
+  const marcas = generarMarcas(tramos, rotondas, cruces).concat(generarPasosCebra(tramos, rotondas, cruces));
+  return {
+    capas, aguas, rejAguas, rejCalles, rieles, rejRieles: construirRejillaCalles(rieles), islas,
+    arboles, rejArboles: construirRejillaPuntos(arboles),
+    farolas, rejFarolas: construirRejillaPuntos(farolas.map(f => [f.x, f.z])), marcas,
+  };
+}
+// ¿Choca un coche de radio R con algo que no sea una casa? (agua, quitamiedos, árboles, farolas, isletas).
+// Sobre una calle no cuenta el agua: ahí hay puentes.
+function chocaMundo(m, x, z, R) {
+  return (!cercaDeCalle(m.rejCalles, x, z, 6) && choca(m.aguas, m.rejAguas, x, z, R)) || cercaDeCalle(m.rejRieles, x, z, R) ||
+    chocaPuntos(m.rejArboles, x, z, R + 0.3) || chocaPuntos(m.rejFarolas, x, z, R + 0.15) || chocaIslas(m.islas, x, z, R);
+}
+// Caja de la zona (para pintar el suelo), con margen
+function calcularCaja(tramos, edif) {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  const mirar = pts => { for (const [x, z] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; } };
+  for (const t of tramos) mirar(t.pts);
+  for (const e of edif) mirar(e.pts);
+  return [x0 - 60, z0 - 60, x1 + 60, z1 + 60];
+}
+// --- tráfico, peatones y flechas de la ruta: se mueven por el grafo de calles y por las aceras ---
+// Cada tramo guarda su trazado al revés y las distancias acumuladas (se calculan una vez)
+function prepararTramo(t) {
+  if (!t.cum) { t.cum = acumulados(t.pts); t.ptsRev = t.pts.slice().reverse(); t.cumRev = acumulados(t.ptsRev); }
+  return t;
+}
+// Tramos del grupo principal de calles que empiezan a menos de R metros de (x, z)
+function tramosCerca(G, x, z, R) {
+  return G.tramos.filter(t => G.nodos[t.a].comp && Math.hypot(t.pts[0][0] - x, t.pts[0][1] - z) < R);
+}
+// Coche de tráfico sobre el tramo seg, en sentido fwd y a s metros de su inicio de sentido
+function nuevoCocheTrafico(G, rng, seg, fwd, s) {
+  const t = prepararTramo(G.tramos[seg]);
+  return { seg, fwd, s, origen: fwd ? t.a : t.b, k: 0.75 + rng() * 0.25, color: rng() };
+}
+// Siguiente tramo al llegar a un nodo: uno cualquiera, sin volver por donde se venía (si no hay otro, se da la vuelta)
+function siguienteArista(G, nodo, desde, rng) {
+  const adj = G.nodos[nodo].adj;
+  const opciones = adj.filter(e => e.to !== desde && G.nodos[e.to].comp);
+  const lista = opciones.length ? opciones : adj;
+  return lista.length ? lista[Math.floor(rng() * lista.length)] : null;
+}
+// Avanza el coche dt segundos; false si se ha quedado en un callejón sin salida (hay que reciclarlo)
+function avanzaTrafico(G, c, dt, rng) {
+  let t = prepararTramo(G.tramos[c.seg]);
+  c.s += (t.velocidad / 3.6) * c.k * dt;
+  let vueltas = 0;
+  while (c.s >= t.len && vueltas++ < 8) {
+    const llegada = c.fwd ? t.b : t.a;
+    const e = siguienteArista(G, llegada, c.origen, rng);
+    if (!e) return false;
+    c.s -= t.len;
+    c.origen = llegada;
+    c.seg = e.seg; c.fwd = e.fwd;
+    t = prepararTramo(G.tramos[c.seg]);
+  }
+  return true;
+}
+// Posición y rumbo del coche: circula por la derecha, a un cuarto del ancho de la calle
+function posicionTrafico(G, c) {
+  const t = prepararTramo(G.tramos[c.seg]);
+  const e = enPolilinea(c.fwd ? t.pts : t.ptsRev, c.fwd ? t.cum : t.cumRev, c.s);
+  const carril = t.ancho / 4;
+  return { x: e.x - e.tz * carril, z: e.z + e.tx * carril, h: Math.atan2(e.tx, e.tz) };
+}
+// Peatón sobre una acera del tramo seg (lado -1 o 1): camina de un extremo al otro y da la vuelta
+function nuevoPeaton(G, rng, seg) {
+  const t = prepararTramo(G.tramos[seg]);
+  return { seg, fwd: rng() < 0.5, s: rng() * t.len, lado: rng() < 0.5 ? -1 : 1, v: 1.0 + rng() * 0.5, color: rng() };
+}
+function avanzaPeaton(G, p, dt) {
+  const t = G.tramos[p.seg];
+  p.s += p.v * dt;
+  if (p.s >= t.len) { p.s -= t.len; p.fwd = !p.fwd; }
+}
+// Posición y rumbo del peatón, en el centro de su acera
+function posicionPeaton(G, p) {
+  const t = prepararTramo(G.tramos[p.seg]);
+  const e = enPolilinea(p.fwd ? t.pts : t.ptsRev, p.fwd ? t.cum : t.cumRev, p.s);
+  const off = p.lado * (t.ancho / 2 + t.acera / 2);
+  return { x: e.x - e.tz * off, z: e.z + e.tx * off, h: Math.atan2(e.tx, e.tz) };
+}
+// Flechas de la ruta: una cada `paso` metros a lo largo del trazado, con el rumbo de la calle
+function flechasRuta(ruta, paso = 16) {
+  const cum = acumulados(ruta), L = cum[cum.length - 1], out = [];
+  for (let d = paso / 2; d < L - 6; d += paso) {
+    const e = enPolilinea(ruta, cum, d);
+    out.push({ x: e.x, z: e.z, h: Math.atan2(e.tx, e.tz), d });
+  }
+  return out;
+}
+// Flechas de cada pierna de la vuelta: [primera, última] (índices), según los metros de ruta hasta cada checkpoint
+function piernasFlechas(flechas, cortes) {
+  return cortes.map((D, k) => {
+    const D0 = k ? cortes[k - 1] : -Infinity;
+    let a = flechas.findIndex(f => f.d > D0);
+    let b = -1;
+    for (let i = flechas.length - 1; i >= 0; i--) if (flechas[i].d <= D) { b = i; break; }
+    if (k === cortes.length - 1) b = flechas.length - 1;
+    if (a < 0) a = flechas.length;
+    return [a, b];
+  });
+}
+// Flecha más cercana a (x, z) entre los índices a y b
+function masCercanaEntre(pos, x, z, a, b) {
+  let mejor = a, md = Infinity;
+  for (let i = a; i <= b; i++) {
+    const d = (pos[i].x - x) ** 2 + (pos[i].z - z) ** 2;
+    if (d < md) { md = d; mejor = i; }
+  }
+  return mejor;
+}
+// --- coche: motor, caja automática de seis marchas, dirección y agarre (SI: m, s, kg, N, rpm) ---
+// Un turismo de unos 150 CV: de 0 a 100 km/h en torno a 9 s; la velocidad punta la pone la marcha 6 y el aire
+const FISICA = {
+  masa: 1250,                                  // kg, con el conductor
+  radioRueda: 0.31,                            // m
+  relacion: [3.6, 2.1, 1.45, 1.08, 0.85, 0.7], // marchas 1 a 6
+  diferencial: 3.9,
+  rendimiento: 0.9,
+  ralenti: 800,                                // rpm
+  corte: 6900,                                 // rpm: el motor corta la inyección
+  subida: [2300, 6200],                        // rpm para cambiar a la marcha de arriba, con el gas suelto y a fondo
+  cambioS: 0.35,                               // s sin empuje mientras la caja cambia
+  frenoMax: 8.5,                               // m/s² (unos 0,87 g)
+  rodadura: 0.012,
+  aero: 0.42,                                  // N·s²/m²: ½ · densidad del aire · Cd · área frontal
+  distanciaEjes: 2.6,                          // m
+  agarre: 8.5,                                 // m/s²: aceleración lateral que aguanta el asfalto
+  fuerzaAtras: 4000,                           // N en marcha atrás
+  marchaAtras: 5,                              // m/s (18 km/h) como mucho en marcha atrás
+};
+// Par del motor (N·m) según las rpm: máximo hacia las 3500 y unos 110 kW hacia las 6000
+const PAR_MOTOR = [[0, 110], [800, 120], [2000, 185], [3500, 225], [4800, 212], [6000, 178], [6900, 150]];
+const G_TIERRA = 9.81;
+function parMotor(rpm) {
+  if (rpm >= FISICA.corte) return 0;
+  for (let i = 1; i < PAR_MOTOR.length; i++) {
+    const [r1, p1] = PAR_MOTOR[i];
+    if (rpm <= r1) {
+      const [r0, p0] = PAR_MOTOR[i - 1];
+      return p0 + (p1 - p0) * (rpm - r0) / (r1 - r0);
+    }
+  }
+  return PAR_MOTOR[PAR_MOTOR.length - 1][1];
+}
+// Relación entre el motor y las ruedas (la marcha 0 es la de atrás)
+function relacionTotal(marcha) {
+  return (marcha === 0 ? FISICA.relacion[0] : FISICA.relacion[marcha - 1]) * FISICA.diferencial;
+}
+// Vueltas del motor a esa velocidad en esa marcha, con el embrague enganchado
+function rpmEnMarcha(v, marcha) {
+  return Math.abs(v) * relacionTotal(marcha) * 60 / (2 * Math.PI * FISICA.radioRueda);
+}
+// Caja automática: sube al llegar a las vueltas de cambio (antes con poco gas) y baja al acelerar a fondo con pocas vueltas o al frenar hasta casi parar
+function cambioAutomatico(c, rapidez) {
+  const F = FISICA;
+  if (c.marcha < 6 && rpmEnMarcha(rapidez, c.marcha) >= F.subida[0] + (F.subida[1] - F.subida[0]) * c.gas) {
+    c.marcha++; c.cambio = F.cambioS;
+    return;
+  }
+  if (c.marcha > 1 && rpmEnMarcha(rapidez, c.marcha - 1) < F.corte - 900) {
+    const rpm = rpmEnMarcha(rapidez, c.marcha);
+    if ((c.gas > 0.6 && rpm < 2600) || (c.freno > 0.3 && rpm < 1500)) { c.marcha--; c.cambio = F.cambioS; }
+  }
+}
+// Un paso de pedales, embrague, caja y frenos. c.v es la velocidad con signo (negativa hacia atrás); c.marcha 0 es marcha atrás
+// Cambio de sentido sencillo: casi parado, mantener el freno 0,3 s pone la marcha atrás (y entonces el freno empuja hacia atrás
+// y el acelerador frena); pisar el acelerador parado en marcha atrás vuelve a la marcha adelante
+function cambioSentidoPedales(c, acel, freno, dt) {
+  if (Math.abs(c.v) >= 0.6) { c.tFreno = 0; return; }
+  if (c.marcha > 0 && freno && !acel) {
+    c.tFreno += dt;
+    if (c.tFreno > 0.3) { c.marcha = 0; c.atrasAuto = true; c.tFreno = 0; c.freno = 0; c.cambio = 0; }
+  } else {
+    c.tFreno = 0;
+    if (c.marcha === 0 && c.atrasAuto && acel && !freno) { c.marcha = 1; c.freno = 0; c.cambio = 0; }
+  }
+}
+// Botón o tecla de marcha: cambia entre adelante (D) y atrás (R) si el coche va a menos de 7 km/h. Con R puesta así, el acelerador va hacia atrás
+function cambiarSentido(c) {
+  if (Math.abs(c.v) > 2) return false;
+  if (c.marcha === 0) c.marcha = 1; else { c.marcha = 0; c.atrasAuto = false; }
+  c.cambio = 0; c.tFreno = 0;
+  return true;
+}
+function pasoMotor(c, acel, freno, dt) {
+  const F = FISICA;
+  cambioSentidoPedales(c, acel, freno, dt);
+  const invertidos = c.marcha === 0 && c.atrasAuto;              // marcha atrás puesta con el freno: los pedales se cambian
+  const pGas = invertidos ? freno : acel, pFreno = invertidos ? acel : freno;
+  c.gas += ((pGas ? 1 : 0) - c.gas) * Math.min(1, dt * 7);     // los pedales responden en unas décimas, no de golpe
+  c.freno += ((pFreno ? 1 : 0) - c.freno) * Math.min(1, dt * 9);
+  c.cambio = Math.max(0, c.cambio - dt);
+  const rapidez = Math.abs(c.v);
+  let fuerza = 0;                                               // N, positiva hacia delante
+  if (c.marcha === 0) {
+    fuerza = -F.fuerzaAtras * c.gas * Math.max(0, 1 - rapidez / F.marchaAtras);
+    c.rpm += (F.ralenti + c.gas * 1500 - c.rpm) * Math.min(1, dt * 6);
+  } else {
+    const patina = rapidez < 2.5;                               // al arrancar, el embrague patina: el motor sube sin mover el coche
+    if (c.cambio <= 0) cambioAutomatico(c, rapidez);
+    const rel = relacionTotal(c.marcha);
+    const objetivo = patina ? F.ralenti + c.gas * 2600 : Math.max(F.ralenti, rpmEnMarcha(c.v, c.marcha));
+    c.rpm += (Math.min(objetivo, F.corte) - c.rpm) * Math.min(1, dt * (patina ? 6 : 14));
+    if (c.cambio <= 0) fuerza = parMotor(c.rpm) * c.gas * rel * F.rendimiento / F.radioRueda;   // sin empuje mientras cambia
+    fuerza = Math.min(fuerza, 0.8 * G_TIERRA * F.masa);         // no pasa de lo que aguantan las ruedas
+    // rozamiento del motor; con el gas suelto aumenta mucho (freno motor)
+    if (!patina) fuerza -= Math.sign(c.v) * (8 + 0.002 * c.rpm + (1 - c.gas) * (16 + 0.003 * c.rpm)) * rel / F.radioRueda;
+  }
+  // arrastre de la caja automática: sin pisar nada, el coche avanza despacio hasta unos 8 km/h
+  if (c.gas < 0.05 && c.freno < 0.05 && rapidez < 2.2 && c.cambio <= 0) fuerza += (c.marcha === 0 ? -1 : 1) * 1800 * (1 - rapidez / 2.2);
+  // resistencias: el freno y la rodadura siempre frenan; el aire, según la velocidad al cuadrado
+  const frenado = c.freno * F.frenoMax * F.masa + F.rodadura * F.masa * G_TIERRA;
+  if (rapidez < 0.02) {
+    // parado: el freno y la rodadura solo sujetan hasta su valor; lo que sobra mueve el coche
+    const neta = Math.abs(fuerza) > frenado ? fuerza - Math.sign(fuerza) * frenado : 0;
+    c.v += neta / F.masa * dt;
+  } else {
+    const neta = fuerza - Math.sign(c.v) * (frenado + F.aero * c.v * c.v);
+    const nueva = c.v + neta / F.masa * dt;
+    c.v = Math.sign(nueva) !== Math.sign(c.v) ? 0 : nueva;   // frenando o rodando no cambia de sentido
+  }
+}
+// Velocidad de giro del coche (rad/s) con el volante en c.dir. Las ruedas giran menos a más velocidad; si el giro pide más agarre
+// del que tiene el asfalto, el coche se abre y pierde velocidad
+function giroCoche(c, dt) {
+  const F = FISICA, v = Math.abs(c.v);
+  const ruedas = c.dir * 0.6 / (1 + v / 12);                    // ángulo de las ruedas (rad)
+  let w = v * Math.tan(ruedas) / F.distanciaEjes;
+  const maxW = F.agarre / Math.max(v, 0.5);
+  c.exceso = 0;   // m/s² de giro que el asfalto no aguanta: el coche derrapa hacia fuera
+  if (Math.abs(w) > maxW) { c.exceso = v * (Math.abs(w) - maxW); w = Math.sign(w) * maxW; c.v *= Math.max(0, 1 - 0.15 * dt); }
+  return w;
+}
+// Rejilla de calzadas: dice si un punto cae dentro de la calzada de otra calle distinta de `propio` (cruces, calzadas dobles, glorietas)
+function construirRejillaCalzadas(tramos) {
+  const C = 40, celdas = new Map(), clave = (i, j) => i + ',' + j;
+  tramos.forEach((t, k) => {
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of t.pts) { x0 = Math.min(x0, x); z0 = Math.min(z0, z); x1 = Math.max(x1, x); z1 = Math.max(z1, z); }
+    const m = t.ancho / 2 + 0.5;
+    for (let i = Math.floor((x0 - m) / C); i <= Math.floor((x1 + m) / C); i++)
+      for (let j = Math.floor((z0 - m) / C); j <= Math.floor((z1 + m) / C); j++) {
+        if (!celdas.has(clave(i, j))) celdas.set(clave(i, j), []);
+        celdas.get(clave(i, j)).push(k);
+      }
+  });
+  return (x, z, propio) => {
+    for (const k of celdas.get(clave(Math.floor(x / C), Math.floor(z / C))) || []) {
+      if (k === propio) continue;
+      const u = tramos[k];
+      if (distanciaTramo2(u, x, z) < (u.ancho / 2 + 0.3) ** 2) return true;
+    }
+    return false;
+  };
+}
+// Trozos de una franja (a `s` metros del eje del tramo) que no caen dentro de la calzada de otra calle: [[d0, d1], ...] en metros desde el inicio
+function trozosLibres(t, cum, s, enOtra, paso = 1.5) {
+  const L = cum[cum.length - 1], n = Math.max(2, Math.ceil(L / paso)), out = [];
+  let ini = -1;
+  for (let i = 0; i <= n; i++) {
+    const d = L * i / n, e = enPolilinea(t.pts, cum, d);
+    const libre = !enOtra(e.x - e.tz * s, e.z + e.tx * s);
+    if (libre && ini < 0) ini = d;
+    if (!libre && ini >= 0) { out.push([ini, d]); ini = -1; }
+  }
+  if (ini >= 0) out.push([ini, L]);
+  return out.filter(([a, b]) => b - a >= 2);
+}
+
+// --- choques con respuesta: contacto de un círculo con el mundo { nx, nz, prof } (normal hacia fuera del obstáculo) ---
+function puntoEnSeg(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz;
+  const t = L > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / L)) : 0;
+  return [ax + dx * t, az + dz * t];
+}
+// Contacto de un círculo (x, z, R) con el punto más cercano (qx, qz) de un obstáculo; dentro: el centro está dentro del obstáculo
+function contactoDesde(x, z, qx, qz, R, dentro) {
+  const dx = x - qx, dz = z - qz, d = Math.hypot(dx, dz);
+  if ((!dentro && d >= R) || d < 1e-6) return null;
+  return dentro ? { nx: -dx / d, nz: -dz / d, prof: R + d } : { nx: dx / d, nz: dz / d, prof: R - d };
+}
+const masHondo = (a, b) => (!a || (b && b.prof > a.prof) ? b : a);
+const conTipo = (c, tipo) => { if (c) c.tipo = tipo; return c; };
+function contactoPoligono(e, x, z, R) {
+  const b = e.bbox;
+  if (x + R < b[0] || x - R > b[2] || z + R < b[1] || z - R > b[3]) return null;
+  const pts = e.pts;
+  let md = Infinity, qx = 0, qz = 0;
+  for (let k = 0, m = pts.length - 1; k < pts.length; m = k++) {
+    const q = puntoEnSeg(x, z, pts[m][0], pts[m][1], pts[k][0], pts[k][1]), d = (q[0] - x) ** 2 + (q[1] - z) ** 2;
+    if (d < md) { md = d; qx = q[0]; qz = q[1]; }
+  }
+  return contactoDesde(x, z, qx, qz, R, enPoligono(pts, x, z));
+}
+function contactoPoligonos(edif, rejilla, x, z, R) {
+  let mejor = null;
+  for (const i of rejilla.get('*') || []) mejor = masHondo(mejor, contactoPoligono(edif[i], x, z, R));
+  const vistos = new Set();
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      for (const i of rejilla.get(cx + ',' + cz) || []) {
+        if (vistos.has(i)) continue;
+        vistos.add(i);
+        mejor = masHondo(mejor, contactoPoligono(edif[i], x, z, R));
+      }
+    }
+  return mejor;
+}
+// Segmentos guardados de cuatro en cuatro en una rejilla (quitamiedos)
+function contactoSegmentos(celdas, x, z, R) {
+  let mejor = null;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      const arr = celdas.get(cx + ',' + cz);
+      if (arr) for (let i = 0; i < arr.length; i += 4) {
+        const q = puntoEnSeg(x, z, arr[i], arr[i + 1], arr[i + 2], arr[i + 3]);
+        mejor = masHondo(mejor, contactoDesde(x, z, q[0], q[1], R, false));
+      }
+    }
+  return mejor;
+}
+// Puntos (árboles, farolas): R ya incluye el grosor del tronco o del poste
+function contactoPuntos(celdas, x, z, R) {
+  let mejor = null;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++)
+      for (const [px, pz] of celdas.get(cx + ',' + cz) || []) mejor = masHondo(mejor, contactoDesde(x, z, px, pz, R, false));
+  return mejor;
+}
+// El contacto más hondo con el mundo (agua, quitamiedos, árboles, farolas, isletas), con su tipo. Sobre una calle no cuenta el agua (puentes)
+function contactoMundo(m, x, z, R) {
+  let c = null;
+  if (!cercaDeCalle(m.rejCalles, x, z, 6)) c = conTipo(contactoPoligonos(m.aguas, m.rejAguas, x, z, R), 'agua');
+  c = masHondo(c, conTipo(contactoSegmentos(m.rejRieles, x, z, R), 'riel'));
+  c = masHondo(c, conTipo(contactoPuntos(m.rejArboles, x, z, R + 0.3), 'arbol'));
+  c = masHondo(c, conTipo(contactoPuntos(m.rejFarolas, x, z, R + 0.15), 'farola'));
+  for (const i of m.islas) c = masHondo(c, conTipo(contactoDesde(x, z, i.cx, i.cz, R + i.ri, false), 'isla'));
+  return c;
+}
+// Rebote contra un obstáculo quieto. V = (vx, vz) es la velocidad del punto que choca; e, el rebote (0 a 1); mu, el roce a lo largo
+// del obstáculo. Devuelve la velocidad nueva y la de choque (la que llevaba contra el obstáculo)
+function rebote(vx, vz, nx, nz, e, mu) {
+  const vn = vx * nx + vz * nz;
+  if (vn >= 0) return { vx, vz, impacto: 0, roce: 0 };
+  let tx = vx - vn * nx, tz = vz - vn * nz;
+  const vt = Math.hypot(tx, tz), Jn = -(1 + e) * vn;
+  const k = vt > 1e-6 ? Math.max(0, vt - mu * Jn) / vt : 0;   // el roce quita velocidad a lo largo, sin dar la vuelta
+  tx *= k; tz *= k;
+  return { vx: tx - e * vn * nx, vz: tz - e * vn * nz, impacto: -vn, roce: vt * k };
+}
+// Rejilla de segmentos de calle con su tramo: para saber en cada fotograma en qué calle está el coche
+function construirRejillaSegmentos(tramos) {
+  const celdas = new Map();
+  tramos.forEach((t, i) => {
+    for (let k = 0; k < t.pts.length - 1; k++) {
+      const [ax, az] = t.pts[k], [bx, bz] = t.pts[k + 1];
+      for (let cx = Math.floor(Math.min(ax, bx) / TAM_CELDA); cx <= Math.floor(Math.max(ax, bx) / TAM_CELDA); cx++)
+        for (let cz = Math.floor(Math.min(az, bz) / TAM_CELDA); cz <= Math.floor(Math.max(az, bz) / TAM_CELDA); cz++) {
+          const clave = cx + ',' + cz;
+          if (!celdas.has(clave)) celdas.set(clave, []);
+          celdas.get(clave).push(i, k);
+        }
+    }
+  });
+  return celdas;
+}
+// Calle más cercana a (x, z) a menos de R metros: { i, t, d, nx, nz } (n: del eje de la calle hacia el punto); null si no hay
+function calleMasCercana(celdas, tramos, x, z, R) {
+  let md = R * R, mi = -1, mk = -1;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      const arr = celdas.get(cx + ',' + cz);
+      if (arr) for (let j = 0; j < arr.length; j += 2) {
+        const p = tramos[arr[j]].pts, k = arr[j + 1];
+        const d = distSeg2(x, z, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1]);
+        if (d < md) { md = d; mi = arr[j]; mk = k; }
+      }
+    }
+  if (mi < 0) return null;
+  const t = tramos[mi], a = t.pts[mk], b = t.pts[mk + 1], q = puntoEnSeg(x, z, a[0], a[1], b[0], b[1]);
+  const d = Math.sqrt(md);
+  let nx = x - q[0], nz = z - q[1];
+  if (d > 1e-6) { nx /= d; nz /= d; }
+  else { const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; nx = -(b[1] - a[1]) / l; nz = (b[0] - a[0]) / l; }
+  return { i: mi, t, d, nx, nz };
+}
+/*CORE-END*/
+
+/*RENDER-START*/
+// ---------- Render, física del coche, carrera y menús ----------
+const $ = id => document.getElementById(id);
+const VUELTAS = 3;
+
+// --- efectos: humo de neumáticos, chispas y marcas de frenada ---
+const Efectos = (() => {
+  const grupo = new THREE.Group();
+  // Partículas como puntos con un sombreado propio: tamaño en metros y transparencia por partícula
+  function sistema(max, color, aditivo) {
+    const pos = new Float32Array(max * 3), tam = new Float32Array(max), alfa = new Float32Array(max);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aTam', new THREE.BufferAttribute(tam, 1).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aAlfa', new THREE.BufferAttribute(alfa, 1).setUsage(THREE.DynamicDrawUsage));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: new THREE.Color(color) }, uEscala: { value: 500 } },
+      vertexShader: `attribute float aTam; attribute float aAlfa; uniform float uEscala; varying float vAlfa;
+        void main(){ vAlfa = aAlfa; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = aTam * uEscala / max(0.1, -mv.z); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform vec3 uColor; varying float vAlfa;
+        void main(){ vec2 p = gl_PointCoord - 0.5; float r = dot(p, p) * 4.0; if (r > 1.0) discard; gl_FragColor = vec4(uColor, vAlfa * (1.0 - r)); }`,
+      transparent: true, depthWrite: false, blending: aditivo ? THREE.AdditiveBlending : THREE.NormalBlending,
+    });
+    const puntos = new THREE.Points(geo, mat);
+    puntos.frustumCulled = false;
+    grupo.add(puntos);
+    const vivas = [];
+    return {
+      mat,
+      emitir(p) { if (vivas.length < max) vivas.push(p); },
+      limpiar() { vivas.length = 0; },
+      actualizar(dt) {
+        for (let i = vivas.length - 1; i >= 0; i--) {
+          const p = vivas[i];
+          p.t += dt;
+          if (p.t >= p.vida) { vivas[i] = vivas[vivas.length - 1]; vivas.pop(); continue; }
+          p.vy -= p.g * dt;
+          const roz = Math.exp(-p.roz * dt);
+          p.vx *= roz; p.vz *= roz;
+          p.x += p.vx * dt; p.y = Math.max(0.05, p.y + p.vy * dt); p.z += p.vz * dt;
+        }
+        vivas.forEach((p, i) => {
+          const u = p.t / p.vida;
+          pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
+          tam[i] = p.t0 + (p.t1 - p.t0) * u;
+          alfa[i] = p.a * (u < 0.15 ? u / 0.15 : 1 - (u - 0.15) / 0.85);
+        });
+        geo.setDrawRange(0, vivas.length);
+        for (const k of ['position', 'aTam', 'aAlfa']) geo.attributes[k].needsUpdate = true;
+      },
+    };
+  }
+  let humo = null, chispas = null;
+  // Marcas de neumático: tiras oscuras sobre el asfalto, en un anillo de trozos (las más viejas se reutilizan)
+  const MAX_TROZOS = 2400, posH = new Float32Array(MAX_TROZOS * 18);
+  let huellas = null, nTrozos = 0;
+  const previo = [null, null, null, null];
+  function crear() {
+    humo = sistema(160, 0xd9d9d6, false);
+    chispas = sistema(160, 0xffb347, true);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(posH, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setDrawRange(0, 0);
+    huellas = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    huellas.frustumCulled = false;
+    grupo.add(huellas);
+    return grupo;
+  }
+  function huella(i, x, z, hx, hz) {
+    const p = previo[i];
+    previo[i] = { x, z, hx, hz };
+    if (!p || (p.x - x) ** 2 + (p.z - z) ** 2 < 0.04) { if (p) previo[i] = p; return; }
+    const o = (nTrozos % MAX_TROZOS) * 18, y = 0.075;
+    const v = [p.x - p.hx, y, p.z - p.hz, p.x + p.hx, y, p.z + p.hz, x + hx, y, z + hz, p.x - p.hx, y, p.z - p.hz, x + hx, y, z + hz, x - hx, y, z - hz];
+    posH.set(v, o);
+    nTrozos++;
+    huellas.geometry.setDrawRange(0, Math.min(nTrozos, MAX_TROZOS) * 6);
+    huellas.geometry.attributes.position.needsUpdate = true;
+  }
+  function cortarHuella(i) { previo[i] = null; }
+  function emitirHumo(x, y, z, vx, vz) {
+    humo.emitir({ x, y, z, vx, vy: 0.6 + Math.random() * 0.5, vz, g: -0.2, roz: 1.5, t: 0, vida: 1.4 + Math.random() * 0.8, t0: 0.6, t1: 3.2, a: 0.32 });
+  }
+  function emitirChispas(x, y, z, n) {
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * Math.PI * 2, v = 2 + Math.random() * 6;
+      chispas.emitir({ x, y, z, vx: Math.cos(a) * v, vy: 1 + Math.random() * 4, vz: Math.sin(a) * v, g: 9.8, roz: 0.6, t: 0, vida: 0.25 + Math.random() * 0.35, t0: 0.09, t1: 0.04, a: 1 });
+    }
+  }
+  const tam = new THREE.Vector2();
+  function actualizar(dt, camara, renderer) {
+    if (!humo) return;
+    renderer.getDrawingBufferSize(tam);
+    const escala = tam.y / (2 * Math.tan(camara.fov * Math.PI / 360));   // píxeles por metro a un metro de distancia
+    humo.mat.uniforms.uEscala.value = escala; chispas.mat.uniforms.uEscala.value = escala;
+    humo.actualizar(dt); chispas.actualizar(dt);
+  }
+  function limpiar() {
+    if (!humo) return;
+    humo.limpiar(); chispas.limpiar();
+    nTrozos = 0; previo.fill(null);
+    huellas.geometry.setDrawRange(0, 0);
+  }
+  return { crear, huella, cortarHuella, humo: emitirHumo, chispas: emitirChispas, actualizar, limpiar };
+})();
+
+// --- sonido: motor, neumáticos, golpes, bocinas y avisos, sintetizados con Web Audio (sin archivos de sonido) ---
+const Sonido = (() => {
+  let ctx = null, maestro = null, ruido = null, n = null, activo = true;
+  try { activo = localStorage.getItem('cochesHuelva.sonido') !== 'no'; } catch (err) { /* sin almacenamiento: con sonido */ }
+  const ganancia = v => { const g = ctx.createGain(); g.gain.value = v; return g; };
+  const filtro = (tipo, f, q = 1) => { const b = ctx.createBiquadFilter(); b.type = tipo; b.frequency.value = f; b.Q.value = q; return b; };
+  const osc = (tipo, f) => { const o = ctx.createOscillator(); o.type = tipo; o.frequency.value = f; return o; };
+  const cadena = (...nodos) => { for (let i = 0; i < nodos.length - 1; i++) nodos[i].connect(nodos[i + 1]); return nodos[nodos.length - 1]; };
+  // Ruido blanco en bucle, ya en marcha (cada uno empieza en un punto distinto para que no suenen igual)
+  function fuenteRuido() { const s = ctx.createBufferSource(); s.buffer = ruido; s.loop = true; s.start(0, Math.random() * 2); return s; }
+  function crear() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+    ruido = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const d = ruido.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -16; comp.ratio.value = 5;
+    maestro = ganancia(activo ? 0.85 : 0);
+    cadena(maestro, comp, ctx.destination);
+    // motor: el encendido de un cuatro cilindros (dos explosiones por vuelta) en diente de sierra, su armónico y un grave,
+    // por un filtro que se abre con las vueltas y el gas; un trémolo a media frecuencia le da el petardeo
+    const motor = ganancia(0), fMotor = filtro('lowpass', 600, 3);
+    const o1 = osc('sawtooth', 30), o2 = osc('sawtooth', 60), o3 = osc('triangle', 15), lfo = osc('sine', 15);
+    const g1 = ganancia(0.55), g2 = ganancia(0.2), g3 = ganancia(0.8), gLfo = ganancia(0.25), tremolo = ganancia(1);
+    cadena(o1, g1, fMotor); cadena(o2, g2, fMotor); cadena(o3, g3, fMotor);
+    cadena(lfo, gLfo); gLfo.connect(tremolo.gain);
+    cadena(fMotor, motor, tremolo, maestro);
+    // admisión: soplido que crece con el gas
+    const admision = ganancia(0), fAdm = filtro('bandpass', 900, 1.4);
+    cadena(fuenteRuido(), fAdm, admision, maestro);
+    // rodadura y aire
+    const rodar = ganancia(0), fRodar = filtro('lowpass', 400, 0.7);
+    cadena(fuenteRuido(), fRodar, rodar, maestro);
+    // chirrido de neumáticos: un tono que vibra más ruido agudo
+    const chirrido = ganancia(0), fChirr = filtro('bandpass', 1900, 4), oChirr = osc('sawtooth', 980), vib = osc('sine', 13), gVib = ganancia(55);
+    cadena(vib, gVib); gVib.connect(oChirr.frequency);
+    cadena(oChirr, fChirr, chirrido, maestro);
+    const fChirr2 = filtro('bandpass', 2900, 3), gChirr2 = ganancia(0.7);
+    cadena(fuenteRuido(), fChirr2, gChirr2, chirrido);
+    // roce de chapa contra el quitamiedos o una pared
+    const roce = ganancia(0), fRoce = filtro('highpass', 2200, 0.8);
+    cadena(fuenteRuido(), fRoce, roce, maestro);
+    for (const o of [o1, o2, o3, lfo, oChirr, vib]) o.start();
+    n = { motor, fMotor, o1, o2, o3, lfo, admision, fAdm, rodar, fRodar, chirrido, oChirr, roce };
+  }
+  function iniciar() {
+    if (!ctx) crear();
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+  }
+  const t0 = () => ctx.currentTime;
+  const hacia = (param, v, tc = 0.05) => param.setTargetAtTime(v, t0(), tc);
+  // Cada fotograma: e = { rpm, gas, v, derrape, roce, cambio, acera }, o null para callar el coche
+  function actualizar(e) {
+    if (!ctx || !n) return;
+    if (!e) { hacia(n.motor.gain, 0, 0.15); hacia(n.admision.gain, 0, 0.1); hacia(n.rodar.gain, 0, 0.2); hacia(n.chirrido.gain, 0, 0.05); hacia(n.roce.gain, 0, 0.05); return; }
+    const f = Math.max(14, e.rpm / 60 * 2);
+    hacia(n.o1.frequency, f, 0.03); hacia(n.o2.frequency, f * 2.01, 0.03); hacia(n.o3.frequency, f * 0.5, 0.03); hacia(n.lfo.frequency, f * 0.5, 0.03);
+    hacia(n.fMotor.frequency, 260 + e.rpm * 0.32 + e.gas * 1300, 0.05);
+    let g = (0.13 + 0.2 * e.gas) * (e.cambio ? 0.5 : 1);
+    if (e.rpm > FISICA.corte - 250) g *= Math.sin(performance.now() / 1000 * 70) > 0 ? 1 : 0.25;   // corte de inyección
+    hacia(n.motor.gain, g, 0.03);
+    hacia(n.fAdm.frequency, 500 + e.rpm * 0.25, 0.05);
+    hacia(n.admision.gain, e.gas * (0.02 + e.rpm / 7000 * 0.07), 0.05);
+    hacia(n.fRodar.frequency, 250 + e.v * 18, 0.1);
+    hacia(n.rodar.gain, Math.min(0.35, e.v * e.v * 0.00028 + e.v * 0.002) * (e.acera ? 1.8 : 1), 0.1);
+    hacia(n.chirrido.gain, e.derrape > 0.25 ? 0.05 + 0.13 * e.derrape : 0, 0.04);
+    hacia(n.oChirr.frequency, 900 + Math.random() * 160, 0.02);
+    hacia(n.roce.gain, Math.min(0.25, e.roce * 0.025), 0.03);
+  }
+  // Envolvente rápida: sube en 5 ms y cae exponencialmente en dur segundos
+  function envolvente(g, pico, dur, t) {
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(pico, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
+  function rafagaRuido(destino, t, dur, desde) {
+    const s = ctx.createBufferSource();
+    s.buffer = ruido; s.playbackRate.value = 0.7 + Math.random() * 0.5;
+    s.connect(destino); s.start(t, desde ?? Math.random() * 1.5); s.stop(t + dur + 0.05);
+  }
+  // Golpe: crujido de chapa y golpe sordo; el quitamiedos y las farolas suenan a metal, los árboles a madera, el coche a cristales
+  function golpe(tipo, fuerza) {
+    if (!ctx || !n) return;
+    const t = t0(), k = Math.min(1, fuerza / 15);
+    const f = filtro('lowpass', tipo === 'riel' || tipo === 'farola' ? 4200 : 2200, 0.8), g = ganancia(0);
+    f.frequency.setValueAtTime(f.frequency.value, t); f.frequency.exponentialRampToValueAtTime(180, t + 0.4);
+    cadena(f, g, maestro); envolvente(g, 0.25 + 0.75 * k, 0.45, t); rafagaRuido(f, t, 0.45);
+    const o = osc('sine', 120), go = ganancia(0);
+    o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.3);
+    cadena(o, go, maestro); envolvente(go, 0.5 + 0.5 * k, 0.32, t); o.start(t); o.stop(t + 0.35);
+    if (tipo === 'riel' || tipo === 'farola') for (const [fr, q] of [[520, 30], [1240, 40], [2650, 50]]) {
+      const b = filtro('bandpass', fr, q), gb = ganancia(0);
+      cadena(b, gb, maestro); envolvente(gb, (0.9 + k) * 1.4, 0.9, t); rafagaRuido(b, t, 0.05);
+    }
+    if (tipo === 'arbol') { const b = filtro('bandpass', 260, 5), gb = ganancia(0); cadena(b, gb, maestro); envolvente(gb, 1.2 * k + 0.3, 0.25, t); rafagaRuido(b, t, 0.25); }
+    if (tipo === 'coche' && k > 0.35) for (let i = 0; i < 5; i++) {
+      const b = filtro('highpass', 4000 + Math.random() * 3000, 1), gb = ganancia(0), ti = t + 0.04 + Math.random() * 0.25;
+      cadena(b, gb, maestro); envolvente(gb, 0.18 * k, 0.06, ti); rafagaRuido(b, ti, 0.06);
+    }
+  }
+  // Bote al subir o bajar un bordillo
+  function bordillo(k) {
+    if (!ctx || !n) return;
+    const t = t0(), o = osc('sine', 85), g = ganancia(0);
+    o.frequency.setValueAtTime(95, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.18);
+    cadena(o, g, maestro); envolvente(g, 0.7 * k, 0.2, t); o.start(t); o.stop(t + 0.22);
+    const f = filtro('lowpass', 500), gf = ganancia(0);
+    cadena(f, gf, maestro); envolvente(gf, 0.5 * k, 0.15, t); rafagaRuido(f, t, 0.15);
+  }
+  // Bocina de un coche de tráfico, más baja cuanto más lejos
+  function bocina(dist) {
+    if (!ctx || !n) return;
+    const t = t0(), g = ganancia(0), f = filtro('lowpass', 1900, 1), vol = 0.22 / (1 + dist / 12);
+    cadena(f, g, maestro);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.02); g.gain.setValueAtTime(vol, t + 0.42); g.gain.linearRampToValueAtTime(0, t + 0.5);
+    for (const fr of [415, 518]) { const o = osc('square', fr); o.connect(f); o.start(t); o.stop(t + 0.52); }
+  }
+  function pitido(fr, dur, vol = 0.22) {
+    if (!ctx || !n) return;
+    const t = t0(), o = osc('triangle', fr), g = ganancia(0);
+    cadena(o, g, maestro);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.01); g.gain.setValueAtTime(vol, t + dur * 0.7); g.gain.linearRampToValueAtTime(0, t + dur);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+  function campana(vuelta) {
+    if (!ctx) return;
+    const notas = vuelta ? [784, 988, 1175, 1568] : [880, 1320];
+    notas.forEach((fr, i) => setTimeout(() => pitido(fr, 0.22, 0.18), i * 110));
+  }
+  function clic() { pitido(1400, 0.05, 0.12); }
+  function alternar() {
+    activo = !activo;
+    try { localStorage.setItem('cochesHuelva.sonido', activo ? 'si' : 'no'); } catch (err) { /* sin almacenamiento */ }
+    iniciar();
+    if (maestro) maestro.gain.setTargetAtTime(activo ? 0.85 : 0, ctx.currentTime, 0.05);
+    return activo;
+  }
+  document.addEventListener('visibilitychange', () => { if (ctx) { if (document.hidden) ctx.suspend(); else ctx.resume(); } });
+  return { iniciar, actualizar, golpe, bordillo, bocina, pitido, campana, clic, alternar, activo: () => activo };
+})();
+
+let renderer, scene, camara, reloj;
+let zona = null;                 // { tramos, G, edif, rejilla, mundo, caja }
+let mallaZona = null;            // grupo con suelo, calles, casas y mundo
+let cocheMesh = null;            // grupo del coche: posición y rumbo
+let cuerpoCoche = null;          // dentro de cocheMesh: la carrocería, que cabecea y se inclina
+let lucesCoche = null;           // halos de las luces de freno y de marcha atrás
+let sombraCoche = null;          // mancha oscura bajo el coche
+let cielo = null, sol = null, sombras = false;
+let contextoRecuperado = false;   // se pone a true si el contexto 3D vuelve tras perderse
+let coche = null;                // { x, z, h, v, dir, acera, golpe, rpm, marcha, cambio, gas, freno, tFreno, sx, sz, wGolpe, ... }
+let carrera = null;              // { cps, meshes, siguiente, vueltas, tVuelta, tiempos, longitud }
+let rutaLinea = null;           // flechas de la ruta (grupo de mallas)
+let modoCamara = 0;             // 0 detrás del coche, 1 cerca del coche, 2 dentro del coche
+let trafico = [], peatones = []; // coches de tráfico y peatones de la zona (se crean con cada carrera)
+let mallaTrafico = [], mallaPeatones = [], matFlechas = null, flechasDatos = null;
+let lucesTrafico = null, sombrasTrafico = null;   // pilotos (dos por coche) y manchas de sombra del tráfico
+let estado = 'menu';             // menu | cuenta | corriendo | fin
+let cuenta = 0, tInicio = 0;
+let avisoTexto = '', avisoHasta = 0;
+let tramoActual = null, dTramo2 = Infinity;
+const controles = { acel: false, freno: false, izq: false, der: false };
+const TECLAS = { ArrowUp: 'acel', KeyW: 'acel', ArrowDown: 'freno', KeyS: 'freno', ArrowLeft: 'izq', KeyA: 'izq', ArrowRight: 'der', KeyD: 'der' };
+const volante = { ang: 0, activo: false, aPrev: 0, muesca: 0 };   // ruleta táctil; ang en grados: positivo = giro a la derecha
+const GIRO_RULETA = 140;         // grados de ruleta para girar del todo
+
+const COLOR_HORIZONTE = 0xc4def0;
+function iniciarRender() {
+  // En el móvil, menos píxeles, sin antialias y sin sombras: la GPU del teléfono no aguanta lo que aguanta un ordenador
+  const movil = matchMedia('(pointer: coarse)').matches;
+  renderer = new THREE.WebGLRenderer({ antialias: !movil, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, movil ? 1.5 : 2));
+  sombras = !movil;
+  if (sombras) { renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; }
+  // Si el contexto 3D se pierde (la GPU se reinicia), se avisa y se intenta recuperar; si no vuelve, se recarga la página
+  renderer.domElement.addEventListener('webglcontextlost', e => {
+    e.preventDefault();
+    mostrarAviso('Se ha perdido la imagen 3D; intentando recuperarla…', 4);
+    setTimeout(() => { if (!contextoRecuperado) location.reload(); }, 4000);
+  });
+  renderer.domElement.addEventListener('webglcontextrestored', () => { contextoRecuperado = true; mostrarAviso('Imagen 3D recuperada', 2); });
+  renderer.setSize(innerWidth, innerHeight);
+  document.body.insertBefore(renderer.domElement, document.body.firstChild);
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(COLOR_HORIZONTE);
+  scene.fog = new THREE.Fog(COLOR_HORIZONTE, 700, 3200);
+  camara = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 4000);
+  scene.add(new THREE.HemisphereLight(0xe4f0ff, 0x5b5847, 0.82));
+  sol = new THREE.DirectionalLight(0xfff1dc, 0.82);
+  sol.position.set(300, 500, 200);
+  if (sombras) {
+    // sombras solo alrededor del coche: la cámara de la luz lo sigue
+    sol.castShadow = true;
+    sol.shadow.mapSize.set(2048, 2048);
+    Object.assign(sol.shadow.camera, { left: -90, right: 90, top: 90, bottom: -90, near: 10, far: 1400 });
+    sol.shadow.bias = -0.0006;
+    sol.shadow.normalBias = 0.05;
+  }
+  scene.add(sol, sol.target);
+  cielo = crearCielo(sol.position.clone().normalize());
+  scene.add(cielo, Efectos.crear());
+  reloj = new THREE.Clock();
+  addEventListener('resize', () => {
+    renderer.setSize(innerWidth, innerHeight);
+    camara.aspect = innerWidth / innerHeight;
+    camara.updateProjectionMatrix();
+  });
+  requestAnimationFrame(bucle);
+}
+// Cielo: degradado del horizonte al azul de arriba, con el sol y su resplandor. Va siempre centrado en la cámara
+function crearCielo(dirSol) {
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+    uniforms: { uSol: { value: dirSol }, uArriba: { value: new THREE.Color(0x3f82d4) }, uHorizonte: { value: new THREE.Color(COLOR_HORIZONTE) } },
+    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform vec3 uSol; uniform vec3 uArriba; uniform vec3 uHorizonte; varying vec3 vD;
+      void main(){
+        vec3 d = normalize(vD);
+        float h = max(d.y, 0.0);
+        vec3 c = mix(uHorizonte, uArriba, pow(h, 0.5));
+        c = mix(c, uHorizonte * 0.92, step(d.y, 0.0));
+        float s = max(dot(d, normalize(uSol)), 0.0);
+        c += vec3(1.0, 0.9, 0.7) * (pow(s, 900.0) * 1.6 + pow(s, 14.0) * 0.16);
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), mat);
+  m.renderOrder = -10;
+  m.frustumCulled = false;
+  return m;
+}
+// Textura redonda y difuminada (halos de luces, humo y sombra del coche)
+let texturaHaloCache = null;
+function texturaHalo() {
+  if (!texturaHaloCache) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    texturaHaloCache = new THREE.CanvasTexture(cv);
+  }
+  return texturaHaloCache;
+}
+// Malla que proyecta y recibe sombras (si hay sombras)
+function conSombra(o, proyecta = true, recibe = true) {
+  if (sombras) o.traverse(m => { if (m.isMesh) { m.castShadow = proyecta; m.receiveShadow = recibe; } });
+  return o;
+}
+
+// --- mallas ---
+const COLOR_CALZADA = t => {
+  switch (tipoBase(t.tipo)) {
+    case 'motorway': return [0.3, 0.3, 0.33];
+    case 'trunk': case 'primary': return [0.36, 0.36, 0.4];
+    case 'secondary': case 'tertiary': return [0.4, 0.4, 0.43];
+    default: return [0.47, 0.47, 0.49];
+  }
+};
+// --- texturas de calzada y aceras, dibujadas aquí (sin imágenes externas) ---
+const TU_ASFALTO = 6, TU_ADOQUIN = 2;   // metros que ocupa una repetición de cada textura
+// Texturas de calzada y acera: imágenes de texturas/ (generadas con Blender). Mientras cargan, se ven los colores de vértice
+const texturasCalle = {};
+function texturaImagen(archivo) {
+  if (!texturasCalle[archivo]) {
+    const t = new THREE.TextureLoader().load(archivo);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 4;
+    texturasCalle[archivo] = t;
+  }
+  return texturasCalle[archivo];
+}
+const texturaAsfalto = () => texturaImagen('texturas/asfalto.jpg');
+const texturaAdoquin = () => texturaImagen('texturas/adoquin.jpg');
+
+// Malla que se va llenando por trozos: posición, color, normal y coordenadas de textura por vértice
+function nuevaMalla() {
+  const m = { pos: [], col: [], nor: [], uv: [] };
+  m.v = (x, y, z, c, u, w, nx = 0, ny = 1, nz = 0) => {
+    m.pos.push(x, y, z); m.col.push(c[0], c[1], c[2]); m.nor.push(nx, ny, nz); m.uv.push(u, w);
+  };
+  m.geo = () => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(m.pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(m.col, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(m.nor, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(m.uv, 2));
+    return g;
+  };
+  return m;
+}
+// Franja horizontal entre los desplazamientos s0 y s1 respecto al eje de una polilínea, a la altura y.
+// Las coordenadas de textura van por metros recorridos (u) y por metros a lo ancho (v), con repetición de tu y tv
+function bandasH(m, pts, s0, s1, y, c, tu = 1, tv = 1) {
+  const cum = acumulados(pts);
+  const V = (x, z, s, d) => m.v(x, y, z, c, d / tu, s / tv);
+  const normal = k => { const dx = pts[k + 1][0] - pts[k][0], dz = pts[k + 1][1] - pts[k][1], L = Math.hypot(dx, dz); return L < 1e-6 ? null : [-dz / L, dx / L]; };
+  for (let k = 0; k < pts.length - 1; k++) {
+    const n = normal(k);
+    if (!n) continue;
+    const [ax, az] = pts[k], [bx, bz] = pts[k + 1], da = cum[k], db = cum[k + 1];
+    const A0 = [ax + n[0] * s0, az + n[1] * s0], A1 = [ax + n[0] * s1, az + n[1] * s1];
+    const B0 = [bx + n[0] * s0, bz + n[1] * s0], B1 = [bx + n[0] * s1, bz + n[1] * s1];
+    V(A0[0], A0[1], s0, da); V(B1[0], B1[1], s1, db); V(B0[0], B0[1], s0, db);
+    V(A0[0], A0[1], s0, da); V(A1[0], A1[1], s1, da); V(B1[0], B1[1], s1, db);
+  }
+  // en cada vértice, un cuadrilátero une la franja de un tramo con la del siguiente (no quedan huecos en las curvas);
+  // se ordena para que mire hacia arriba (si no, se vería oscuro, como cara trasera)
+  const orientar = t => (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[1][1] - t[0][1]) * (t[2][0] - t[0][0]) < 0 ? t : [t[0], t[2], t[1]];
+  for (let k = 1; k < pts.length - 1; k++) {
+    const n0 = normal(k - 1), n1 = normal(k);
+    if (!n0 || !n1) continue;
+    const P = pts[k], d = cum[k];
+    const B0 = [P[0] + n0[0] * s0, P[1] + n0[1] * s0, s0], B1 = [P[0] + n0[0] * s1, P[1] + n0[1] * s1, s1];
+    const A0 = [P[0] + n1[0] * s0, P[1] + n1[1] * s0, s0], A1 = [P[0] + n1[0] * s1, P[1] + n1[1] * s1, s1];
+    for (const tri of [[B0, A0, A1], [B0, A1, B1]]) for (const [x, z, s] of orientar(tri)) V(x, z, s, d);
+  }
+}
+
+// Calzada, aceras, bordillos y arcenes de cada calle (anchos del zip). Caminos de tierra sin aceras.
+function mallaCarreteras(tramos) {
+  const calzada = nuevaMalla(), aceras = nuevaMalla(), bordillos = nuevaMalla(), rigolas = nuevaMalla();
+  const ACERA = [0.5, 0.48, 0.45], CANTO = [0.7, 0.68, 0.64], BORDILLO = [0.56, 0.54, 0.51], ARCEN = [0.42, 0.41, 0.39], RIGOLA = [0.6, 0.59, 0.56];
+  // cara vertical (bordillo) en el desplazamiento s, de y0 a y1; mira hacia el centro de la calle
+  const caraV = (m, pts, s, y0, y1, c) => {
+    const sg = s >= 0 ? -1 : 1;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const ax = pts[k][0], az = pts[k][1], bx = pts[k + 1][0], bz = pts[k + 1][1];
+      const dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz);
+      if (L < 1e-6) continue;
+      const nx = -dz / L, nz = dx / L;
+      const P0 = [ax + nx * s, y0, az + nz * s], P1 = [ax + nx * s, y1, az + nz * s];
+      const Q0 = [bx + nx * s, y0, bz + nz * s], Q1 = [bx + nx * s, y1, bz + nz * s];
+      const tr = sg < 0 ? [P0, P1, Q0, P1, Q1, Q0] : [P0, Q0, P1, P1, Q0, Q1];
+      for (const v of tr) m.v(v[0], v[1], v[2], c, 0, 0, sg * nx, 0, sg * nz);
+    }
+  };
+  const enOtra = construirRejillaCalzadas(tramos);
+  for (let k = 0; k < tramos.length; k++) {
+    const t = tramos[k];
+    const h = t.ancho / 2;
+    const tierra = /tierra|grava/.test(t.dib), adoquin = /adoqu/.test(t.dib);
+    const asfalto = tierra ? [0.5, 0.42, 0.3] : adoquin ? [0.52, 0.5, 0.47] : COLOR_CALZADA(t);
+    bandasH(calzada, t.pts, -h, h, 0.05, asfalto, TU_ASFALTO, TU_ASFALTO);
+    if (t.acera > 0 && !tierra) {
+      // aceras y bordillos solo donde no caen dentro de la calzada de otra calle (cruces y calzadas dobles)
+      const cum = acumulados(t.pts);
+      for (const [d0, d1] of trozosLibres(t, cum, h + t.acera / 2, (x, z) => enOtra(x, z, k))) {
+        const p = subPolilinea(t.pts, cum, d0, d1);
+        bandasH(aceras, p, h + 0.2, h + t.acera, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
+        bandasH(aceras, p, h, h + 0.2, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);   // canto claro del bordillo
+        caraV(bordillos, p, h, 0.05, 0.16, BORDILLO);
+        bandasH(rigolas, p, h - 0.3, h, 0.055, RIGOLA, TU_ADOQUIN, TU_ADOQUIN);   // rigola de hormigón junto al bordillo
+      }
+      for (const [d0, d1] of trozosLibres(t, cum, -(h + t.acera / 2), (x, z) => enOtra(x, z, k))) {
+        const p = subPolilinea(t.pts, cum, d0, d1);
+        bandasH(aceras, p, -h - t.acera, -h - 0.2, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
+        bandasH(aceras, p, -h - 0.2, -h, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);
+        caraV(bordillos, p, -h, 0.05, 0.16, BORDILLO);
+        bandasH(rigolas, p, -h, -h + 0.3, 0.055, RIGOLA, TU_ADOQUIN, TU_ADOQUIN);
+      }
+    } else if (/con arcén/.test(t.dib)) {   // arcén: franja junto a la calzada, sin acera
+      bandasH(calzada, t.pts, h, h + 1.2, 0.045, ARCEN, TU_ASFALTO, TU_ASFALTO);
+      bandasH(calzada, t.pts, -h - 1.2, -h, 0.045, ARCEN, TU_ASFALTO, TU_ASFALTO);
+    }
+  }
+  const grupo = new THREE.Group();
+  const matCalzada = new THREE.MeshLambertMaterial({ map: texturaAsfalto(), vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const matAceras = new THREE.MeshLambertMaterial({ map: texturaAdoquin(), vertexColors: true, side: THREE.DoubleSide });
+  const matBordillos = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const matRigolas = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  grupo.add(new THREE.Mesh(calzada.geo(), matCalzada), new THREE.Mesh(aceras.geo(), matAceras), new THREE.Mesh(bordillos.geo(), matBordillos), new THREE.Mesh(rigolas.geo(), matRigolas));
+  return conSombra(grupo, false, true);
+}
+
+// Marcas viales: línea central, bordes y pasos de cebra (franjas blancas sobre la calzada)
+function mallaMarcas(marcas) {
+  const m = nuevaMalla(), BLANCO = [0.95, 0.95, 0.92];
+  for (const k of marcas) bandasH(m, k.pts, k.s0, k.s1, 0.07, BLANCO);
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  return new THREE.Mesh(m.geo(), mat);
+}
+
+// Farolas: poste, brazo y luminaria como instancias (una llamada de dibujo por parte)
+function mallaFarolas(farolas) {
+  const grupo = new THREE.Group();
+  const n = farolas.length;
+  if (!n) return grupo;
+  const metal = new THREE.MeshLambertMaterial({ color: 0x5d6368 });
+  const poste = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.07, 0.09, 6, 6, 1, true).translate(0, 3, 0), metal, n);
+  const brazo = new THREE.InstancedMesh(new THREE.BoxGeometry(1.3, 0.1, 0.1).translate(0.65, 5.8, 0), metal, n);
+  const luz = new THREE.InstancedMesh(new THREE.BoxGeometry(0.5, 0.12, 0.3).translate(1.3, 5.72, 0), new THREE.MeshLambertMaterial({ color: 0xe6e8e4 }), n);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0);
+  farolas.forEach((f, i) => {
+    m.compose(new THREE.Vector3(f.x, 0, f.z), q.setFromAxisAngle(eje, f.th), new THREE.Vector3(1, 1, 1));
+    poste.setMatrixAt(i, m); brazo.setMatrixAt(i, m); luz.setMatrixAt(i, m);
+  });
+  for (const im of [poste, brazo, luz]) { im.instanceMatrix.needsUpdate = true; im.frustumCulled = false; grupo.add(im); }
+  return conSombra(grupo, true, false);
+}
+
+// Ortofoto (PNOA) de la zona: una malla sobre el rectángulo que cubre la imagen; cada vértice lleva su punto exacto de la foto
+function mallaFoto(foto) {
+  const { g, W, H } = foto;
+  const esquinas = [[-0.5, -0.5], [W - 0.5, -0.5], [-0.5, H - 0.5], [W - 0.5, H - 0.5]]
+    .map(([c, f]) => localDeMercator(g.A * c + g.B * f + g.C, g.D * c + g.E * f + g.F));
+  const x0 = Math.min(...esquinas.map(e => e[0])), x1 = Math.max(...esquinas.map(e => e[0]));
+  const z0 = Math.min(...esquinas.map(e => e[1])), z1 = Math.max(...esquinas.map(e => e[1]));
+  const NX = 48, NZ = 48, pos = [], uv = [], idx = [];
+  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
+    const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ;
+    const [X, Y] = mercatorDeLocal(x, z), [u, v] = uvOrtofoto(X, Y, g, W, H);
+    pos.push(x, -0.1, z); uv.push(u, v);
+  }
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+    const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));   // suelo plano: normal hacia arriba
+  geo.setIndex(idx);
+  // Lambert para que reciba sombras; el gris compensa la luz del cielo y del sol, y la foto se ve con su brillo
+  const malla = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: foto.textura, side: THREE.DoubleSide, color: new THREE.Color(0.7, 0.7, 0.7) }));
+  malla.receiveShadow = sombras;
+  return malla;
+}
+// Suelo: la ortofoto donde hay; fuera de ella, el color medio de la foto (o el verde de siempre si no hay foto)
+function construirTerreno(caja, capas, foto) {
+  const grupo = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.PlaneGeometry(14000, 14000), foto
+    ? new THREE.MeshBasicMaterial({ color: foto.media })
+    : new THREE.MeshLambertMaterial({ color: SUELO_BASE }));
+  base.rotation.x = -Math.PI / 2;
+  base.position.y = -1.2;
+  grupo.add(base, construirSuelo(caja, capas, foto ? foto.media : SUELO_BASE));
+  if (foto) grupo.add(mallaFoto(foto));
+  return grupo;
+}
+
+// Suelo pintado con los usos del mapa (praderas, parques, cultivos, agua) sobre la caja de la zona.
+// La luz del juego lo deja muy claro: se oscurece un poco para que los cultivos no salgan blancos
+const LUZ_SUELO = 0.72;
+function construirSuelo(caja, capas, colorBase) {
+  const [x0, z0, x1, z1] = caja;
+  const W = x1 - x0, H = z1 - z0, esc = 2048 / Math.max(W, H);
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(W * esc); cv.height = Math.round(H * esc);
+  const g = cv.getContext('2d');
+  g.fillStyle = colorBase; g.fillRect(0, 0, cv.width, cv.height);
+  const px = x => (x - x0) * esc, py = z => (z - z0) * esc;
+  for (const capa of ['cultivo', 'pradera', 'humedal', 'zona urbana', 'parque o jardín', 'cauce', 'agua']) {
+    for (const c of capas) {
+      if (c.capa !== capa) continue;
+      const pts = c.anillo || c.linea;
+      g.beginPath();
+      pts.forEach(([x, z], i) => (i ? g.lineTo(px(x), py(z)) : g.moveTo(px(x), py(z))));
+      if (c.anillo) { g.closePath(); g.fillStyle = COLOR_SUELO[capa]; g.fill(); }
+      else { g.strokeStyle = COLOR_SUELO[capa]; g.lineWidth = c.ancho * esc; g.lineJoin = 'round'; g.stroke(); }
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  const suelo = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshLambertMaterial({ map: tex, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO) }));
+  suelo.rotation.x = -Math.PI / 2;
+  suelo.position.set((x0 + x1) / 2, -0.6, (z0 + z1) / 2);
+  suelo.receiveShadow = sombras;
+  return suelo;
+}
+
+// Agua: superficie que ondula; el coche no entra en ella
+const materialAgua = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  uniforms: { uTiempo: { value: 0 } },
+  vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform float uTiempo; varying vec3 vP;
+    void main(){
+      float o = sin(dot(vP.xz, vec2(0.071,0.043)) + uTiempo*0.6) + 0.7*sin(dot(vP.xz, vec2(-0.052,0.067)) - uTiempo*0.45)
+        + 0.5*sin(dot(vP.xz, vec2(0.023,-0.091)) + uTiempo*0.8);
+      vec3 base = mix(vec3(0.14,0.38,0.58), vec3(0.2,0.5,0.7), 0.5 + 0.2*o);
+      gl_FragColor = vec4(base + smoothstep(1.4, 2.2, o) * 0.16, 1.0);
+    }`,
+});
+function mallaPoligono(pts, y) {
+  let tris;
+  try { tris = THREE.ShapeUtils.triangulateShape(pts.map(p => new THREE.Vector2(p[0], p[1])), []); }
+  catch (err) { return null; }
+  const pos = [];
+  for (const t of tris) for (const i of t) pos.push(pts[i][0], y, pts[i][1]);
+  if (!pos.length) return null;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return g;
+}
+function mallaAguas(aguas) {
+  const grupo = new THREE.Group();
+  for (const a of aguas) {
+    const geo = mallaPoligono(a.pts, 0.03);
+    if (geo) grupo.add(new THREE.Mesh(geo, materialAgua));
+  }
+  return grupo;
+}
+
+// Árboles: troncos y copas en instancias (una sola llamada de dibujo por parte)
+// --- árboles: modelos de Kenney (modelos/arboles/, CC0) por bloques de 150 m; solo se dibujan los bloques cercanos al coche ---
+// Árboles de modelos/arboles/ (Kenney Nature Kit, CC0): sobre todo árboles altos, y algún arbusto
+const ARCHIVOS_ARBOLES = [
+  'modelos/arboles/roble.glb', 'modelos/arboles/roble.glb', 'modelos/arboles/roble.glb', 'modelos/arboles/alamo.glb',
+  'modelos/arboles/alamo.glb', 'modelos/arboles/pino.glb', 'modelos/arboles/pino.glb', 'modelos/arboles/arbusto.glb',
+];
+const BLOQUE_ARBOLES = 150;    // m
+const DIST_ARBOLES = 260;      // m: más allá de esta distancia no se dibujan
+let bloquesArboles = [];       // { malla, cx, cz }
+const geometriasModelo = {};   // archivo → promesa de { geo, materiales }, se carga una sola vez
+function geometriaModelo(archivo) {
+  if (!geometriasModelo[archivo]) geometriasModelo[archivo] = new Promise((res, rej) =>
+    new THREE.GLTFLoader().load(archivo, g => res(geometriaUnida(g.scene)), undefined, rej));
+  return geometriasModelo[archivo];
+}
+async function mallaArbolesModelos(arboles) {
+  const modelos = await Promise.all(ARCHIVOS_ARBOLES.map(geometriaModelo));
+  const rng = mulberry32(99), m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), c = new THREE.Color();
+  const bloques = new Map();
+  for (const [x, z] of arboles) {
+    const bx = Math.floor(x / BLOQUE_ARBOLES), bz = Math.floor(z / BLOQUE_ARBOLES), k = Math.floor(rng() * modelos.length);
+    const clave = bx + ',' + bz + ',' + k;
+    if (!bloques.has(clave)) bloques.set(clave, { bx, bz, k, lista: [] });
+    bloques.get(clave).lista.push([x, z, rng(), rng()]);
+  }
+  const grupo = new THREE.Group(), mallas = [];
+  for (const { bx, bz, k, lista } of bloques.values()) {
+    const im = new THREE.InstancedMesh(modelos[k].geo, modelos[k].materiales, lista.length);
+    im.frustumCulled = false;
+    lista.forEach(([x, z, giro, tamano], i) => {
+      const esc = 0.85 + 0.3 * tamano;
+      m.compose(new THREE.Vector3(x, 0, z), q.setFromAxisAngle(eje, giro * Math.PI * 2), uno.set(esc, esc, esc));
+      im.setMatrixAt(i, m);
+      im.setColorAt(i, c.setRGB(0.78 + 0.12 * tamano, 0.95 + 0.05 * tamano, 0.55 + 0.1 * tamano));   // del verde azulado de los modelos a un verde más natural, con algo de variación
+    });
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.castShadow = sombras;
+    grupo.add(im);
+    mallas.push({ malla: im, cx: (bx + 0.5) * BLOQUE_ARBOLES, cz: (bz + 0.5) * BLOQUE_ARBOLES });
+  }
+  bloquesArboles = mallas;
+  return grupo;
+}
+function mallaArboles(arboles) {
+  const grupo = new THREE.Group();
+  if (!arboles.length) return grupo;
+  if (!ARCHIVOS_ARBOLES.length) return mallaArbolesProcedural(arboles);
+  bloquesArboles = [];
+  mallaArbolesModelos(arboles).then(g => grupo.add(g), () => grupo.add(mallaArbolesProcedural(arboles)));   // si no cargan, árboles sencillos
+  return grupo;
+}
+// Solo se dibujan los bloques de árboles cercanos al coche
+function actualizarArboles() {
+  for (const b of bloquesArboles) b.malla.visible = Math.hypot(b.cx - coche.x, b.cz - coche.z) < DIST_ARBOLES + BLOQUE_ARBOLES;
+}
+function mallaArbolesProcedural(arboles) {
+  const n = arboles.length, grupo = new THREE.Group();
+  if (!n) return grupo;
+  const troncos = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.28, 2.6, 4, 1, true).translate(0, 1.3, 0), new THREE.MeshLambertMaterial({ color: 0x6b4a2b }), n);
+  const copas = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(2.0, 0).translate(0, 3.7, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }), n);
+  const rng = mulberry32(99), m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const k = 0.75 + rng() * 0.6;
+    m.compose(new THREE.Vector3(arboles[i][0], 0, arboles[i][1]), q.setFromAxisAngle(eje, rng() * Math.PI * 2), new THREE.Vector3(k, k, k));
+    troncos.setMatrixAt(i, m); copas.setMatrixAt(i, m);
+    copas.setColorAt(i, c.setHSL(0.2 + rng() * 0.1, 0.42 + rng() * 0.2, 0.26 + rng() * 0.12));
+  }
+  troncos.instanceMatrix.needsUpdate = true; copas.instanceMatrix.needsUpdate = true;
+  if (copas.instanceColor) copas.instanceColor.needsUpdate = true;
+  troncos.frustumCulled = false; copas.frustumCulled = false;
+  grupo.add(troncos, copas);
+  return conSombra(grupo, true, false);
+}
+
+// Quitamiedos: bionda de doble onda (perfil W) de acero galvanizado, postes cada 4 m detrás y captafaros naranjas
+const PERFIL_BIONDA = [[0, 0.42], [0.07, 0.47], [0.07, 0.53], [0.015, 0.58], [0.07, 0.63], [0.07, 0.69], [0, 0.74]];   // [hacia la calzada, altura] (m)
+function mallaQuitamiedos(rieles) {
+  const pos = [], nor = [], postes = [], ojos = [];
+  // triángulo con su normal; se ordena para que la cara de delante mire hacia la normal (con DoubleSide, la de detrás se vería oscura)
+  const tri = (A, B, C, n) => {
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    const [p, q] = cx * n[0] + cy * n[1] + cz * n[2] >= 0 ? [B, C] : [C, B];
+    for (const v of [A, p, q]) { pos.push(v[0], v[1], v[2]); nor.push(n[0], n[1], n[2]); }
+  };
+  for (const r of rieles) {
+    const p = r.pts, lado = r.lado || 1;
+    const N = p.map((_, k) => { const n = normalEn(p, k); return [n[0] * lado, n[1] * lado]; });   // hacia la calzada
+    const en = (k, s, y) => [p[k][0] + N[k][0] * s, y, p[k][1] + N[k][1] * s];
+    for (let k = 0; k < p.length - 1; k++) {
+      for (let j = 0; j < PERFIL_BIONDA.length - 1; j++) {
+        const [s0, y0] = PERFIL_BIONDA[j], [s1, y1] = PERFIL_BIONDA[j + 1];
+        let ns = y1 - y0, ny = -(s1 - s0);
+        const l = Math.hypot(ns, ny) || 1; ns /= l; ny /= l;
+        const nk = [(N[k][0] + N[k + 1][0]) / 2 * ns, ny, (N[k][1] + N[k + 1][1]) / 2 * ns];
+        const A0 = en(k, s0, y0), A1 = en(k, s1, y1), B0 = en(k + 1, s0, y0), B1 = en(k + 1, s1, y1);
+        tri(A0, B0, B1, nk); tri(A0, B1, A1, nk);
+      }
+    }
+    // postes y captafaros a lo largo de la bionda
+    const cum = acumulados(p), L = cum[cum.length - 1];
+    for (let d = 0.5, i = 0; d < L; d += 4, i++) {
+      const e = enPolilinea(p, cum, d), nx = -e.tz * lado, nz = e.tx * lado;
+      postes.push({ x: e.x - nx * 0.1, z: e.z - nz * 0.1, h: Math.atan2(nx, nz) });
+      if (i % 3 === 0) ojos.push({ x: e.x + nx * 0.08, z: e.z + nz * 0.08, h: Math.atan2(nx, nz) });
+    }
+  }
+  const grupo = new THREE.Group();
+  if (pos.length) {
+    const banda = new THREE.BufferGeometry();
+    banda.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    banda.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    grupo.add(new THREE.Mesh(banda, new THREE.MeshPhongMaterial({ color: 0xbfc7ce, specular: 0x8e979f, shininess: 70, side: THREE.DoubleSide })));
+  }
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  const instancias = (geo, mat, lista) => {
+    const im = new THREE.InstancedMesh(geo, mat, lista.length);
+    lista.forEach((o, i) => { m.compose(new THREE.Vector3(o.x, 0, o.z), q.setFromAxisAngle(eje, o.h), uno); im.setMatrixAt(i, m); });
+    im.instanceMatrix.needsUpdate = true;
+    im.frustumCulled = false;
+    grupo.add(im);
+  };
+  if (postes.length) instancias(new THREE.BoxGeometry(0.1, 0.8, 0.14).translate(0, 0.4, 0), new THREE.MeshLambertMaterial({ color: 0x7f878e }), postes);
+  if (ojos.length) instancias(new THREE.BoxGeometry(0.1, 0.07, 0.02).translate(0, 0.58, 0), new THREE.MeshBasicMaterial({ color: 0xff9a1a }), ojos);
+  return conSombra(grupo);
+}
+
+// Rotondas: césped en el centro, bordillo alrededor
+function mallaIslas(islas) {
+  const grupo = new THREE.Group();
+  const cesped = new THREE.MeshLambertMaterial({ color: 0x6fa35a }), bordillo = new THREE.MeshLambertMaterial({ color: 0xb8b5ad });
+  for (const i of islas) {
+    const disco = new THREE.Mesh(new THREE.CircleGeometry(i.ri, 28).rotateX(-Math.PI / 2), cesped);
+    disco.position.set(i.cx, 0.12, i.cz);
+    const anillo = new THREE.Mesh(new THREE.RingGeometry(i.ri, i.ri + 0.4, 28).rotateX(-Math.PI / 2), bordillo);
+    anillo.position.set(i.cx, 0.14, i.cz);
+    grupo.add(disco, anillo);
+  }
+  return grupo;
+}
+
+// --- edificios: paredes con ventanas, puerta, zócalo y marcos, dibujados en el sombreado (como el paseo) ---
+const FRAGMENTO_FACHADA = `#include <color_fragment>
+  float fwu=fwidth(vWw.x),fwv=fwidth(vWw.y);
+  if(vWw.z>0.5){
+    float u=vWw.x,v=vWw.y,H=vWw.z;
+    float aa=clamp(1.0-max(fwu,fwv)*2.2,0.0,1.0);
+    vec3 base=diffuseColor.rgb;
+    float n1=hh(floor(vec2(u,v)*1.5)),n2=hh(floor(vec2(u,v)*0.2+7.0));
+    vec3 col=base*mix(1.0,0.95+0.08*n1,aa)*(0.97+0.05*n2);
+    float zh=vZc.a*4.0;
+    col*=1.0-0.07*(1.0-smoothstep(zh,zh+1.3,v));
+    col=mix(col,vZc.rgb*(0.93+0.1*n1),1.0-step(zh,v));
+    col*=1.0-0.3*(1.0-smoothstep(0.0,0.035,abs(v-zh)))*aa*step(0.2,zh);
+    float cor=step(H-0.34,v)*step(v,H-0.1);
+    col=mix(col,base*1.03,cor);
+    col*=1.0-0.2*step(H-0.5,v)*step(v,H-0.34)*smoothstep(H-0.5,H-0.34,v)*aa;
+    float fx=floor(vFa.x+0.5),type=mod(fx,4.0),ws=floor(fx/4.0);
+    if(type>0.5){
+      float u0=vFa.z,u1=vFa.w,L=u1-u0,doorU=vFa.y;
+      float sp=type>1.5?3.3:5.0,nC=max(1.0,floor(L/sp+0.25)),s=L/nC;
+      float ci=clamp(floor((u-u0)/s),0.0,nC-1.0),cu=u0+(ci+0.5)*s,du=u-cu;
+      float fl=floor(max(v,0.0)/3.1),fv=v-fl*3.1;
+      float r1=hh(vec2(ws*1.37+ci*7.0,fl+3.0)),r2=hh(vec2(ws*0.71+ci*3.0+11.0,fl+19.0)),r3=hh(vec2(ws*2.13+ci*5.0+29.0,fl+7.0));
+      vec3 carp=vCp.rgb;
+      float hasDoor=step(-9000.0,doorU);
+      float doorCol=hasDoor*step(abs(cu-doorU),0.05);
+      float dW=min(1.15,s*0.8),dH=2.3;
+      float dx=u-doorU;
+      float inDoor=hasDoor*step(abs(dx),dW*0.5)*step(0.0,v)*step(v,dH);
+      bool ground=fl<0.5;
+      float ww=ground?1.1:1.0,wh=ground?1.4:1.35,sill=ground?1.0:0.85;
+      float bal=(type>1.5&&!ground&&r1<0.5)?1.0:0.0;
+      if(bal>0.5){ww=1.05;wh=2.15;sill=0.06;}
+      ww=min(ww,s*0.7);
+      float okW=step(1.6,L)*step(fl*3.1+sill+wh,H-0.45)*(1.0-doorCol*(ground?1.0:0.0))*(type<1.5?step(0.45,r2):1.0)*step(0.35,fl*3.1+sill);
+      vec2 wq=vec2(du/ww+0.5,(fv-sill)/wh);
+      float inW=okW*step(0.0,wq.x)*step(wq.x,1.0)*step(0.0,wq.y)*step(wq.y,1.0);
+      if(vCp.a>0.5){float rw=0.16;vec3 rcc=mix(vec3(0.6,0.38,0.12),vec3(0.52,0.31,0.09),hh(vec2(ws,1.0)));
+        float inR=okW*step(abs(du),ww*0.5+rw)*step(sill-rw,fv)*step(fv,sill+wh+rw)*(1.0-inW);
+        float inRD=hasDoor*step(abs(dx),dW*0.5+rw)*step(0.0,v)*step(v,dH+rw)*(1.0-inDoor);
+        col=mix(col,rcc,max(inR,inRD)*(0.4+0.6*aa));}
+      float slab=okW*step(abs(du),ww*0.5+(bal>0.5?0.22:0.08))*step(sill-(bal>0.5?0.14:0.07),fv)*step(fv,sill)*(1.0-inW);
+      col=mix(col,vec3(0.78,0.77,0.74),slab*(0.4+0.6*aa));
+      col*=1.0-0.18*okW*step(abs(du),ww*0.5+(bal>0.5?0.22:0.08))*step(sill-(bal>0.5?0.45:0.25),fv)*step(fv,sill-(bal>0.5?0.14:0.07))*aa;
+      if(inW>0.5){
+        vec2 wp=vec2(wq.x*ww,wq.y*wh);
+        float fr=0.07,frame=1.0-step(fr,wp.x)*step(wp.x,ww-fr)*step(fr,wp.y)*step(wp.y,wh-fr);
+        float mull=1.0-step(0.025,abs(wp.x-ww*0.5));
+        vec3 glassC=mix(vec3(0.05,0.065,0.08),vec3(0.2,0.26,0.32),wq.y*0.75)*(0.8+0.4*r3);
+        float pf=ground?0.15+0.6*r2:0.08+0.8*r1*r2;
+        float blind=step(1.0-pf,wq.y);
+        float aS=clamp(1.0-fwv*14.0*1.6,0.0,1.0),aB=clamp(1.0-fwu/0.12*1.6,0.0,1.0);
+        vec3 blindC=mix(carp,vec3(0.74,0.7,0.6),step(0.55,r3))*(0.92+0.16*(step(0.5,fract(wp.y*14.0))-0.5)*aS);
+        vec3 wc=mix(glassC,blindC,blind);
+        wc=mix(wc,carp*0.95,max(frame,mull*(1.0-blind))*(0.3+0.7*aa));
+        wc*=1.0-0.45*(1.0-smoothstep(0.0,0.14,wh-wp.y))-0.3*(1.0-smoothstep(0.0,0.09,wp.x));
+        if(type>1.5&&ground){float bar=clamp(step(0.86,fract(wp.x/0.12))+step(abs(wp.y-wh*0.12),0.025)+step(abs(wp.y-wh*0.88),0.025),0.0,1.0);wc=mix(wc,vec3(0.035),mix(0.2,bar*0.95,aB));}
+        if(bal>0.5){float rail=step(wp.y,1.0)*clamp(step(0.82,fract(wp.x/0.11))+step(abs(wp.y-1.0),0.03),0.0,1.0);wc=mix(wc,vec3(0.04),step(wp.y,1.0)*mix(0.25,rail*0.95/max(step(wp.y,1.0),0.001),aB));}
+        col=mix(col,wc,0.35+0.65*aa);
+      }
+      if(inDoor>0.5){vec2 dp=vec2(dx+dW*0.5,v);
+        vec3 dc=carp*(0.9+0.1*n1);
+        float fr2=1.0-step(0.07,dp.x)*step(dp.x,dW-0.07)*step(0.0,dp.y)*step(dp.y,dH-0.07);
+        float leaf=1.0-step(0.02,abs(dp.x-dW*0.5));
+        float pan=step(0.17,fract((dp.y-0.1)/0.55))*step(0.15,fract(dp.x/(dW*0.5)))*step(fract(dp.x/(dW*0.5)),0.85);
+        dc*=mix(0.8,1.0,pan);dc=mix(dc,carp*0.65,max(fr2,leaf));
+        float mont=step(dH-0.45,dp.y)*step(dp.y,dH-0.1)*step(0.12,dp.x)*step(dp.x,dW-0.12);
+        dc=mix(dc,vec3(0.06,0.08,0.1),mont);
+        dc*=1.0-0.4*(1.0-smoothstep(0.0,0.12,dH-dp.y));
+        col=mix(col,dc,0.4+0.6*aa);}
+    }
+    diffuseColor.rgb=col;
+  }`;
+
+let matFachadas = null;
+function materialFachadas() {
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  m.onBeforeCompile = sh => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vWw = aW; vZc = aZ; vCp = aC; vFa = aF;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa;
+float hh(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}`)
+      .replace('#include <color_fragment>', FRAGMENTO_FACHADA);
+  };
+  return m;
+}
+
+function mallaEdificios(edif) {
+  // Triángulos de cada tejado: se calculan antes para reservar la memoria de una vez
+  const tejados = edif.map(e => {
+    try { return THREE.ShapeUtils.triangulateShape(e.pts.map(p => new THREE.Vector2(p[0], p[1])), []); }
+    catch (err) { return []; }
+  });
+  let V = 0, I = 0;
+  edif.forEach((e, k) => {
+    for (const s of e.lados) if (s.len >= 0.02) { V += 4; I += 6; }
+    V += e.pts.length; I += tejados[k].length * 3;
+  });
+  const P = new Float32Array(V * 3), N = new Float32Array(V * 3), W = new Float32Array(V * 3), F = new Float32Array(V * 4);
+  const C = new Uint8Array(V * 3), Z = new Uint8Array(V * 4), K = new Uint8Array(V * 4), X = new Uint32Array(I);   // colores en bytes: menos memoria
+  let v = 0, t = 0;
+  const pon = (x, y, z, nx, ny, nz, c, w, zc, kc, fc) => {
+    const a = v * 3, b = v * 4;
+    P[a] = x; P[a + 1] = y; P[a + 2] = z;
+    N[a] = nx; N[a + 1] = ny; N[a + 2] = nz;
+    for (let k = 0; k < 3; k++) C[a + k] = Math.round(c[k] * 255);
+    W[a] = w[0]; W[a + 1] = w[1]; W[a + 2] = w[2];
+    for (let k = 0; k < 4; k++) { Z[b + k] = Math.round(zc[k] * 255); K[b + k] = Math.round(kc[k] * 255); F[b + k] = fc[k]; }
+    return v++;
+  };
+  const tri = (a, b, c) => { X[t++] = a; X[t++] = b; X[t++] = c; };
+  const SUELO = -0.3;   // las paredes bajan un poco por debajo del suelo para no dejar huecos
+  edif.forEach((e, k) => {
+    const n = e.pts.length, H = e.h, off = e.off;
+    const pared = hexA01(e.colPared), zc = [...hexA01(e.colZoc), e.zh / 4], kc = [...hexA01(e.colCarp), e.rec];
+    e.lados.forEach((s, j) => {
+      if (s.len < 0.02) return;
+      const p = e.pts[j], q = e.pts[(j + 1) % n];
+      const u0 = s.u0 + off, u1 = s.u0 + s.len + off;
+      const fc = s.tipo > 0 ? [s.tipo + 4 * e.ws[j], j === e.puertaLado ? e.puertaU + off : -1e4, u0, u1] : [0, -1e4, 0, 0];
+      const a = pon(p[0], SUELO, p[1], s.nx, 0, s.nz, pared, [u0, SUELO, H], zc, kc, fc);
+      pon(q[0], SUELO, q[1], s.nx, 0, s.nz, pared, [u1, SUELO, H], zc, kc, fc);
+      pon(q[0], H, q[1], s.nx, 0, s.nz, pared, [u1, H, H], zc, kc, fc);
+      pon(p[0], H, p[1], s.nx, 0, s.nz, pared, [u0, H, H], zc, kc, fc);
+      tri(a, a + 2, a + 1); tri(a, a + 3, a + 2);
+    });
+    // tejado plano del color de teja o de azotea
+    const techo = hexA01(e.colTecho), primero = v, cero = [0, 0, 0, 0], cero3 = [0, 0, 0];
+    for (let i = 0; i < n; i++) pon(e.pts[i][0], H, e.pts[i][1], 0, 1, 0, techo, cero3, cero, cero, cero);
+    for (const tr of tejados[k]) {
+      let [a, b, c] = [primero + tr[0], primero + tr[1], primero + tr[2]];
+      const ux = P[b * 3] - P[a * 3], uz = P[b * 3 + 2] - P[a * 3 + 2], vx = P[c * 3] - P[a * 3], vz = P[c * 3 + 2] - P[a * 3 + 2];
+      if (uz * vx - ux * vz < 0) [b, c] = [c, b];   // que mire hacia arriba
+      tri(a, b, c);
+    }
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(P, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(C, 3, true));
+  geo.setAttribute('aW', new THREE.BufferAttribute(W, 3));
+  geo.setAttribute('aZ', new THREE.BufferAttribute(Z, 4, true));
+  geo.setAttribute('aC', new THREE.BufferAttribute(K, 4, true));
+  geo.setAttribute('aF', new THREE.BufferAttribute(F, 4));
+  geo.setIndex(new THREE.BufferAttribute(X, 1));
+  if (!matFachadas) matFachadas = materialFachadas();   // un solo material para todos los bloques
+  return conSombra(new THREE.Mesh(geo, matFachadas));
+}
+// Coche básico: carrocería con capó y maletero, cabina con cristales, faros, pilotos y ruedas con llanta
+// Edificios por bloques de 300 m: así la cámara (y la de las sombras) solo dibuja los bloques que ve
+const BLOQUE_EDIFICIOS = 300;
+function mallaEdificiosPorBloques(edif) {
+  const bloques = new Map(), grupo = new THREE.Group();
+  for (const e of edif) {
+    const b = e.bbox, clave = Math.floor((b[0] + b[2]) / 2 / BLOQUE_EDIFICIOS) + ',' + Math.floor((b[1] + b[3]) / 2 / BLOQUE_EDIFICIOS);
+    if (!bloques.has(clave)) bloques.set(clave, []);
+    bloques.get(clave).push(e);
+  }
+  for (const lista of bloques.values()) grupo.add(mallaEdificios(lista));
+  return grupo;
+}
+function construirCoche(color) {
+  const g = new THREE.Group();
+  const pintura = new THREE.MeshPhongMaterial({ color, specular: 0x555555, shininess: 60 });
+  const cristal = new THREE.MeshPhongMaterial({ color: 0x1c2733, specular: 0xaaaaaa, shininess: 90 });
+  const negro = new THREE.MeshLambertMaterial({ color: 0x151515 });
+  const caja = (w, h, l, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat); m.position.set(x, y, z); g.add(m); return m; };
+  caja(1.9, 0.55, 4.2, pintura, 0, 0.62, 0);                 // carrocería
+  caja(1.94, 0.22, 4.24, negro, 0, 0.38, 0);                 // bajos y paragolpes
+  caja(1.64, 0.5, 2.0, pintura, 0, 1.13, -0.25);             // techo y pilares
+  caja(1.66, 0.4, 1.7, cristal, 0, 1.12, -0.25);             // cristales laterales
+  const parabrisas = caja(1.6, 0.05, 0.75, cristal, 0, 1.1, 0.88); parabrisas.rotation.x = -0.95;
+  const luneta = caja(1.6, 0.05, 0.6, cristal, 0, 1.1, -1.38); luneta.rotation.x = 0.9;
+  const faro = new THREE.MeshBasicMaterial({ color: 0xfff6d8 }), piloto = new THREE.MeshBasicMaterial({ color: 0x9c1010 });
+  for (const x of [-0.68, 0.68]) { caja(0.42, 0.14, 0.04, faro, x, 0.72, 2.11); caja(0.42, 0.14, 0.04, piloto, x, 0.74, -2.11); }
+  caja(0.5, 0.1, 0.03, new THREE.MeshLambertMaterial({ color: 0xe8e8e8 }), 0, 0.5, 2.13);   // matrícula
+  const ruedaGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 18).rotateZ(Math.PI / 2);
+  const llantaGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.27, 10).rotateZ(Math.PI / 2);
+  const llantaMat = new THREE.MeshPhongMaterial({ color: 0xb8bcc2, specular: 0xffffff, shininess: 80 });
+  for (const [x, z] of [[-0.86, 1.3], [0.86, 1.3], [-0.86, -1.3], [0.86, -1.3]]) {
+    const r = new THREE.Mesh(ruedaGeo, negro); r.position.set(x, 0.36, z);
+    const l = new THREE.Mesh(llantaGeo, llantaMat); l.position.set(x * 1.01, 0.36, z);
+    g.add(r, l);
+  }
+  return g;
+}
+// Halos de las luces traseras del coche del jugador: rojos al frenar, blancos con la marcha atrás
+function crearLucesCoche() {
+  const grupo = new THREE.Group(), frenos = [], atras = [];
+  const halo = color => new THREE.Sprite(new THREE.SpriteMaterial({ map: texturaHalo(), color, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+  for (let i = 0; i < 2; i++) { const f = halo(0xff2a1a); f.scale.set(1.1, 0.7, 1); frenos.push(f); const a = halo(0xffffff); a.scale.set(0.7, 0.5, 1); atras.push(a); grupo.add(f, a); }
+  return { grupo, frenos, atras };
+}
+// Coloca los halos en la trasera del modelo (según su caja)
+function colocarLucesCoche(caja) {
+  const ancho = caja.max.x - caja.min.x, alto = caja.max.y - caja.min.y;
+  const y = caja.min.y + alto * 0.45, x = Math.max(0.3, ancho / 2 - 0.3), z = caja.min.z - 0.05;
+  lucesCoche.frenos.forEach((f, i) => f.position.set(i ? x : -x, y, z));
+  lucesCoche.atras.forEach((a, i) => a.position.set(i ? x - 0.3 : 0.3 - x, y - 0.08, z));
+}
+// --- coches: el básico (caja roja) y modelos GLB, que se descargan al elegirlos ---
+// Galería de coches (Kenney y Quaternius, CC0): modelos/coches/catalogo.json con los mismos datos
+const GALERIA = [
+  { id: 'sedan', nombre: 'Berlina', archivo: 'modelos/coches/sedan.glb' },
+  { id: 'hatch', nombre: 'Hatchback', archivo: 'modelos/coches/hatch.glb' },
+  { id: 'deportivo', nombre: 'Deportivo', archivo: 'modelos/coches/deportivo.glb' },
+  { id: 'suv', nombre: 'SUV', archivo: 'modelos/coches/suv.glb' },
+  { id: 'suv-lujo', nombre: 'SUV de lujo', archivo: 'modelos/coches/suv-lujo.glb' },
+  { id: 'taxi', nombre: 'Taxi', archivo: 'modelos/coches/taxi.glb' },
+  { id: 'policia', nombre: 'Patrulla', archivo: 'modelos/coches/policia.glb' },
+  { id: 'furgoneta', nombre: 'Furgoneta', archivo: 'modelos/coches/furgoneta.glb' },
+];
+const CATALOGO_COCHES = Object.fromEntries([
+  ['basico', { nombre: 'Coche básico' }],
+  ...GALERIA.map(g => [g.id, { nombre: g.nombre, archivo: g.archivo, giro: 0 }]),
+  ['concept', { nombre: 'CarConcept', archivo: 'modelos/carconcept.glb', giro: 0 }],   // su frontal ya mira a +Z, hacia donde avanza el juego
+  ['toy', { nombre: 'ToyCar', archivo: 'modelos/toycar.glb', giro: 0 }],
+]);
+let cocheElegido = 'basico';
+const cochesCargados = {};
+// Escala, gira y apoya el modelo: 4,2 m de largo, centrado en el coche y con las ruedas sobre el suelo
+function prepararModeloCoche(modelo, giro) {
+  modelo.rotation.y = giro;
+  modelo.updateMatrixWorld(true);
+  let caja = new THREE.Box3().setFromObject(modelo);
+  modelo.scale.setScalar(4.2 / caja.getSize(new THREE.Vector3()).z);
+  modelo.updateMatrixWorld(true);
+  caja = new THREE.Box3().setFromObject(modelo);
+  const c = caja.getCenter(new THREE.Vector3());
+  modelo.position.set(-c.x, -caja.min.y, -c.z);
+  return modelo;
+}
+function cargarCoche(clave) {
+  if (!cochesCargados[clave]) {
+    cochesCargados[clave] = clave === 'basico'
+      ? Promise.resolve(construirCoche(0xe74c3c))
+      : new Promise((res, rej) => new THREE.GLTFLoader().load(CATALOGO_COCHES[clave].archivo,
+          g => res(prepararModeloCoche(g.scene, CATALOGO_COCHES[clave].giro)), undefined, rej));
+  }
+  return cochesCargados[clave];
+}
+async function montarCoche(clave) {
+  let modelo;
+  try { modelo = await cargarCoche(clave); }
+  catch (err) { modelo = await cargarCoche('basico'); }   // si no se puede descargar, se usa el básico
+  if (modelo.parent) modelo.parent.remove(modelo);
+  const caja = new THREE.Box3().setFromObject(modelo);    // suelto, su caja queda en el espacio del coche
+  cuerpoCoche.clear();
+  cuerpoCoche.add(conSombra(modelo, true, false), lucesCoche.grupo);
+  colocarLucesCoche(caja);
+}
+// Sombra de contacto: una mancha oscura y difuminada bajo el coche (se ve también sin sombras de verdad)
+function crearSombraCoche(largo = 5, ancho = 2.7) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(ancho, largo).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ map: texturaHalo(), color: 0x000000, transparent: true, opacity: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+  m.position.y = 0.08;
+  return m;
+}
+
+function construirMallaZona() {
+  if (mallaZona) scene.remove(mallaZona);
+  mallaZona = new THREE.Group();
+  const m = zona.mundo;
+  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif));
+  mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas));
+  scene.add(mallaZona);
+  if (!cocheMesh) {
+    cocheMesh = new THREE.Group();
+    cuerpoCoche = new THREE.Group();
+    lucesCoche = crearLucesCoche();
+    sombraCoche = crearSombraCoche();
+    cocheMesh.add(cuerpoCoche, sombraCoche);
+    scene.add(cocheMesh);
+  }
+}
+
+// Foto aérea (ortofoto.jpg, con su ortofoto.jgw): suelo de satélite. Sin ella, el suelo se pinta con los usos del mapa
+async function cargarFoto(zip) {
+  const fichero = zip.file('ortofoto.jpg'), mundo = zip.file('ortofoto.jgw');
+  if (!fichero || !mundo) return null;
+  const img = new Image();
+  img.src = URL.createObjectURL(await fichero.async('blob'));
+  await img.decode();
+  const cv = document.createElement('canvas'), n = 32;
+  cv.width = cv.height = n;
+  const g = cv.getContext('2d');
+  g.drawImage(img, 0, 0, n, n);
+  const px = g.getImageData(0, 0, n, n).data;
+  let r = 0, v = 0, b = 0;
+  for (let k = 0; k < px.length; k += 4) { r += px[k]; v += px[k + 1]; b += px[k + 2]; }
+  const hex = c => Math.round(c / (n * n)).toString(16).padStart(2, '0');
+  const textura = new THREE.Texture(img);
+  textura.needsUpdate = true;
+  textura.anisotropy = 4;
+  return { textura, g: leerJgw(await mundo.async('string')), W: img.naturalWidth, H: img.naturalHeight, media: '#' + hex(r) + hex(v) + hex(b) };
+}
+
+// --- carga del zip de la zona ---
+async function cargarZona(archivo) {
+  $('estado').textContent = 'Leyendo el zip…';
+  const zip = await JSZip.loadAsync(archivo);
+  const leer = async nombre => {
+    const f = zip.file(nombre);
+    if (!f) throw new Error('falta ' + nombre + ' en el zip');
+    return JSON.parse(await f.async('string'));
+  };
+  const opcional = async (nombre, vacio) => zip.file(nombre) ? leer(nombre) : vacio;
+  const calles = await leer('calles.geojson');
+  $('estado').textContent = 'Procesando calles…';
+  await new Promise(r => setTimeout(r, 0));
+  const tramos = parsearCalles(calles);
+  const G = construirGrafo(tramos);
+  $('estado').textContent = 'Cargando casas…';
+  await new Promise(r => setTimeout(r, 0));
+  const casas = await leer('casas.geojson');
+  const edif = parsearCasas(casas);
+  $('estado').textContent = 'Construyendo la zona…';
+  await new Promise(r => setTimeout(r, 0));
+  zona = { tramos, G, edif, rejilla: construirRejilla(edif), enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos) };
+  prepararCasas(edif, zona.rejilla, tramos);
+  $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas)…';
+  await new Promise(r => setTimeout(r, 0));
+  const mapa = await opcional('mapa.geojson', { features: [] });
+  const osm = await opcional('datos/osm.json', { elements: [] });
+  zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242));
+  zona.caja = calcularCaja(tramos, edif);
+  $('estado').textContent = 'Cargando la foto aérea…';
+  await new Promise(r => setTimeout(r, 0));
+  zona.foto = await cargarFoto(zip);
+  construirMallaZona();
+  $('btnNueva').disabled = false;
+  mostrarMenu(`Zona cargada: ${tramos.length} tramos conducibles, ${edif.length} casas, ${zona.mundo.arboles.length} árboles.`);
+}
+
+$('archivo').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try { await cargarZona(f); }
+  catch (err) { $('estado').textContent = 'Error: ' + err.message; }
+});
+
+// --- menús y avisos ---
+function mostrarMenu(texto) {
+  estado = 'menu';
+  $('pantalla').style.display = 'flex';
+  $('estado').textContent = texto || '';
+}
+function ocultarMenu() { $('pantalla').style.display = 'none'; }
+function mostrarAviso(texto, seg = 1.6) { avisoTexto = texto; avisoHasta = performance.now() / 1000 + seg; }
+function formato(s) {
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return `${m}:${r.toFixed(2).padStart(5, '0')}`;
+}
+
+// --- controles: teclado, pedales, botón de marcha y ruleta (gírala con el dedo; vuelve sola al centro) ---
+addEventListener('keydown', e => {
+  Sonido.iniciar();
+  if (e.code === 'KeyM') { mostrarMenu(estado === 'menu' ? $('estado').textContent : 'Menú'); return; }
+  if (e.code === 'KeyC' && !e.repeat) { cambiarCamara(); return; }
+  if (e.code === 'KeyN' && !e.repeat) { alternarSonido(); return; }
+  if (e.code === 'KeyR' && !e.repeat) { pulsarSentido(); return; }
+  const c = TECLAS[e.code];
+  if (c) { controles[c] = true; e.preventDefault(); }
+});
+addEventListener('keyup', e => { const c = TECLAS[e.code]; if (c) controles[c] = false; });
+addEventListener('pointerdown', () => Sonido.iniciar(), true);   // el navegador solo deja sonar después de tocar la pantalla
+document.querySelectorAll('#controles [data-c]').forEach(b => {
+  const c = b.dataset.c;
+  const on = ev => { ev.preventDefault(); controles[c] = true; b.classList.add('pulsado'); };
+  const off = ev => { ev.preventDefault(); controles[c] = false; b.classList.remove('pulsado'); };
+  b.addEventListener('pointerdown', on);
+  b.addEventListener('pointerup', off);
+  b.addEventListener('pointerleave', off);
+  b.addEventListener('pointercancel', off);
+  b.addEventListener('contextmenu', ev => ev.preventDefault());
+});
+// Botón de marcha: D ⇄ R con el coche casi parado
+function pulsarSentido() {
+  if (!coche || estado !== 'corriendo') return;
+  if (cambiarSentido(coche)) { mostrarAviso(coche.marcha === 0 ? 'Marcha atrás' : 'Adelante', 0.8); Sonido.clic(); }
+  else mostrarAviso('Frena para cambiar de sentido', 1);
+}
+$('btnSentido').addEventListener('pointerdown', ev => { ev.preventDefault(); pulsarSentido(); });
+// Ruleta: el giro sigue al dedo alrededor del centro; cerca del centro el ángulo no se fía y no gira
+const elRuleta = $('ruleta');
+const enRuleta = e => {
+  const r = elRuleta.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+  return { a: Math.atan2(dy, dx), lejos: Math.hypot(dx, dy) > r.width * 0.12 };
+};
+elRuleta.addEventListener('pointerdown', e => {
+  try { elRuleta.setPointerCapture(e.pointerId); } catch (err) { /* sin captura, el dedo sigue funcionando sobre la ruleta */ }
+  volante.activo = true; volante.aPrev = enRuleta(e).a; e.preventDefault();
+});
+elRuleta.addEventListener('pointermove', e => {
+  if (!volante.activo) return;
+  const p = enRuleta(e);
+  let d = p.a - volante.aPrev;
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  if (p.lejos) volante.ang = Math.max(-GIRO_RULETA, Math.min(GIRO_RULETA, volante.ang + d * 180 / Math.PI));
+  volante.aPrev = p.a;
+  const muesca = Math.round(volante.ang / 20);   // un toque de vibración cada 20 grados, como las muescas de una ruleta
+  if (muesca !== volante.muesca) { volante.muesca = muesca; if (navigator.vibrate) navigator.vibrate(muesca === 0 ? 14 : 5); }
+});
+const soltarRuleta = () => { volante.activo = false; };
+elRuleta.addEventListener('pointerup', soltarRuleta);
+elRuleta.addEventListener('pointercancel', soltarRuleta);
+// Dibujo de la ruleta: el grupo gira con el dedo y un arco ámbar marca cuánto se gira
+let angRuletaPintado = null;
+function pintarRuleta() {
+  const a = Math.round(volante.ang * 2) / 2;
+  if (a === angRuletaPintado) return;
+  angRuletaPintado = a;
+  $('ruletaGiro').setAttribute('transform', `rotate(${a} 50 50)`);
+  const R = 45, a0 = -Math.PI / 2, a1 = a0 + a * Math.PI / 180;
+  const p0 = [50 + R * Math.cos(a0), 50 + R * Math.sin(a0)], p1 = [50 + R * Math.cos(a1), 50 + R * Math.sin(a1)];
+  $('ruletaArco').setAttribute('d', Math.abs(a) < 1 ? '' : `M${p0[0].toFixed(2)} ${p0[1].toFixed(2)} A${R} ${R} 0 ${Math.abs(a) > 180 ? 1 : 0} ${a > 0 ? 1 : 0} ${p1[0].toFixed(2)} ${p1[1].toFixed(2)}`);
+}
+// Giro que pide el conductor: +1 izquierda, -1 derecha. La ruleta si se está tocando (o aún vuelve al centro, si no hay tecla pulsada); si no, las flechas
+function direccion() {
+  const teclas = (controles.izq ? 1 : 0) - (controles.der ? 1 : 0);
+  if (volante.activo || (teclas === 0 && Math.abs(volante.ang) > 0.5)) return -Math.max(-1, Math.min(1, volante.ang / GIRO_RULETA));
+  return teclas;
+}
+function alternarSonido() {
+  const activo = Sonido.alternar();
+  $('btnSonido').textContent = activo ? '🔊' : '🔇';
+  mostrarAviso(activo ? 'Sonido activado' : 'Sonido quitado', 0.9);
+}
+$('btnSonido').textContent = Sonido.activo() ? '🔊' : '🔇';
+$('btnSonido').addEventListener('click', alternarSonido);
+$('btnMenu').addEventListener('click', () => mostrarMenu('Menú'));
+$('btnCamara').addEventListener('click', cambiarCamara);
+
+// --- tráfico, peatones y flechas: decoración que se mueve; los coches de tráfico frenan al jugador como un muro ---
+const N_TRAFICO = 40, N_PEATONES = 110, RADIO_TRAFICO = 320;
+// Peatones de modelos/peatones/ (Kenney Blocky Characters, CC0): 1,75 m, con el frontal hacia +Z
+const ARCHIVOS_PEATONES = [1, 2, 3, 4, 5, 6, 7, 8].map(n => `modelos/peatones/peaton-${n}.glb`);
+const COLORES_COCHE = [0xe63946, 0x1d3557, 0xf1faee, 0x457b9d, 0xf4a261, 0x2a9d8f, 0x6d6875, 0xffb703, 0x8d99ae];
+let rngTrafico = mulberry32(1);
+// Tramos del grafo que empiezan a menos de R metros del coche y cumplen la condición
+function segmentosCerca(R, cumple) {
+  const out = [];
+  zona.G.tramos.forEach((t, i) => {
+    if (zona.G.nodos[t.a].comp && Math.hypot(t.pts[0][0] - coche.x, t.pts[0][1] - coche.z) < R && cumple(t)) out.push(i);
+  });
+  return out;
+}
+// Un coche de tráfico nuevo en una calle cercana, a más de 60 m del jugador
+function colocarCoche(c) {
+  const candidatos = segmentosCerca(RADIO_TRAFICO, t => t.ancho >= 5);
+  if (!candidatos.length) return;
+  for (let k = 0; k < 20; k++) {
+    const seg = candidatos[Math.floor(rngTrafico() * candidatos.length)];
+    const nuevo = nuevoCocheTrafico(zona.G, rngTrafico, seg, rngTrafico() < 0.5, rngTrafico() * zona.G.tramos[seg].len);
+    const p = posicionTrafico(zona.G, nuevo);
+    if (Math.hypot(p.x - coche.x, p.z - coche.z) > 60) { reiniciarCocheTrafico(c, nuevo); return; }
+  }
+  reiniciarCocheTrafico(c, nuevoCocheTrafico(zona.G, rngTrafico, candidatos[0], true, 0));
+}
+// Coche de tráfico recién puesto: en su carril, sin golpes ni desplazamientos
+function reiniciarCocheTrafico(c, nuevo) {
+  Object.assign(c, nuevo, { ox: 0, oz: 0, oh: 0, svx: 0, svz: 0, wg: 0, parado: 0, factor: 1, frena: false, espera: 0, vx: 0, vz: 0 });
+  const p = posicionTrafico(zona.G, c);
+  c.x = p.x; c.z = p.z; c.h = p.h; c.hp = p.h;
+}
+// Un peatón nuevo en una acera cercana
+function colocarPeaton(p) {
+  const candidatos = segmentosCerca(260, t => t.acera > 0 && t.ancho >= 4);
+  if (!candidatos.length) return;
+  Object.assign(p, nuevoPeaton(zona.G, rngTrafico, candidatos[Math.floor(rngTrafico() * candidatos.length)]), { ex: 0, ez: 0, evx: 0, evz: 0, susto: 0 });
+}
+// Modelos de tráfico: los dos coches reales en versión ligera (un 10 % de los triángulos), cada uno unido en una sola geometría
+const ARCHIVOS_TRAFICO = [...GALERIA.map(g => g.archivo), 'modelos/trafico-concept.glb', 'modelos/trafico-toy.glb'];
+let modelosTrafico = null;
+// Une las mallas de un modelo en una sola geometría (un grupo por material), en la posición que ya tiene el modelo
+function geometriaUnida(raiz) {
+  raiz.updateMatrixWorld(true);
+  const materiales = [], pos = [], nor = [], uvs = [], idx = [], grupos = [];
+  const v = new THREE.Vector3(), n = new THREE.Vector3(), nm = new THREE.Matrix3();
+  raiz.traverse(o => {
+    if (!o.isMesh || !o.visible) return;
+    let mi = materiales.indexOf(o.material);
+    if (mi < 0) { materiales.push(o.material); mi = materiales.length - 1; }
+    const g = o.geometry, M = o.matrixWorld;
+    nm.getNormalMatrix(M);
+    const P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv;
+    const base = pos.length / 3;
+    for (let i = 0; i < P.count; i++) {
+      v.fromBufferAttribute(P, i).applyMatrix4(M); pos.push(v.x, v.y, v.z);
+      if (N) { n.fromBufferAttribute(N, i).applyMatrix3(nm).normalize(); nor.push(n.x, n.y, n.z); } else nor.push(0, 1, 0);
+      if (U) uvs.push(U.getX(i), U.getY(i)); else uvs.push(0, 0);
+    }
+    const inicio = idx.length;
+    if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(g.index.getX(i) + base);
+    else for (let i = 0; i < P.count; i++) idx.push(base + i);
+    grupos.push([inicio, idx.length - inicio, mi]);
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(idx);
+  for (const [s0, c, mi] of grupos) geo.addGroup(s0, c, mi);
+  return { geo, materiales };
+}
+function cargarModelosTrafico() {
+  if (!modelosTrafico) modelosTrafico = Promise.all(ARCHIVOS_TRAFICO.map(a => new Promise((res, rej) =>
+    new THREE.GLTFLoader().load(a, g => { const m = geometriaUnida(prepararModeloCoche(g.scene, 0)); m.geo.computeBoundingBox(); res(m); }, undefined, rej))));
+  return modelosTrafico;
+}
+// Malla de peatones: cuerpo de color y cabeza, en instancias
+function limpiarTrafico() {
+  for (const im of mallaTrafico) scene.remove(im);
+  mallaTrafico = [];
+  for (const im of mallaPeatones) scene.remove(im);
+  mallaPeatones = [];
+  for (const im of [lucesTrafico, sombrasTrafico]) if (im) { scene.remove(im); im.geometry.dispose(); im.material.dispose(); }
+  lucesTrafico = sombrasTrafico = null;
+  trafico = []; peatones = [];
+}
+async function iniciarTrafico() {
+  limpiarTrafico();
+  rngTrafico = mulberry32((Date.now() & 0xffffff) || 3);
+  let modelos = null;
+  try { modelos = await cargarModelosTrafico(); } catch (err) { modelos = null; }
+  if (modelos) {
+    trafico = Array.from({ length: N_TRAFICO }, () => ({}));
+    trafico.forEach(c => colocarCoche(c));
+    trafico = trafico.filter(c => c.seg !== undefined);   // los que no han encontrado calle no se dibujan
+    const cuenta = modelos.map(() => 0);
+    trafico.forEach(c => { c.modelo = Math.floor(rngTrafico() * modelos.length); c.idx = cuenta[c.modelo]++; });
+    mallaTrafico = modelos.map((m, k) => {
+      const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k]));
+      im.frustumCulled = false;
+      trafico.forEach(c => { if (c.modelo === k) im.setColorAt(c.idx, new THREE.Color(COLORES_COCHE[Math.floor(c.color * COLORES_COCHE.length)])); });
+      im.castShadow = sombras;
+      scene.add(im);
+      return im;
+    });
+    // pilotos traseros (dos por coche): se encienden al frenar y parpadean en naranja tras un golpe
+    const n = Math.max(1, trafico.length);
+    lucesTrafico = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.13, 0.05), new THREE.MeshBasicMaterial({ color: 0xffffff }), 2 * n);
+    lucesTrafico.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(6 * n).fill(0.3), 3);
+    sombrasTrafico = new THREE.InstancedMesh(new THREE.PlaneGeometry(2.6, 4.9).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: texturaHalo(), color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), n);
+    for (const im of [lucesTrafico, sombrasTrafico]) { im.frustumCulled = false; scene.add(im); }
+    trafico.forEach(c => {   // altura y anchura de los pilotos según el modelo
+      const b = modelos[c.modelo].geo.boundingBox;
+      c.luzX = Math.max(0.3, (b.max.x - b.min.x) / 2 - 0.32); c.luzY = b.min.y + (b.max.y - b.min.y) * 0.42; c.luzZ = b.min.z - 0.01;
+    });
+  }
+  peatones = Array.from({ length: N_PEATONES }, () => ({}));
+  peatones.forEach(p => colocarPeaton(p));
+  peatones = peatones.filter(p => p.seg !== undefined);
+  let modelosPeatones = null;
+  try { modelosPeatones = await Promise.all(ARCHIVOS_PEATONES.map(geometriaModelo)); } catch (err) { modelosPeatones = null; }
+  if (modelosPeatones && modelosPeatones.length) {
+    const cuenta = modelosPeatones.map(() => 0);
+    peatones.forEach(p => { p.modelo = Math.floor(rngTrafico() * modelosPeatones.length); p.idx = cuenta[p.modelo]++; });
+    mallaPeatones = modelosPeatones.map((m, k) => {
+      const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k]));
+      im.frustumCulled = false;
+      im.castShadow = sombras;
+      scene.add(im);
+      return im;
+    });
+  } else {
+    // sin modelos de peatones: un cilindro de color por peatón
+    const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.24, 1.7, 6).translate(0, 0.85, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, peatones.length));
+    im.frustumCulled = false;
+    peatones.forEach((p, i) => { p.modelo = 0; p.idx = i; im.setColorAt(i, new THREE.Color().setHSL(p.color, 0.5, 0.45)); });
+    mallaPeatones = [im];
+    scene.add(im);
+  }
+}
+// Contacto de un círculo (x, z, R) con el tráfico: cada coche son dos círculos de 0,95 m (delante y detrás)
+function contactoTrafico(x, z, R) {
+  let mejor = null;
+  for (const c of trafico) {
+    if ((c.x - x) ** 2 + (c.z - z) ** 2 > 49) continue;
+    const fx = Math.sin(c.h), fz = Math.cos(c.h);
+    for (const off of [1.15, -1.15]) {
+      const k = contactoDesde(x, z, c.x + fx * off, c.z + fz * off, R + 0.95, false);
+      if (k && (!mejor || k.prof > mejor.prof)) { k.tipo = 'coche'; k.coche = c; k.off = off; mejor = k; }
+    }
+  }
+  return mejor;
+}
+// ¿Qué hay delante de un coche de tráfico? Metros hasta el coche (o el jugador) más cercano en su carril
+function distanciaDelante(c) {
+  const fx = Math.sin(c.hp), fz = Math.cos(c.hp);
+  let dMin = Infinity, jugador = false;
+  const mira = (o, x, z, siempre) => {
+    const dx = x - c.x, dz = z - c.z;
+    if (dx * dx + dz * dz > 400) return;
+    const a = dx * fx + dz * fz;
+    if (a < 1 || a > 20 || Math.abs(dx * fz - dz * fx) > 2) return;
+    if (!siempre && o.parado <= 0 && Math.sin(o.hp) * fx + Math.cos(o.hp) * fz < 0) return;   // los que vienen de frente van por su carril
+    if (a < dMin) { dMin = a; jugador = siempre; }
+  };
+  for (const o of trafico) if (o !== c) mira(o, o.x, o.z, false);
+  if (coche) mira(null, coche.x, coche.z, true);
+  return { dMin, jugador };
+}
+function actualizarTrafico(dt) {
+  if (!mallaTrafico.length) return;
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
+  const parpadeo = Math.sin(performance.now() / 1000 * 9) > 0, luz = lucesTrafico && lucesTrafico.instanceColor;
+  trafico.forEach((c, n) => {
+    // frena si tiene a alguien delante; tras un golpe se queda parado unos segundos
+    const { dMin, jugador } = distanciaDelante(c);
+    const objetivo = Math.max(0, Math.min(1, (dMin - 6.5) / 12));
+    c.factor += objetivo < c.factor ? Math.max(objetivo - c.factor, -dt * 1.8) : Math.min(objetivo - c.factor, dt * 0.45);
+    c.frena = objetivo < c.factor - 0.02 || c.factor < 0.05;
+    if (c.parado > 0) { c.parado -= dt; c.factor = 0; }
+    // si el jugador le corta el paso un rato, pita
+    c.espera = jugador && dMin < 12 && c.factor < 0.05 && c.parado <= 0 ? c.espera + dt : Math.min(c.espera, 0);
+    if (c.espera > 2.5) { Sonido.bocina(Math.hypot(c.x - coche.x, c.z - coche.z)); c.espera = -5; }
+    if (!avanzaTrafico(zona.G, c, dt * c.factor, rngTrafico)) colocarCoche(c);   // callejón sin salida: se recicla
+    let p = posicionTrafico(zona.G, c);
+    // golpes: el coche se desliza y gira, y luego vuelve poco a poco a su carril
+    c.ox += c.svx * dt; c.oz += c.svz * dt; c.oh += c.wg * dt;
+    const roz = Math.exp(-2.4 * dt); c.svx *= roz; c.svz *= roz; c.wg *= Math.exp(-3 * dt);
+    if (c.parado <= 0) { const vuelve = Math.exp(-0.9 * dt); c.ox *= vuelve; c.oz *= vuelve; c.oh *= vuelve; }
+    if (Math.hypot(p.x + c.ox - coche.x, p.z + c.oz - coche.z) > 420) { colocarCoche(c); p = posicionTrafico(zona.G, c); }
+    const t = zona.G.tramos[c.seg], rapidez = t.velocidad / 3.6 * c.k * c.factor;
+    c.x = p.x + c.ox; c.z = p.z + c.oz; c.h = p.h + c.oh; c.hp = p.h;
+    c.vx = Math.sin(p.h) * rapidez + c.svx; c.vz = Math.cos(p.h) * rapidez + c.svz;   // para los choques
+    m.compose(v.set(c.x, 0, c.z), q.setFromAxisAngle(eje, c.h), uno);
+    mallaTrafico[c.modelo].setMatrixAt(c.idx, m);
+    if (sombrasTrafico) { m.compose(v.set(c.x, 0.08, c.z), q, uno); sombrasTrafico.setMatrixAt(n, m); }
+    if (lucesTrafico && c.luzX !== undefined) {
+      const sh = Math.sin(c.h), ch = Math.cos(c.h);
+      for (const lado of [-1, 1]) {
+        const lx = lado * c.luzX, i = 2 * n + (lado > 0 ? 1 : 0);
+        m.compose(v.set(c.x + lx * ch + c.luzZ * sh, c.luzY, c.z - lx * sh + c.luzZ * ch), q, uno);
+        lucesTrafico.setMatrixAt(i, m);
+        if (c.parado > 0) luz.setXYZ(i, parpadeo ? 1 : 0.25, parpadeo ? 0.55 : 0.12, 0.02);   // emergencias
+        else if (c.frena) luz.setXYZ(i, 1, 0.12, 0.08);
+        else luz.setXYZ(i, 0.38, 0.03, 0.03);
+      }
+    }
+  });
+  mallaTrafico.forEach(im => { im.instanceMatrix.needsUpdate = true; });
+  for (const im of [lucesTrafico, sombrasTrafico]) if (im) im.instanceMatrix.needsUpdate = true;
+  if (luz) luz.needsUpdate = true;
+}
+function actualizarPeatones(dt) {
+  if (!mallaPeatones.length) return;
+  const ahora = performance.now() / 1000, m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
+  peatones.forEach((p, i) => {
+    if (!(p.susto > 0)) avanzaPeaton(zona.G, p, dt);
+    let pos = posicionPeaton(zona.G, p);
+    if (zona.enCalzadaAjena(pos.x, pos.z, p.seg) || Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = posicionPeaton(zona.G, p); }   // si su acera se corta en un cruce, busca otra
+    // si el coche se le echa encima, se aparta de un salto hacia el lado contrario; luego vuelve despacio a su sitio
+    const dx = pos.x + p.ex - coche.x, dz = pos.z + p.ez - coche.z;
+    if (!(p.susto > 0) && dx * dx + dz * dz < 20 && Math.abs(coche.v) > 1.5) {
+      const lado = Math.sign(dx * fz - dz * fx) || 1;
+      p.evx = fz * lado * 5; p.evz = -fx * lado * 5; p.susto = 0.45;
+    }
+    let salto = 0;
+    if (p.susto > 0) { p.susto -= dt; p.ex += p.evx * dt; p.ez += p.evz * dt; salto = Math.sin(Math.max(0, p.susto) / 0.45 * Math.PI) * 0.45; }
+    else { const k = Math.exp(-0.6 * dt); p.ex *= k; p.ez *= k; }
+    const bote = Math.abs(Math.sin(ahora * 6 + p.color * 6.28)) * 0.05;   // el paso se nota en el vaivén
+    m.compose(new THREE.Vector3(pos.x + p.ex, bote + salto, pos.z + p.ez), q.setFromAxisAngle(eje, pos.h), uno);
+    const im = mallaPeatones[p.modelo];
+    if (im) im.setMatrixAt(p.idx, m);
+  });
+  mallaPeatones.forEach(im => { im.instanceMatrix.needsUpdate = true; });
+}
+// Flechas pintadas en la calzada: cada una apunta por donde hay que seguir. Un contorno oscuro debajo las separa del asfalto
+function mallaFlechas(flechas) {
+  const grupo = new THREE.Group();
+  if (!flechas.length) return grupo;
+  const forma = (ancho, largo) => {   // flecha que apunta a +Z: punta, dos alas y una muesca en la cola
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, largo, 0, 0, -0.1 * largo, -ancho, 0, -0.6 * largo,
+      0, 0, largo, ancho, 0, -0.6 * largo, 0, 0, -0.1 * largo,
+    ], 3));
+    g.computeVertexNormals();
+    return g;
+  };
+  matFlechas = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });   // el color lo pone cada flecha
+  const matContorno = new THREE.MeshBasicMaterial({ color: 0x1b2026, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const n = flechas.length;
+  const amarillas = new THREE.InstancedMesh(forma(1.5, 2.1), matFlechas, n);
+  const contorno = new THREE.InstancedMesh(forma(1.95, 2.6), matContorno, n);
+  amarillas.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3 * n).fill(1), 3);   // brillo propio de cada flecha
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  const mA = new Float32Array(16 * n), mC = new Float32Array(16 * n);   // todas las matrices; actualizarFlechas elige la ventana
+  flechas.forEach((f, i) => {
+    const r = q.setFromAxisAngle(eje, f.h);
+    m.compose(new THREE.Vector3(f.x, 0.09, f.z), r, uno).toArray(mC, i * 16);
+    m.compose(new THREE.Vector3(f.x, 0.095, f.z), r, uno).toArray(mA, i * 16);
+  });
+  flechasDatos = { n, mA, mC, pos: flechas, amarillas, contorno, piernas: [], prog: -1, pierna: -1 };
+  amarillas.frustumCulled = false; contorno.frustumCulled = false;
+  grupo.add(contorno, amarillas);
+  return grupo;
+}
+// Solo se marcan las flechas de la pierna actual (del último checkpoint al siguiente), desde el coche en adelante;
+// un destello sube por ellas hacia el checkpoint. Se sigue el avance del coche para no saltar a otro trozo de la misma pierna
+function actualizarFlechas(ahora) {
+  if (!flechasDatos || !carrera || !flechasDatos.piernas.length) return;
+  const F = flechasDatos, { mA, mC, pos, amarillas, contorno } = F;
+  const [a, b] = F.piernas[carrera.siguiente] || [0, -1];
+  if (b < a) { amarillas.count = contorno.count = 0; return; }
+  if (F.pierna !== carrera.siguiente) { F.pierna = carrera.siguiente; F.prog = a; }
+  let i0 = masCercanaEntre(pos, coche.x, coche.z, Math.max(a, F.prog - 6), Math.min(b, F.prog + 40));
+  if (Math.hypot(pos[i0].x - coche.x, pos[i0].z - coche.z) > 45) i0 = masCercanaEntre(pos, coche.x, coche.z, a, b);   // atajo o vuelta atrás
+  F.prog = i0;
+  const W = b - i0 + 1, brillo = amarillas.instanceColor;
+  for (let k = 0; k < W; k++) {
+    const i = i0 + k;
+    amarillas.instanceMatrix.array.set(mA.subarray(i * 16, i * 16 + 16), k * 16);
+    contorno.instanceMatrix.array.set(mC.subarray(i * 16, i * 16 + 16), k * 16);
+    const s = 0.5 + 0.5 * Math.sin(ahora * 7 - k * 0.8);   // entre ámbar y amarillo claro
+    brillo.setXYZ(k, 1, 0.72 + 0.28 * s, 0.2 + 0.45 * s);
+  }
+  amarillas.count = W; contorno.count = W;
+  amarillas.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true; brillo.needsUpdate = true;
+}
+
+// --- carrera ---
+function limpiarCarrera() {
+  if (carrera) carrera.meshes.forEach(g => { scene.remove(g); g.traverse(o => { if (o.material) o.material.dispose(); }); });
+  if (rutaLinea) { scene.remove(rutaLinea); rutaLinea.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
+  limpiarTrafico();
+  Efectos.limpiar();
+  carrera = null; rutaLinea = null; matFlechas = null; flechasDatos = null;
+}
+// Checkpoint: columna de luz que se desvanece hacia arriba, con bandas que suben, y un aro en el suelo
+const geoBaliza = new THREE.CylinderGeometry(5, 5, 26, 32, 1, true).translate(0, 13, 0);
+const geoAro = new THREE.RingGeometry(4.3, 5.2, 48).rotateX(-Math.PI / 2);
+function crearBaliza() {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(0xffd166) }, uAlfa: { value: 0.6 }, uT: { value: 0 } },
+    vertexShader: 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'uniform vec3 uColor; uniform float uAlfa; uniform float uT; varying float vY; void main(){ float b = 0.7 + 0.3 * sin(vY * 28.0 - uT * 5.0); gl_FragColor = vec4(uColor, uAlfa * pow(1.0 - vY, 1.6) * b); }',
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+  });
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(geoBaliza, mat), new THREE.Mesh(geoAro, new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })));
+  g.children.forEach(m => { m.frustumCulled = false; });
+  return g;
+}
+// El siguiente checkpoint brilla (verde si es la meta); de los demás solo se ve el aro en el suelo
+function pintarCheckpoints() {
+  carrera.meshes.forEach((g, i) => {
+    const actual = i === carrera.siguiente, meta = i === carrera.cps.length - 1;
+    const color = actual ? (meta ? 0x2ecc71 : 0xffd166) : 0xffffff;
+    const [haz, aro] = g.children;
+    haz.material.uniforms.uColor.value.setHex(color);
+    haz.material.uniforms.uAlfa.value = 0.75;
+    haz.visible = actual;                    // solo el siguiente checkpoint tiene columna de luz
+    aro.material.color.setHex(color);
+    aro.material.opacity = actual ? 0.85 : 0.12;
+  });
+}
+async function nuevaCarrera() {
+  if (!zona) return;
+  Sonido.iniciar();
+  $('estado').textContent = 'Cargando el coche…';
+  await montarCoche(cocheElegido);
+  const rng = mulberry32((Date.now() & 0xffffff) || 1);
+  const plan = planearVuelta(zona.G, rng, 1200, 3500, (x, z) => !choca(zona.edif, zona.rejilla, x, z, RADIO_COCHE) && !chocaMundo(zona.mundo, x, z, RADIO_COCHE));
+  if (!plan) { mostrarMenu('No he encontrado un circuito. Pulsa otra vez.'); return; }
+  limpiarCarrera();
+  ocultarMenu();
+  carrera = {
+    cps: plan.checkpoints, siguiente: 0, vueltas: 0, tVuelta: 0, tiempos: [], longitud: plan.longitud,
+    meshes: plan.checkpoints.map(cp => {
+      const g = crearBaliza();
+      g.position.set(cp.x, 0, cp.z);
+      scene.add(g);
+      return g;
+    }),
+  };
+  const flechas = flechasRuta(plan.ruta);
+  rutaLinea = mallaFlechas(flechas);   // flechas pintadas en la calzada, solo las del tramo hasta el siguiente checkpoint
+  if (flechasDatos) flechasDatos.piernas = piernasFlechas(flechas, plan.cortes);
+  scene.add(rutaLinea);
+  pintarCheckpoints();
+  coche = {
+    x: plan.inicio.x, z: plan.inicio.z, h: plan.inicio.h, v: 0, dir: 0, acera: false, golpe: 0, rpm: FISICA.ralenti, marcha: 1, cambio: 0, gas: 0, freno: 0, tFreno: 0,
+    atrasAuto: false, sx: 0, sz: 0, wGolpe: 0, exceso: 0, derrape: 0, roce: 0, sacudida: 0, aLong: 0, aLat: 0, vPrev: 0, ultimoGolpe: 0,
+  };
+  actualizarMalla(0);
+  await iniciarTrafico();
+  const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
+  camara.position.set(coche.x - fx * 13, 6, coche.z - fz * 13);
+  camara.lookAt(coche.x + fx * 6, 1.2, coche.z + fz * 6);
+  cuenta = 3;
+  estado = 'cuenta';
+}
+$('btnNueva').addEventListener('click', nuevaCarrera);
+// Botones para elegir coche, uno por cada entrada del catálogo
+function pintarSelectorCoches() {
+  const cont = $('coches');
+  cont.innerHTML = '';
+  for (const [clave, datos] of Object.entries(CATALOGO_COCHES)) {
+    const b = document.createElement('button');
+    b.dataset.coche = clave;
+    b.textContent = datos.nombre;
+    b.classList.toggle('activo', clave === cocheElegido);
+    b.addEventListener('click', () => {
+      cocheElegido = clave;
+      cont.querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b));
+      cargarCoche(cocheElegido).catch(() => {});   // empieza a descargarlo ya
+    });
+    cont.appendChild(b);
+  }
+}
+pintarSelectorCoches();
+
+function actualizarCarrera(ahora) {
+  const cp = carrera.cps[carrera.siguiente];
+  if (Math.hypot(coche.x - cp.x, coche.z - cp.z) > 25) return;
+  if (carrera.siguiente === carrera.cps.length - 1) {
+    const vuelta = ahora - carrera.tVuelta;
+    carrera.tiempos.push(vuelta);
+    carrera.vueltas++;
+    carrera.tVuelta = ahora;
+    carrera.siguiente = 0;
+    mostrarAviso(`Vuelta ${carrera.vueltas}: ${formato(vuelta)}`);
+    Sonido.campana(true);
+    if (carrera.vueltas >= VUELTAS) terminar(ahora);
+  } else {
+    carrera.siguiente++;
+    Sonido.campana(false);
+  }
+  pintarCheckpoints();
+}
+function terminar(ahora) {
+  estado = 'fin';
+  const total = ahora - tInicio;
+  const lista = carrera.tiempos.map((t, i) => `V${i + 1}: ${formato(t)}`).join(' · ');
+  mostrarMenu(`Carrera terminada en ${formato(total)}. ${lista}. Pulsa Nueva carrera.`);
+}
+
+// --- choques: casas, agua, árboles, farolas, quitamiedos, isletas y tráfico ---
+// El coche choca con tres círculos a lo largo de su eje (delante, en medio y detrás), del ancho del coche
+const CIRCULOS_COCHE = [1.15, 0, -1.15], RADIO_CIRCULO = 1.0;
+// Rebote (e) y roce (mu) de cada cosa: los quitamiedos desvían el coche y dejan que siga, las casas y los árboles lo paran
+const MATERIAL_CHOQUE = { casa: [0.2, 0.55], agua: [0.05, 0.6], riel: [0.12, 0.18], arbol: [0.3, 0.6], farola: [0.25, 0.5], isla: [0.3, 0.35], bordillo: [0.3, 0.25] };
+function contactoCoche(x, z, R) {
+  let c = conTipo(contactoPoligonos(zona.edif, zona.rejilla, x, z, R), 'casa');
+  c = masHondo(c, contactoMundo(zona.mundo, x, z, R));
+  return masHondo(c, contactoTrafico(x, z, R));
+}
+function obstaculo(x, z, R = RADIO_COCHE) { return !!contactoCoche(x, z, R); }
+// Reparte la velocidad nueva (vx, vz) entre la de avance del coche y el deslizamiento de lado
+function ponerVelocidad(c, vx, vz) {
+  const fx = Math.sin(c.h), fz = Math.cos(c.h);
+  c.v = vx * fx + vz * fz;
+  c.sx = vx - fx * c.v; c.sz = vz - fz * c.v;
+}
+// Saca el coche de lo que toca y le da el rebote, el roce y el giro del golpe
+function resolverChoques(c) {
+  const fx = Math.sin(c.h), fz = Math.cos(c.h);
+  let peor = null;
+  for (let it = 0; it < 3; it++) {
+    let algo = false;
+    for (const off of CIRCULOS_COCHE) {
+      const k = contactoCoche(c.x + fx * off, c.z + fz * off, RADIO_CIRCULO);
+      if (!k || k.prof < 1e-3) continue;
+      algo = true;
+      const Vx = fx * c.v + c.sx, Vz = fz * c.v + c.sz;
+      let r;
+      if (k.tipo === 'coche') {
+        // choque entre dos coches de masa parecida: se reparten el golpe; el de tráfico sale despedido y se queda parado
+        const o = k.coche, m1 = FISICA.masa, m2 = 1300;
+        const vn = (Vx - o.vx) * k.nx + (Vz - o.vz) * k.nz;
+        c.x += k.nx * k.prof * 0.6; c.z += k.nz * k.prof * 0.6;
+        o.ox -= k.nx * k.prof * 0.4; o.oz -= k.nz * k.prof * 0.4;
+        if (vn < 0) {
+          const j = -(1 + 0.35) * vn / (1 / m1 + 1 / m2);
+          if (o.parado <= 0) { o.svx = o.vx; o.svz = o.vz; }   // deja su carril con la velocidad que llevaba
+          o.svx -= j / m2 * k.nx; o.svz -= j / m2 * k.nz;
+          const ofx = Math.sin(o.h) * k.off, ofz = Math.cos(o.h) * k.off, dvx = -j / m2 * k.nx, dvz = -j / m2 * k.nz;
+          o.wg = Math.max(-2.5, Math.min(2.5, o.wg - (ofx * dvz - ofz * dvx) * 0.35));   // gira según dónde le den
+          o.parado = 4 + Math.min(3, -vn * 0.3);
+          r = { vx: Vx + j / m1 * k.nx, vz: Vz + j / m1 * k.nz, impacto: -vn, roce: 0 };
+        }
+      } else {
+        // si se ha metido mucho (por ejemplo, al salir de un puente hacia el agua), no se le empuja: vuelve atrás
+        const empuje = Math.min(k.prof, 0.6);
+        c.x += k.nx * empuje; c.z += k.nz * empuje;
+        const [e, mu] = MATERIAL_CHOQUE[k.tipo] || [0.2, 0.5];
+        r = rebote(Vx, Vz, k.nx, k.nz, e, mu);
+        if (r.roce > 2 && (k.tipo === 'riel' || k.tipo === 'casa')) c.roce = Math.max(c.roce, r.roce);
+      }
+      if (r && r.impacto > 0) {
+        ponerVelocidad(c, r.vx, r.vz);
+        // giro del golpe: un golpe de lado en el morro o en la cola hace girar el coche
+        const dvx = r.vx - Vx, dvz = r.vz - Vz, cruz = fx * off * dvz - fz * off * dvx;
+        c.wGolpe = Math.max(-3, Math.min(3, c.wGolpe - cruz * 0.22));
+        if (!peor || r.impacto > peor.impacto) peor = { impacto: r.impacto, tipo: k.tipo, x: c.x + fx * off - k.nx * RADIO_CIRCULO, z: c.z + fz * off - k.nz * RADIO_CIRCULO, nx: k.nx, nz: k.nz };
+      }
+    }
+    if (!algo) break;
+  }
+  return peor;
+}
+// Bordillos: subir a la acera de lado y despacio da un bote; de frente y deprisa, el bordillo hace de muro y el coche rebota
+function bordillos(c, x0, z0) {
+  const r = calleMasCercana(zona.rejSeg, zona.tramos, c.x, c.z, 25);
+  tramoActual = r ? r.t : null; dTramo2 = r ? r.d * r.d : Infinity;
+  let enAcera = false;
+  if (r) {
+    const t = r.t, mitad = t.ancho / 2;
+    enAcera = t.acera > 0 && !/tierra|grava/.test(t.dib) && r.d > mitad + 0.15 && r.d < mitad + t.acera + 0.4 && !zona.enCalzadaAjena(c.x, c.z, r.i);
+  }
+  if (enAcera && !c.acera) {
+    const fx = Math.sin(c.h), fz = Math.cos(c.h), Vx = fx * c.v + c.sx, Vz = fz * c.v + c.sz;
+    const vn = Vx * r.nx + Vz * r.nz;   // velocidad hacia la acera
+    if (vn > 8) {
+      c.x = x0; c.z = z0;
+      const [e, mu] = MATERIAL_CHOQUE.bordillo, rb = rebote(Vx, Vz, -r.nx, -r.nz, e, mu);
+      ponerVelocidad(c, rb.vx, rb.vz);
+      efectoGolpe({ impacto: rb.impacto, tipo: 'bordillo', x: c.x + r.nx, z: c.z + r.nz });
+      return;
+    }
+    c.golpe = 0.5; c.v *= 0.85; c.sacudida = Math.max(c.sacudida, 0.25);
+    Sonido.bordillo(Math.min(1, Math.abs(c.v) / 12 + 0.3));
+    mostrarAviso('¡Bordillo!', 0.9);
+  } else if (!enAcera && c.acera) Sonido.bordillo(0.35);   // baja de la acera
+  c.acera = enAcera;
+}
+// Sonido, sacudida, chispas y aviso de un golpe
+function efectoGolpe(g) {
+  const ahora = performance.now() / 1000;
+  if (g.impacto < 1.2) return;
+  coche.sacudida = Math.max(coche.sacudida, Math.min(1, g.impacto / 14));
+  if (ahora - coche.ultimoGolpe > 0.12) { Sonido.golpe(g.tipo, g.impacto); coche.ultimoGolpe = ahora; }
+  if (g.tipo === 'riel' || g.tipo === 'casa' || g.tipo === 'coche' || g.tipo === 'farola') Efectos.chispas(g.x, 0.5, g.z, Math.min(28, 4 + g.impacto * 1.5));
+  if (g.impacto > 6) {
+    const d = $('destello');
+    d.style.transition = 'none'; d.style.opacity = Math.min(1, g.impacto / 18).toFixed(2);
+    requestAnimationFrame(() => { d.style.transition = 'opacity .5s'; d.style.opacity = '0'; });
+    if (g.tipo === 'coche') setTimeout(() => Sonido.bocina(8), 350);
+  }
+}
+
+// --- física del coche ---
+function fisica(dt) {
+  const c = coche, x0 = c.x, z0 = c.z;
+  const objetivoDir = direccion() * (c.acera ? 0.6 : 1);   // en la acera, el volante responde menos
+  c.dir += (objetivoDir - c.dir) * Math.min(1, dt * 8);
+  pasoMotor(c, controles.acel, controles.freno, dt);   // motor, caja automática y frenos
+  if (c.acera && Math.abs(c.v) > 7) c.v -= Math.sign(c.v) * (Math.abs(c.v) - 7) * Math.min(1, dt * 2.5);   // en la acera, a 25 km/h como mucho
+  const sentido = c.v >= 0 ? 1 : -1;
+  const w = giroCoche(c, dt) * sentido;
+  c.h += (w + c.wGolpe) * dt;
+  c.wGolpe *= Math.exp(-4 * dt);
+  // derrape: si el asfalto no aguanta el giro, el coche se va hacia fuera de la curva; el deslizamiento se frena con el agarre
+  if (c.exceso > 0) { const k = -Math.sign(w) * c.exceso * 0.35 * dt; c.sx += Math.cos(c.h) * k; c.sz -= Math.sin(c.h) * k; }
+  const agarre = Math.exp(-(c.acera ? 5 : 3.2) * dt);
+  c.sx *= agarre; c.sz *= agarre;
+  if (c.acera) c.h += Math.sin(performance.now() / 1000 * 23) * 0.9 * Math.min(Math.abs(c.v) / 4, 1) * dt;   // tirones del bordillo
+  if (c.golpe > 0) c.golpe = Math.max(0, c.golpe - dt);
+  // avance en pasos de 35 cm como mucho, sacando el coche de lo que toque en cada paso
+  c.roce = 0;
+  const vx = Math.sin(c.h) * c.v + c.sx, vz = Math.cos(c.h) * c.v + c.sz;
+  const pasos = Math.max(1, Math.ceil(Math.hypot(vx, vz) * dt / 0.35)), h = dt / pasos;
+  let peor = null;
+  for (let i = 0; i < pasos; i++) {
+    const px = c.x, pz = c.z;
+    c.x += (Math.sin(c.h) * c.v + c.sx) * h; c.z += (Math.cos(c.h) * c.v + c.sz) * h;
+    const g = resolverChoques(c);
+    if (g && (!peor || g.impacto > peor.impacto)) peor = g;
+    if (Math.hypot(c.x - px, c.z - pz) > 2) { c.x = px; c.z = pz; c.v *= -0.2; c.sx = c.sz = 0; }   // empujado demasiado lejos: vuelve atrás
+  }
+  if (peor) efectoGolpe(peor);
+  bordillos(c, x0, z0);
+  // aceleraciones para inclinar la carrocería y para los derrapes
+  c.aLong += ((c.v - c.vPrev) / dt - c.aLong) * Math.min(1, dt * 6);
+  c.aLat += (c.v * w - c.aLat) * Math.min(1, dt * 6);
+  c.vPrev = c.v;
+  efectosConduccion(c, dt);
+}
+// Humo, marcas de neumático y chirrido: al frenar fuerte, al derrapar, al patinar de lado o al salir a fondo
+function efectosConduccion(c, dt) {
+  const vAbs = Math.abs(c.v), lado = Math.hypot(c.sx, c.sz);
+  const frenada = c.freno > 0.75 && vAbs > 9 ? Math.min(1, (vAbs - 9) / 12 + 0.4) : 0;
+  const patinazo = c.marcha === 1 && c.gas > 0.9 && vAbs < 7 && vAbs > 0.3 ? 0.6 : 0;
+  c.derrape = Math.max(frenada, Math.min(1, c.exceso / 6), Math.min(1, (lado - 1.2) / 3), patinazo);
+  const fx = Math.sin(c.h), fz = Math.cos(c.h), rx = Math.cos(c.h), rz = -Math.sin(c.h);
+  const ruedas = [[0.82, -1.3], [-0.82, -1.3], [0.82, 1.3], [-0.82, 1.3]];
+  ruedas.forEach(([l, a], i) => {
+    const x = c.x + rx * l + fx * a, z = c.z + rz * l + fz * a;
+    const marca = c.derrape > 0.3 && !c.acera && (i < 2 || frenada > 0);
+    if (marca) Efectos.huella(i, x, z, rx * 0.11, rz * 0.11); else Efectos.cortarHuella(i);
+    if (marca && i < 2 && Math.random() < c.derrape * dt * 30) Efectos.humo(x, 0.3, z, -fx * c.v * 0.1 + (Math.random() - 0.5), -fz * c.v * 0.1 + (Math.random() - 0.5));
+  });
+  if (c.roce > 0 && Math.random() < dt * 25) Efectos.chispas(c.x, 0.5, c.z, 2);
+}
+
+// Dentro del coche, si hay una pared a menos de 2,5 m de frente, se ve el coche desde fuera: si no, la pared llena la pantalla y queda en blanco
+function modoVisto() {
+  if (modoCamara !== 2) return modoCamara;
+  return obstaculo(coche.x + Math.sin(coche.h) * 2.5, coche.z + Math.cos(coche.h) * 2.5, 1.2) ? 1 : 2;
+}
+function actualizarMalla(dt) {
+  const salto = coche.golpe > 0 ? Math.sin(coche.golpe / 0.5 * Math.PI) * 0.22 : 0;   // bote al subir al bordillo
+  const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
+  cocheMesh.position.set(coche.x, 0, coche.z);
+  cocheMesh.rotation.y = coche.h;
+  // la carrocería cabecea al acelerar y frenar y se inclina hacia fuera en las curvas
+  cuerpoCoche.position.y = salto + tiemble;
+  cuerpoCoche.rotation.x = Math.max(-0.05, Math.min(0.05, -coche.aLong * 0.0045));
+  cuerpoCoche.rotation.z = Math.max(-0.07, Math.min(0.07, coche.aLat * 0.007));
+  sombraCoche.position.y = coche.acera ? 0.18 : 0.08;
+  cocheMesh.visible = modoVisto() !== 2;   // dentro del coche no se ve la carrocería
+  const frena = coche.freno > 0.2 || (coche.marcha === 0 && coche.atrasAuto && controles.acel), atras = coche.marcha === 0;
+  lucesCoche.frenos.forEach(f => { f.material.opacity += ((frena ? 0.95 : 0.12) - f.material.opacity) * Math.min(1, dt * 18); });
+  lucesCoche.atras.forEach(a => { a.material.opacity = atras ? 0.8 : 0; });
+}
+// --- cámaras: detrás, cerca y dentro del coche (la tecla C o el botón Cámara pasan de una a otra) ---
+const NOMBRES_CAMARA = ['detrás del coche', 'cerca del coche', 'dentro del coche'];
+function cambiarCamara() {
+  modoCamara = (modoCamara + 1) % 3;
+  document.body.classList.toggle('dentro', modoCamara === 2);
+  mostrarAviso('Cámara ' + NOMBRES_CAMARA[modoCamara], 1.2);
+}
+function actualizarCamara(dt) {
+  const fx = Math.sin(coche.h), fz = Math.cos(coche.h), izq = [fz, -fx];   // en España el conductor va a la izquierda
+  const modo = modoVisto();
+  document.body.classList.toggle('dentro', modo === 2);
+  // más ángulo de visión a más velocidad: da sensación de rapidez
+  const rapido = Math.min(1, Math.abs(coche.v) / 50);
+  const fov = [60, 68, 74][modo] + rapido * [12, 9, 6][modo];
+  if (Math.abs(camara.fov - fov) > 0.05) { camara.fov += (fov - camara.fov) * Math.min(1, dt * 4); camara.updateProjectionMatrix(); }
+  const salto = coche.golpe > 0 ? Math.sin(coche.golpe / 0.5 * Math.PI) * 0.22 : 0;      // bote al subir al bordillo
+  const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
+  coche.sacudida *= Math.exp(-5 * dt);
+  const sk = coche.sacudida * 0.35, sac = () => (Math.random() - 0.5) * sk;
+  if (modo === 2) {   // dentro: los ojos del conductor, a la izquierda del eje, en un asiento alto para ver bien la calle
+    camara.position.set(coche.x + fx * 0.1 + izq[0] * 0.36 + sac(), 1.62 + salto + tiemble + sac(), coche.z + fz * 0.1 + izq[1] * 0.36 + sac());
+    camara.lookAt(coche.x + fx * 40, 0.9 + coche.aLong * 0.02, coche.z + fz * 40);
+    return;
+  }
+  const cerca = modo === 1;
+  let atras = (cerca ? 7 : 13) + rapido * 1.5;
+  while (atras > 2 && choca(zona.edif, zona.rejilla, coche.x - fx * atras, coche.z - fz * atras, 0.8)) atras -= 1;   // no dentro de una casa
+  const alto = cerca ? 2.6 : 5.5;
+  const objetivo = new THREE.Vector3(coche.x - fx * atras, alto + Math.min(Math.abs(coche.v) / 15, 2) + salto, coche.z - fz * atras);
+  camara.position.lerp(objetivo, 1 - Math.exp(-(cerca ? 10 : 6) * dt));
+  camara.position.x += sac(); camara.position.y += sac(); camara.position.z += sac();
+  camara.lookAt(coche.x + fx * (cerca ? 4 : 6), cerca ? 1.1 : 1.2, coche.z + fz * (cerca ? 4 : 6));
+}
+
+// --- HUD ---
+let avisoPintado = '';
+function actualizarHUD(ahora) {
+  const kmh = Math.round(Math.abs(coche.v) * 3.6);
+  $('vel').innerHTML = kmh + '<small>km/h</small>';
+  const atras = coche.marcha === 0;
+  $('marcha').textContent = atras ? 'R' : coche.marcha;
+  $('marcha').classList.toggle('cambia', coche.cambio > 0 && !atras);
+  $('marcha').classList.toggle('atras', atras);
+  if ($('btnSentido').classList.contains('atras') !== atras || !$('btnSentido').dataset.listo) {
+    $('btnSentido').innerHTML = (atras ? 'R' : 'D') + '<small>MARCHA</small>';
+    $('btnSentido').classList.toggle('atras', atras);
+    $('btnSentido').dataset.listo = '1';
+  }
+  $('rpmBarra').style.width = Math.min(100, coche.rpm / 7000 * 100).toFixed(1) + '%';
+  $('rpmBarra').classList.toggle('alto', coche.rpm >= 5200);
+  $('rpmBarra').classList.toggle('corte', coche.rpm >= 6200);
+  $('rpmTexto').textContent = Math.round(coche.rpm / 10) * 10 + ' rpm';
+  if (estado !== 'corriendo') { const r = calleMasCercana(zona.rejSeg, zona.tramos, coche.x, coche.z, 25); tramoActual = r ? r.t : null; dTramo2 = r ? r.d * r.d : Infinity; }
+  const el = $('limite');
+  if (tramoActual) {
+    const t = tramoActual;
+    const enCalzada = Math.sqrt(dTramo2) <= t.ancho / 2 + 1.5;
+    el.textContent = `Límite ${t.velocidad} km/h (informativo)${t.nombre ? ' · ' + t.nombre : ''}`;
+    el.classList.toggle('excede', kmh > t.velocidad);
+    $('fuera').textContent = coche.acera ? 'En la acera' : (enCalzada ? '' : 'Fuera de la calzada');
+  } else {
+    el.textContent = 'Límite: —';
+    el.classList.remove('excede');
+    $('fuera').textContent = 'Fuera de la calzada';
+  }
+  if (carrera) {
+    const cp = carrera.cps[carrera.siguiente];
+    const dist = Math.round(Math.hypot(coche.x - cp.x, coche.z - cp.z));
+    const t = estado === 'corriendo' ? ahora - tInicio : 0;
+    // flecha hacia el checkpoint, según hacia dónde mira el coche (arriba = de frente)
+    const rumbo = Math.atan2(cp.x - coche.x, cp.z - coche.z), rel = -(rumbo - coche.h) * 180 / Math.PI;
+    $('carrera').innerHTML =
+      `Vuelta ${Math.min(carrera.vueltas + 1, VUELTAS)} / ${VUELTAS}<br>` +
+      `${formato(t)}<br>` +
+      `${carrera.siguiente === carrera.cps.length - 1 ? 'Meta' : 'Checkpoint ' + (carrera.siguiente + 1)}: ${dist} m<span id="flechaCp" style="transform:rotate(${rel.toFixed(0)}deg)">▲</span>`;
+  }
+  const txt = ahora < avisoHasta ? avisoTexto : '';
+  if (txt !== avisoPintado) {
+    const av = $('aviso');
+    av.textContent = txt;
+    av.classList.remove('pop');
+    if (txt) { void av.offsetWidth; av.classList.add('pop'); }
+    avisoPintado = txt;
+  }
+}
+
+// --- bucle principal ---
+let cuentaPintada = 0;
+function bucle() {
+  requestAnimationFrame(bucle);
+  const dt = Math.min(0.05, reloj.getDelta());
+  const ahora = performance.now() / 1000;
+  materialAgua.uniforms.uTiempo.value = ahora % 1000;   // módulo: los móviles calculan peor con números grandes
+  if (!volante.activo) volante.ang *= Math.exp(-9 * dt);   // la ruleta vuelve sola al centro
+  pintarRuleta();
+  if (estado === 'cuenta') {
+    cuenta -= dt;
+    if (cuenta > 0) {
+      mostrarAviso(String(Math.ceil(cuenta)), 1.1);
+      if (Math.ceil(cuenta) !== cuentaPintada) { cuentaPintada = Math.ceil(cuenta); Sonido.pitido(660, 0.16); }
+    } else {
+      estado = 'corriendo';
+      tInicio = ahora;
+      carrera.tVuelta = ahora;
+      cuentaPintada = 0;
+      mostrarAviso('¡YA!', 0.9);
+      Sonido.pitido(1046, 0.45);
+    }
+  }
+  if (estado === 'corriendo') { fisica(dt); actualizarCarrera(ahora); }
+  if (coche) {
+    actualizarTrafico(dt);
+    actualizarPeatones(dt);
+    actualizarArboles();
+    actualizarFlechas(ahora);
+    actualizarMalla(dt);
+    actualizarCamara(dt);
+    actualizarHUD(ahora);
+    if (carrera) carrera.meshes.forEach((g, i) => { g.children[0].material.uniforms.uT.value = ahora % 1000; g.children[1].rotation.y = ahora * (i === carrera.siguiente ? 1.2 : 0.3); });
+    if (sombras) {   // la sombra sigue al coche
+      sol.position.set(coche.x + 300, 500, coche.z + 200);
+      sol.target.position.set(coche.x, 0, coche.z);
+    }
+  }
+  const enMarcha = coche && (estado === 'corriendo' || estado === 'cuenta');
+  Sonido.actualizar(enMarcha ? { rpm: coche.rpm, gas: coche.gas, v: Math.abs(coche.v), derrape: coche.derrape, roce: coche.roce, cambio: coche.cambio > 0, acera: coche.acera } : null);
+  Efectos.actualizar(dt, camara, renderer);
+  cielo.position.copy(camara.position);
+  renderer.render(scene, camara);
+}
+
+// Carga la zona que va junto a la página; si no está (p. ej. abriendo el HTML desde el disco), pide el zip.
+async function cargarZonaIncluida() {
+  if (location.protocol === 'file:') { mostrarMenu('Carga el zip de la zona para empezar.'); return; }
+  mostrarMenu('Descargando la zona…');
+  let archivo;
+  try {
+    const r = await fetch('zona-huelva.zip');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    archivo = await r.blob();
+  } catch (err) {
+    mostrarMenu('Carga el zip de la zona para empezar.');
+    return;
+  }
+  try { await cargarZona(archivo); }
+  catch (err) { $('estado').textContent = 'Error: ' + err.message; }
+}
+
+iniciarRender();
+cargarZonaIncluida();
+/*RENDER-END*/
+</script>
+</body>
+</html>

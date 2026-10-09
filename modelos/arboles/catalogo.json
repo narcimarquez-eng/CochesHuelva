@@ -1,0 +1,42 @@
+[
+  {
+    "id": "roble",
+    "nombre": "Roble (copa redonda)",
+    "archivo": "modelos/arboles/roble.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/nature-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 196,
+    "alto_m": 9.0
+  },
+  {
+    "id": "alamo",
+    "nombre": "Alamo (copa estrecha)",
+    "archivo": "modelos/arboles/alamo.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/nature-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 72,
+    "alto_m": 11.0
+  },
+  {
+    "id": "pino",
+    "nombre": "Pino (conifera)",
+    "archivo": "modelos/arboles/pino.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/nature-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 230,
+    "alto_m": 10.5
+  },
+  {
+    "id": "arbusto",
+    "nombre": "Arbusto redondo",
+    "archivo": "modelos/arboles/arbusto.glb",
+    "autor": "Kenney (kenney.nl)",
+    "fuente": "https://kenney.nl/assets/nature-kit",
+    "licencia": "CC0 1.0",
+    "triangulos": 104,
+    "alto_m": 1.6
+  }
+]
