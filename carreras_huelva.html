@@ -35,7 +35,9 @@
   #aviso.pop{animation:pop .35s ease-out}
   @keyframes pop{0%{transform:scale(1.5);opacity:0}60%{transform:scale(.95);opacity:1}100%{transform:scale(1)}}
   #destello{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,rgba(255,255,255,0) 45%,rgba(200,30,20,.55) 100%);opacity:0;z-index:3}
-  #pantalla{position:fixed;inset:0;background:rgba(10,20,30,.82);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;text-align:center;box-sizing:border-box;z-index:10;overflow:auto}
+  #pantalla{position:fixed;inset:0;background:rgba(10,20,30,.82);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;padding:20px;text-align:center;box-sizing:border-box;z-index:10;overflow:auto}
+  #pantalla>:first-child{margin-top:auto}
+  #pantalla>:last-child{margin-bottom:auto}
   #pantalla h1{margin:0;font-size:28px}
   #pantalla p{margin:0;max-width:460px;line-height:1.4;opacity:.9}
   button{font:inherit;font-size:17px;padding:12px 20px;border-radius:10px;border:0;background:var(--ambar);color:#1b1b1b;font-weight:600;cursor:pointer}
@@ -58,6 +60,26 @@
   #ruleta svg{width:100%;height:100%;display:block;filter:drop-shadow(0 5px 12px rgba(0,0,0,.6))}
   #estado{min-height:20px;color:#ffd166}
   #coches{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:620px}
+  .opcion{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center}
+  .opcion>span{font-size:13px;opacity:.75;min-width:44px;text-align:right}
+  .selector{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+  .selector button{font-size:15px;padding:8px 13px;background:#3a4856;color:#fff}
+  .selector button.activo{background:var(--ambar);color:#1b1b1b}
+  #botonesMenu{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  #btnSeguir{background:#2ecc71}
+  #dano{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px}
+  #dano svg{width:26px;height:42px;display:block}
+  #danoBarra{position:relative;width:96px;height:8px;border-radius:4px;background:rgba(255,255,255,.15);overflow:hidden}
+  #danoRelleno{position:absolute;left:0;top:0;bottom:0;width:0;background:#2ecc71;transition:width .3s,background .3s}
+  #danoTxt{font-variant-numeric:tabular-nums;min-width:62px}
+  #dano.grave #danoTxt{color:#ff6b5b;font-weight:700}
+  #btnClaxon{width:58px;height:58px;padding:0;border-radius:50%;font-size:24px;background:rgba(12,18,26,.82);border:3px solid rgba(255,255,255,.92);box-shadow:0 5px 16px rgba(0,0,0,.55);touch-action:none}
+  #btnClaxon.pulsado{background:var(--ambar)}
+  #controles .derecha{display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:none}
+  #controles .derecha>*{pointer-events:auto}
+  #fueraRuta{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:rgba(200,30,25,.9);color:#fff;font-weight:800;padding:7px 14px;border-radius:10px;font-size:15px;pointer-events:none;display:none;z-index:4;box-shadow:0 4px 14px rgba(0,0,0,.4);max-width:calc(100vw - 420px);min-width:180px;text-align:center}
+  @media (max-width:640px){#fueraRuta{bottom:auto;top:40%;max-width:80vw}}
+  body.fuera #fueraRuta{display:block}
   #coches button{font-size:15px;padding:8px 14px;background:#4a5a6a;color:#fff}
   #coches button.activo{background:var(--ambar);color:#1b1b1b}
   @media (max-height:520px){#ruleta{width:140px;height:140px}.pedal{width:74px;height:94px}#btnFreno{height:80px}#btnSentido{width:54px;height:54px}#vel{font-size:36px}}
@@ -69,7 +91,19 @@
   <div id="motor"><span id="marcha">1</span><div id="rpm"><div id="rpmBarra"></div></div><span id="rpmTexto">800 rpm</span></div>
   <div id="limite">Límite: —</div>
   <div id="fuera"></div>
+  <div id="dano" title="Daño del coche: delante, detrás, izquierda y derecha">
+    <svg viewBox="0 0 26 42">
+      <rect x="4" y="3" width="18" height="36" rx="6" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.6)" stroke-width="1"/>
+      <path id="zDelante" d="M6 4 h14 a5 5 0 0 1 2 4 v4 H4 v-4 a5 5 0 0 1 2 -4z" fill="#2ecc71"/>
+      <path id="zDetras" d="M4 30 h18 v4 a5 5 0 0 1 -2 4 H6 a5 5 0 0 1 -2 -4z" fill="#2ecc71"/>
+      <rect id="zIzq" x="4" y="13" width="5" height="16" fill="#2ecc71"/>
+      <rect id="zDer" x="17" y="13" width="5" height="16" fill="#2ecc71"/>
+      <rect x="10" y="14" width="6" height="8" rx="1.5" fill="rgba(20,28,38,.9)"/>
+    </svg>
+    <div><div id="danoTxt">Daño 0 %</div><div id="danoBarra"><div id="danoRelleno"></div></div></div>
+  </div>
 </div>
+<div id="fueraRuta">⚠ Fuera de ruta: sigue las flechas rojas</div>
 <div id="carrera" class="panel"></div>
 <div id="aviso"></div>
 <div id="destello"></div>
@@ -94,20 +128,29 @@
       <path d="M38 50 l6 -5 v10 z M62 50 l-6 -5 v10 z" fill="#fff"/>
     </svg>
   </div>
+  <div class="derecha">
+  <button id="btnClaxon" title="Claxon (H)">📢</button>
   <div class="grupo">
     <button id="btnSentido" title="Marcha adelante (D) o atrás (R). Tecla R">D<small>MARCHA</small></button>
     <button class="pedal" id="btnFreno" data-c="freno"><svg viewBox="0 0 40 40"><rect x="8" y="8" width="24" height="24" rx="5" fill="#fff"/></svg>FRENO</button>
     <button class="pedal" id="btnGas" data-c="acel"><svg viewBox="0 0 40 40"><path d="M20 5 L35 31 H5 Z" fill="#fff"/></svg>GAS</button>
   </div>
+  </div>
 </div>
 <div id="pantalla">
   <h1>Carreras por Huelva</h1>
-  <p>Prototipo. Carga el zip de la zona (el que exporta el paseo). Los límites de velocidad son solo informativos: puedes ir más deprisa.</p>
+  <p>Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
   <div id="estado"></div>
+  <div class="opcion"><span>Modo</span><div class="selector" id="modos">
+    <button data-modo="circuito">🏁 Circuito · 3 vueltas</button><button data-modo="exploracion">🧭 Exploración</button>
+  </div></div>
+  <div class="opcion"><span>Hora</span><div class="selector" id="horas">
+    <button data-hora="dia">☀️ Día</button><button data-hora="tarde">🌇 Atardecer</button><button data-hora="noche">🌙 Noche</button>
+  </div></div>
   <div id="coches"></div>
-  <button id="btnNueva" disabled>Nueva carrera</button>
-  <p style="font-size:13px;opacity:.75">Teclas: flechas o WASD. Parado, mantén ↓ para ir marcha atrás y ↑ para volver adelante (o R). C cambia de cámara, N quita el sonido y M abre el menú.</p>
+  <div id="botonesMenu"><button id="btnSeguir" style="display:none">Continuar</button><button id="btnNueva" disabled>Nueva partida</button></div>
+  <p style="font-size:13px;opacity:.75">Teclas: flechas o WASD. Parado, mantén ↓ para ir marcha atrás y ↑ para volver adelante (o R). H toca el claxon, C cambia de cámara, N quita el sonido y M abre el menú.</p>
   <p style="font-size:12px;opacity:.6">Datos: © colaboradores de OpenStreetMap (ODbL) · Dirección General del Catastro</p>
   <p style="font-size:12px;opacity:.6">Modelos: CarConcept © Eric Chadwick (Darmstadt Graphics Group), CC BY 4.0 · ToyCar © Guido Odendahl y Eric Chadwick, CC0 · Galería © Kenney (kenney.nl), CC0</p>
 </div>
@@ -305,7 +348,7 @@ function planearVuelta(G, rng, longitudMin, longitudMax, libre) {
     }
     if (libre && (!libre(S.x, S.z) || !libre(S.x + Math.sin(h) * 3, S.z + Math.cos(h) * 3) || !libre(S.x + Math.sin(h) * 6, S.z + Math.cos(h) * 6))) continue;
     return {
-      checkpoints: nodos.slice(1).map(i => ({ x: G.nodos[i].x, z: G.nodos[i].z })), // [A, B, C, meta]
+      checkpoints: nodos.slice(1).map(i => ({ x: G.nodos[i].x, z: G.nodos[i].z, nodo: i })), // [A, B, C, meta]
       inicio: { x: S.x, z: S.z, h },
       ruta, longitud,
       cortes: piernas.map((_, k) => piernas.slice(0, k + 1).reduce((a, p) => a + p.longitud, 0)),   // metros de ruta hasta cada checkpoint
@@ -859,6 +902,24 @@ function generarPasosCebra(tramos, rotondas, cruces) {
   return marcas;
 }
 
+// Pasos de cebra como puntos para los peatones que cruzan: centro, sentido de la calle, ancho de la calzada y tramo
+function puntosPasoCebra(tramos, rotondas, cruces) {
+  const clave = p => p[0].toFixed(1) + '|' + p[1].toFixed(1), llegan = new Map(), pasos = [];
+  tramos.forEach((t, i) => { for (const [p, inicio] of [[t.pts[0], true], [t.pts[t.pts.length - 1], false]]) {
+    const k = clave(p);
+    if (!llegan.has(k)) llegan.set(k, []);
+    llegan.get(k).push({ t, i, inicio });
+  } });
+  for (const c of cruces) for (const { t, i, inicio } of llegan.get(clave(c)) || []) {
+    if (t.ancho < 6 || !(t.acera > 0) || AUTOVIAS.has(t.tipo) || enRotonda(t, rotondas)) continue;
+    const cum = acumulados(t.pts), L = cum[cum.length - 1];
+    if (L < 16) continue;
+    const e = enPolilinea(t.pts, cum, inicio ? 11 : L - 11);
+    pasos.push({ x: e.x, z: e.z, tx: e.tx, tz: e.tz, ancho: t.ancho, seg: i });
+  }
+  return pasos;
+}
+
 // --- mobiliario: farolas cada 36 m en el centro de la acera (de un lado y de otro); árboles de alineación ---
 // Cada farola es {x, z, th}: th es el giro (rad) del brazo, que apunta hacia la calzada
 function generarFarolas(tramos, rotondas, cruces, arboles) {
@@ -914,7 +975,9 @@ function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng) {
   }
   const farolas = generarFarolas(tramos, rotondas, cruces, arboles).filter(f => !choca(aguas, rejAguas, f.x, f.z, 1) && !dentroDeOtraCasa(edif, rejilla, f.x, f.z, -1));
   const marcas = generarMarcas(tramos, rotondas, cruces).concat(generarPasosCebra(tramos, rotondas, cruces));
+  const pasos = puntosPasoCebra(tramos, rotondas, cruces).filter(p => !dentroDeOtraCasa(edif, rejilla, p.x, p.z, -1));
   return {
+    pasos,
     capas, aguas, rejAguas, rejCalles, rieles, rejRieles: construirRejillaCalles(rieles), islas,
     arboles, rejArboles: construirRejillaPuntos(arboles),
     farolas, rejFarolas: construirRejillaPuntos(farolas.map(f => [f.x, f.z])), marcas,
@@ -1111,7 +1174,7 @@ function pasoMotor(c, acel, freno, dt) {
   const rapidez = Math.abs(c.v);
   let fuerza = 0;                                               // N, positiva hacia delante
   if (c.marcha === 0) {
-    fuerza = -F.fuerzaAtras * c.gas * Math.max(0, 1 - rapidez / F.marchaAtras);
+    fuerza = -F.fuerzaAtras * c.gas * Math.max(0, 1 - rapidez / F.marchaAtras) * (c.potencia ?? 1);
     c.rpm += (F.ralenti + c.gas * 1500 - c.rpm) * Math.min(1, dt * 6);
   } else {
     const patina = rapidez < 2.5;                               // al arrancar, el embrague patina: el motor sube sin mover el coche
@@ -1119,7 +1182,7 @@ function pasoMotor(c, acel, freno, dt) {
     const rel = relacionTotal(c.marcha);
     const objetivo = patina ? F.ralenti + c.gas * 2600 : Math.max(F.ralenti, rpmEnMarcha(c.v, c.marcha));
     c.rpm += (Math.min(objetivo, F.corte) - c.rpm) * Math.min(1, dt * (patina ? 6 : 14));
-    if (c.cambio <= 0) fuerza = parMotor(c.rpm) * c.gas * rel * F.rendimiento / F.radioRueda;   // sin empuje mientras cambia
+    if (c.cambio <= 0) fuerza = parMotor(c.rpm) * c.gas * rel * F.rendimiento / F.radioRueda * (c.potencia ?? 1);   // sin empuje mientras cambia; el daño le quita potencia
     fuerza = Math.min(fuerza, 0.8 * G_TIERRA * F.masa);         // no pasa de lo que aguantan las ruedas
     // rozamiento del motor; con el gas suelto aumenta mucho (freno motor)
     if (!patina) fuerza -= Math.sign(c.v) * (8 + 0.002 * c.rpm + (1 - c.gas) * (16 + 0.003 * c.rpm)) * rel / F.radioRueda;
@@ -1144,7 +1207,7 @@ function giroCoche(c, dt) {
   const F = FISICA, v = Math.abs(c.v);
   const ruedas = c.dir * 0.6 / (1 + v / 12);                    // ángulo de las ruedas (rad)
   let w = v * Math.tan(ruedas) / F.distanciaEjes;
-  const maxW = F.agarre / Math.max(v, 0.5);
+  const maxW = F.agarre * (c.agarreDano ?? 1) / Math.max(v, 0.5);
   c.exceso = 0;   // m/s² de giro que el asfalto no aguanta: el coche derrapa hacia fuera
   if (Math.abs(w) > maxW) { c.exceso = v * (Math.abs(w) - maxW); w = Math.sign(w) * maxW; c.v *= Math.max(0, 1 - 0.15 * dt); }
   return w;
@@ -1295,12 +1358,107 @@ function calleMasCercana(celdas, tramos, x, z, R) {
       }
     }
   if (mi < 0) return null;
-  const t = tramos[mi], a = t.pts[mk], b = t.pts[mk + 1], q = puntoEnSeg(x, z, a[0], a[1], b[0], b[1]);
-  const d = Math.sqrt(md);
+  const t = prepararTramo(tramos[mi]), a = t.pts[mk], b = t.pts[mk + 1], q = puntoEnSeg(x, z, a[0], a[1], b[0], b[1]);
+  const d = Math.sqrt(md), s = t.cum[mk] + Math.hypot(q[0] - a[0], q[1] - a[1]);   // s: metros desde el inicio del tramo
   let nx = x - q[0], nz = z - q[1];
   if (d > 1e-6) { nx /= d; nz /= d; }
   else { const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; nx = -(b[1] - a[1]) / l; nz = (b[0] - a[0]) / l; }
-  return { i: mi, t, d, nx, nz };
+  return { i: mi, t, d, nx, nz, s };
+}
+// --- rutas desde donde esté el coche: la vuelta al camino cuando se sale de la ruta, y los destinos de la exploración ---
+// Camino más corto desde (x, z), mirando hacia h, hasta el nodo destino: sigue la calle en la que está el coche hasta uno de sus
+// extremos (dar la vuelta cuesta 40 m; contra dirección prohibida no) y de ahí por el grafo. { pts, longitud } o null
+function rutaDesde(G, celdas, x, z, h, destino) {
+  const r = calleMasCercana(celdas, G.tramos, x, z, 60);
+  if (!r) return null;
+  const t = prepararTramo(r.t), e = enPolilinea(t.pts, t.cum, r.s);
+  const haciaB = e.tx * Math.sin(h) + e.tz * Math.cos(h) >= 0;
+  let mejor = null;
+  for (const [nodo, dTramo, alB] of [[t.b, t.len - r.s, true], [t.a, r.s, false]]) {
+    if ((!alB && t.unSentido) || !G.nodos[nodo].comp) continue;
+    const res = nodo === destino ? { camino: [], longitud: 0 } : dijkstra(G, nodo, destino);
+    if (!res) continue;
+    const total = dTramo + (alB === haciaB ? 0 : 40) + res.longitud;
+    if (!mejor || total < mejor.total) mejor = { total, alB, res };
+  }
+  if (!mejor) return null;
+  const tramo = mejor.alB ? subPolilinea(t.pts, t.cum, r.s, t.len) : subPolilinea(t.ptsRev, t.cumRev, t.len - r.s, t.len);
+  const pts = tramo.concat(polilinea(G, mejor.res.camino).slice(1));
+  return { pts, longitud: mejor.total };
+}
+// Nombre de una calle que llega al nodo i ('' si ninguna tiene nombre)
+function nombreNodo(G, i) {
+  for (const e of G.nodos[i].adj) if (G.tramos[e.seg].nombre) return G.tramos[e.seg].nombre;
+  for (const t of G.tramos) if ((t.a === i || t.b === i) && t.nombre) return t.nombre;
+  return '';
+}
+// Exploración: siguiente destino a 350–900 m en línea recta, lejos de los ya visitados y por calles poco recorridas.
+// usados: tramos ya recorridos; visitados: [[x, z], ...]. { nodo, camino, longitud } o null
+function elegirDestino(G, rng, desde, usados, visitados) {
+  const S = G.nodos[desde];
+  for (const estricto of [true, false]) {
+    let mejor = null;
+    for (let k = 0, probados = 0; k < 400 && probados < 14; k++) {
+      const i = Math.floor(rng() * G.nodos.length), n = G.nodos[i];
+      if (!n.comp || !n.adj.length || i === desde) continue;
+      const d = Math.hypot(n.x - S.x, n.z - S.z);
+      if (d < 350 || d > 900) continue;
+      if (estricto && visitados.some(p => Math.hypot(p[0] - n.x, p[1] - n.z) < 220)) continue;
+      const r = dijkstra(G, desde, i);
+      if (!r || !r.camino.length || r.longitud > d * 2.4) continue;
+      probados++;
+      let repetido = 0;
+      for (const e of r.camino) if (usados.has(e.seg)) repetido += G.tramos[e.seg].len;
+      const nota = repetido / r.longitud * 3 + rng() * 0.3;
+      if (!mejor || nota < mejor.nota) mejor = { nodo: i, camino: r.camino, longitud: r.longitud, nota };
+    }
+    if (mejor) return mejor;
+  }
+  return null;
+}
+// Nodo del grupo principal más cercano a (x, z)
+function nodoMasCercano(G, x, z) {
+  let mejor = -1, md = Infinity;
+  G.nodos.forEach((n, i) => { if (!n.comp || !n.adj.length) return; const d = (n.x - x) ** 2 + (n.z - z) ** 2; if (d < md) { md = d; mejor = i; } });
+  return mejor;
+}
+// Distancia de (x, z) a una polilínea mirando solo los puntos de a a b; { d, k } con k el punto donde empieza el trozo más cercano
+function distanciaPolilinea(pts, x, z, a = 0, b = pts.length - 1) {
+  let md = Infinity, mk = a;
+  for (let k = Math.max(0, a); k < Math.min(b, pts.length - 1); k++) {
+    const d = distSeg2(x, z, pts[k][0], pts[k][1], pts[k + 1][0], pts[k + 1][1]);
+    if (d < md) { md = d; mk = k; }
+  }
+  return { d: Math.sqrt(md), k: mk };
+}
+
+// --- daño del coche: cada golpe suma daño a una zona (delante, detrás, izquierda, derecha) y al total ---
+const MATERIAL_DANO = { casa: 1, arbol: 1.1, farola: 0.9, riel: 0.6, agua: 0.3, isla: 0.7, coche: 0.9, bordillo: 0.35, bici: 0.15, valla: 0.4 };
+// Daño (en %) de un golpe a la velocidad impacto (m/s): por debajo de 2,5 m/s (9 km/h) no se rompe nada
+function danoGolpe(impacto, tipo) {
+  return Math.max(0, impacto - 2.5) ** 1.4 * 0.75 * (MATERIAL_DANO[tipo] ?? 1);
+}
+// Zona del coche que se lleva el golpe: n es la normal del choque (del obstáculo hacia el coche), f el frente del coche
+function zonaGolpe(fx, fz, nx, nz) {
+  // el lado +X del coche, (fz, -fx), es su izquierda; si el obstáculo está a la izquierda, la normal apunta hacia la derecha
+  const delante = -(nx * fx + nz * fz), izq = -(nx * fz - nz * fx);
+  if (Math.abs(delante) >= Math.abs(izq)) return delante > 0 ? 'delante' : 'detras';
+  return izq > 0 ? 'izq' : 'der';
+}
+// Suma un golpe al daño: la zona se lleva una vez y media lo que el total
+function sumarDano(dano, zona, cuanto) {
+  dano[zona] = Math.min(100, dano[zona] + cuanto * 1.5);
+  dano.total = Math.min(100, dano.total + cuanto);
+  return dano;
+}
+// Lo que el daño le hace al coche: potencia del motor, velocidad máxima (m/s), agarre y tirón del volante (+ izquierda)
+function efectosDano(d) {
+  return {
+    potencia: Math.max(0.15, 1 - 0.5 * d.delante / 100 - 0.3 * d.total / 100),
+    velMax: 56 * (1 - 0.55 * d.total / 100),
+    agarre: 1 - 0.3 * d.detras / 100,
+    tiron: (d.izq - d.der) / 100 * 0.16,
+  };
 }
 /*CORE-END*/
 
@@ -1314,17 +1472,19 @@ const Efectos = (() => {
   const grupo = new THREE.Group();
   // Partículas como puntos con un sombreado propio: tamaño en metros y transparencia por partícula
   function sistema(max, color, aditivo) {
-    const pos = new Float32Array(max * 3), tam = new Float32Array(max), alfa = new Float32Array(max);
+    const pos = new Float32Array(max * 3), tam = new Float32Array(max), alfa = new Float32Array(max), col = new Float32Array(max * 3);
+    const base = new THREE.Color(color);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('aTam', new THREE.BufferAttribute(tam, 1).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('aAlfa', new THREE.BufferAttribute(alfa, 1).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aColor', new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage));
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color(color) }, uEscala: { value: 500 } },
-      vertexShader: `attribute float aTam; attribute float aAlfa; uniform float uEscala; varying float vAlfa;
-        void main(){ vAlfa = aAlfa; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = aTam * uEscala / max(0.1, -mv.z); gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `uniform vec3 uColor; varying float vAlfa;
-        void main(){ vec2 p = gl_PointCoord - 0.5; float r = dot(p, p) * 4.0; if (r > 1.0) discard; gl_FragColor = vec4(uColor, vAlfa * (1.0 - r)); }`,
+      uniforms: { uEscala: { value: 500 } },
+      vertexShader: `attribute float aTam; attribute float aAlfa; attribute vec3 aColor; uniform float uEscala; varying float vAlfa; varying vec3 vColor;
+        void main(){ vAlfa = aAlfa; vColor = aColor; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = aTam * uEscala / max(0.1, -mv.z); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `varying float vAlfa; varying vec3 vColor;
+        void main(){ vec2 p = gl_PointCoord - 0.5; float r = dot(p, p) * 4.0; if (r > 1.0) discard; gl_FragColor = vec4(vColor, vAlfa * (1.0 - r)); }`,
       transparent: true, depthWrite: false, blending: aditivo ? THREE.AdditiveBlending : THREE.NormalBlending,
     });
     const puntos = new THREE.Points(geo, mat);
@@ -1343,27 +1503,31 @@ const Efectos = (() => {
           p.vy -= p.g * dt;
           const roz = Math.exp(-p.roz * dt);
           p.vx *= roz; p.vz *= roz;
+          p.vy *= p.rozY ? Math.exp(-p.rozY * dt) : 1;
           p.x += p.vx * dt; p.y = Math.max(0.05, p.y + p.vy * dt); p.z += p.vz * dt;
         }
         vivas.forEach((p, i) => {
           const u = p.t / p.vida;
           pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z;
+          const c = p.c || base;
+          col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
           tam[i] = p.t0 + (p.t1 - p.t0) * u;
           alfa[i] = p.a * (u < 0.15 ? u / 0.15 : 1 - (u - 0.15) / 0.85);
         });
         geo.setDrawRange(0, vivas.length);
-        for (const k of ['position', 'aTam', 'aAlfa']) geo.attributes[k].needsUpdate = true;
+        for (const k of ['position', 'aTam', 'aAlfa', 'aColor']) geo.attributes[k].needsUpdate = true;
       },
     };
   }
-  let humo = null, chispas = null;
+  let humo = null, chispas = null, fuego = null;
   // Marcas de neumático: tiras oscuras sobre el asfalto, en un anillo de trozos (las más viejas se reutilizan)
   const MAX_TROZOS = 2400, posH = new Float32Array(MAX_TROZOS * 18);
   let huellas = null, nTrozos = 0;
   const previo = [null, null, null, null];
   function crear() {
-    humo = sistema(160, 0xd9d9d6, false);
+    humo = sistema(260, 0xd9d9d6, false);
     chispas = sistema(160, 0xffb347, true);
+    fuego = sistema(700, 0xffffff, true);   // fuegos artificiales y llamas
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(posH, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setDrawRange(0, 0);
@@ -1384,8 +1548,20 @@ const Efectos = (() => {
     huellas.geometry.attributes.position.needsUpdate = true;
   }
   function cortarHuella(i) { previo[i] = null; }
-  function emitirHumo(x, y, z, vx, vz) {
-    humo.emitir({ x, y, z, vx, vy: 0.6 + Math.random() * 0.5, vz, g: -0.2, roz: 1.5, t: 0, vida: 1.4 + Math.random() * 0.8, t0: 0.6, t1: 3.2, a: 0.32 });
+  function emitirHumo(x, y, z, vx, vz, color, opacidad = 0.32, tam = 3.2) {
+    humo.emitir({ x, y, z, vx, vy: 0.6 + Math.random() * 0.5, vz, g: -0.2, roz: 1.5, t: 0, vida: 1.4 + Math.random() * 0.8, t0: 0.6, t1: tam, a: opacidad, c: color });
+  }
+  // Llamas del motor: puntos naranjas que suben y se apagan
+  function emitirLlama(x, y, z) {
+    fuego.emitir({ x: x + (Math.random() - 0.5) * 0.6, y, z: z + (Math.random() - 0.5) * 0.6, vx: (Math.random() - 0.5) * 0.4, vy: 1.6 + Math.random(), vz: (Math.random() - 0.5) * 0.4, g: 0, roz: 1, t: 0, vida: 0.5 + Math.random() * 0.4, t0: 0.7, t1: 0.15, a: 0.9, c: new THREE.Color().setHSL(0.04 + Math.random() * 0.07, 1, 0.55) });
+  }
+  // Palmera de fuegos artificiales de un color (o de dos)
+  function emitirFuegos(x, y, z) {
+    const c1 = new THREE.Color().setHSL(Math.random(), 1, 0.6), c2 = new THREE.Color().setHSL(Math.random(), 1, 0.65);
+    for (let k = 0; k < 90; k++) {
+      const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = Math.sqrt(1 - u * u), v = 9 + Math.random() * 4;
+      fuego.emitir({ x, y, z, vx: r * Math.cos(a) * v, vy: u * v, vz: r * Math.sin(a) * v, g: 3.5, roz: 1.2, rozY: 1.2, t: 0, vida: 1.6 + Math.random() * 0.9, t0: 0.55, t1: 0.25, a: 1, c: k % 3 ? c1 : c2 });
+    }
   }
   function emitirChispas(x, y, z, n) {
     for (let k = 0; k < n; k++) {
@@ -1398,16 +1574,63 @@ const Efectos = (() => {
     if (!humo) return;
     renderer.getDrawingBufferSize(tam);
     const escala = tam.y / (2 * Math.tan(camara.fov * Math.PI / 360));   // píxeles por metro a un metro de distancia
-    humo.mat.uniforms.uEscala.value = escala; chispas.mat.uniforms.uEscala.value = escala;
-    humo.actualizar(dt); chispas.actualizar(dt);
+    for (const s of [humo, chispas, fuego]) { s.mat.uniforms.uEscala.value = escala; s.actualizar(dt); }
   }
   function limpiar() {
     if (!humo) return;
-    humo.limpiar(); chispas.limpiar();
+    humo.limpiar(); chispas.limpiar(); fuego.limpiar();
     nTrozos = 0; previo.fill(null);
     huellas.geometry.setDrawRange(0, 0);
   }
-  return { crear, huella, cortarHuella, humo: emitirHumo, chispas: emitirChispas, actualizar, limpiar };
+  return { crear, huella, cortarHuella, humo: emitirHumo, chispas: emitirChispas, llama: emitirLlama, fuegos: emitirFuegos, actualizar, limpiar };
+})();
+
+// --- abolladuras: los golpes hunden de verdad la carrocería del coche del jugador (y el taller la endereza) ---
+const Abolladuras = (() => {
+  let mallas = [];
+  const inv = new THREE.Matrix4(), p = new THREE.Vector3(), d = new THREE.Vector3();
+  // Cada malla del modelo con su geometría propia y una copia de la forma original
+  function preparar(modelo) {
+    mallas = [];
+    modelo.traverse(o => {
+      if (!o.isMesh || !o.geometry.attributes.position) return;
+      if (!o.userData.orig) { o.geometry = o.geometry.clone(); o.userData.orig = o.geometry.attributes.position.array.slice(); }
+      mallas.push(o);
+    });
+    reparar(1);
+  }
+  // Hunde la chapa alrededor de un punto (mundo) hacia dentro del coche (dirección dir, mundo); fuerza de 0 a 1
+  function abollar(punto, dir, fuerza) {
+    for (const o of mallas) {
+      o.updateMatrixWorld();
+      const esc = o.matrixWorld.getMaxScaleOnAxis() || 1;
+      inv.copy(o.matrixWorld).invert();
+      p.copy(punto).applyMatrix4(inv);
+      d.copy(dir).transformDirection(inv);
+      const R = (0.8 + 0.7 * fuerza) / esc, prof = (0.05 + 0.3 * fuerza) / esc, max = 0.38 / esc;
+      const pos = o.geometry.attributes.position, a = pos.array, orig = o.userData.orig;
+      let tocado = false;
+      for (let i = 0; i < a.length; i += 3) {
+        const dx = a[i] - p.x, dy = a[i + 1] - p.y, dz = a[i + 2] - p.z, dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dist >= R) continue;
+        const w = (1 - dist / R) ** 2 * prof * (0.75 + 0.5 * Math.abs(Math.sin(i * 12.9898)));   // un poco irregular, como la chapa
+        a[i] += d.x * w; a[i + 1] += d.y * w; a[i + 2] += d.z * w;
+        const ox = a[i] - orig[i], oy = a[i + 1] - orig[i + 1], oz = a[i + 2] - orig[i + 2], o2 = Math.sqrt(ox * ox + oy * oy + oz * oz);
+        if (o2 > max) { const k = max / o2; a[i] = orig[i] + ox * k; a[i + 1] = orig[i + 1] + oy * k; a[i + 2] = orig[i + 2] + oz * k; }
+        tocado = true;
+      }
+      if (tocado) { pos.needsUpdate = true; o.geometry.computeBoundingSphere(); }
+    }
+  }
+  // Devuelve la chapa hacia su forma original (f = 1: del todo)
+  function reparar(f) {
+    for (const o of mallas) {
+      const a = o.geometry.attributes.position.array, orig = o.userData.orig;
+      if (f >= 1) a.set(orig); else for (let i = 0; i < a.length; i++) a[i] += (orig[i] - a[i]) * f;
+      o.geometry.attributes.position.needsUpdate = true;
+    }
+  }
+  return { preparar, abollar, reparar };
 })();
 
 // --- sonido: motor, neumáticos, golpes, bocinas y avisos, sintetizados con Web Audio (sin archivos de sonido) ---
@@ -1454,8 +1677,11 @@ const Sonido = (() => {
     // roce de chapa contra el quitamiedos o una pared
     const roce = ganancia(0), fRoce = filtro('highpass', 2200, 0.8);
     cadena(fuenteRuido(), fRoce, roce, maestro);
+    // traqueteo del motor dañado: golpeteo metálico grave que crece con el daño
+    const traqueteo = ganancia(0), fTraq = filtro('bandpass', 260, 3);
+    cadena(fuenteRuido(), fTraq, traqueteo, maestro);
     for (const o of [o1, o2, o3, lfo, oChirr, vib]) o.start();
-    n = { motor, fMotor, o1, o2, o3, lfo, admision, fAdm, rodar, fRodar, chirrido, oChirr, roce };
+    n = { motor, fMotor, o1, o2, o3, lfo, admision, fAdm, rodar, fRodar, chirrido, oChirr, roce, traqueteo, fTraq };
   }
   function iniciar() {
     if (!ctx) crear();
@@ -1466,13 +1692,17 @@ const Sonido = (() => {
   // Cada fotograma: e = { rpm, gas, v, derrape, roce, cambio, acera }, o null para callar el coche
   function actualizar(e) {
     if (!ctx || !n) return;
-    if (!e) { hacia(n.motor.gain, 0, 0.15); hacia(n.admision.gain, 0, 0.1); hacia(n.rodar.gain, 0, 0.2); hacia(n.chirrido.gain, 0, 0.05); hacia(n.roce.gain, 0, 0.05); return; }
+    if (!e) { for (const k of ['motor', 'admision', 'rodar', 'chirrido', 'roce', 'traqueteo']) hacia(n[k].gain, 0, 0.12); return; }
     const f = Math.max(14, e.rpm / 60 * 2);
     hacia(n.o1.frequency, f, 0.03); hacia(n.o2.frequency, f * 2.01, 0.03); hacia(n.o3.frequency, f * 0.5, 0.03); hacia(n.lfo.frequency, f * 0.5, 0.03);
     hacia(n.fMotor.frequency, 260 + e.rpm * 0.32 + e.gas * 1300, 0.05);
     let g = (0.13 + 0.2 * e.gas) * (e.cambio ? 0.5 : 1);
     if (e.rpm > FISICA.corte - 250) g *= Math.sin(performance.now() / 1000 * 70) > 0 ? 1 : 0.25;   // corte de inyección
+    if (e.dano > 0.3 && Math.random() < e.dano * 0.12) g *= 0.15;                            // motor tocado: falla y petardea
+    if (e.apagado) g = 0;
     hacia(n.motor.gain, g, 0.03);
+    hacia(n.traqueteo.gain, e.apagado ? 0 : Math.max(0, e.dano - 0.2) * (0.05 + e.rpm / 7000 * 0.2), 0.05);
+    hacia(n.fTraq.frequency, 160 + e.rpm * 0.06, 0.05);
     hacia(n.fAdm.frequency, 500 + e.rpm * 0.25, 0.05);
     hacia(n.admision.gain, e.gas * (0.02 + e.rpm / 7000 * 0.07), 0.05);
     hacia(n.fRodar.frequency, 250 + e.v * 18, 0.1);
@@ -1506,6 +1736,7 @@ const Sonido = (() => {
       const b = filtro('bandpass', fr, q), gb = ganancia(0);
       cadena(b, gb, maestro); envolvente(gb, (0.9 + k) * 1.4, 0.9, t); rafagaRuido(b, t, 0.05);
     }
+    if (tipo === 'bici') { const b = filtro('bandpass', 1800, 12), gb = ganancia(0); cadena(b, gb, maestro); envolvente(gb, 0.8, 0.5, t); rafagaRuido(b, t, 0.04); }
     if (tipo === 'arbol') { const b = filtro('bandpass', 260, 5), gb = ganancia(0); cadena(b, gb, maestro); envolvente(gb, 1.2 * k + 0.3, 0.25, t); rafagaRuido(b, t, 0.25); }
     if (tipo === 'coche' && k > 0.35) for (let i = 0; i < 5; i++) {
       const b = filtro('highpass', 4000 + Math.random() * 3000, 1), gb = ganancia(0), ti = t + 0.04 + Math.random() * 0.25;
@@ -1542,6 +1773,59 @@ const Sonido = (() => {
     notas.forEach((fr, i) => setTimeout(() => pitido(fr, 0.22, 0.18), i * 110));
   }
   function clic() { pitido(1400, 0.05, 0.12); }
+  const atenuar = dist => 1 / (1 + Math.max(0, dist) / 10);
+  // Ladrido: un golpe de ruido con dos formantes que bajan, como un «guau»
+  function ladrido(dist, agudo = 1) {
+    if (!ctx || !n) return;
+    const t = t0(), vol = 0.5 * atenuar(dist);
+    for (let k = 0; k < (Math.random() < 0.5 ? 2 : 1); k++) {
+      const ti = t + k * 0.22;
+      for (const [f0, q, a] of [[700, 6, 1], [1500, 8, 0.5]]) {
+        const b = filtro('bandpass', f0 * agudo, q), g = ganancia(0);
+        b.frequency.setValueAtTime(f0 * agudo * 1.25, ti); b.frequency.exponentialRampToValueAtTime(f0 * agudo * 0.7, ti + 0.13);
+        cadena(b, g, maestro); envolvente(g, vol * a, 0.15, ti); rafagaRuido(b, ti, 0.16);
+      }
+      const o = osc('sawtooth', 320 * agudo), go = ganancia(0), fo = filtro('lowpass', 1200);
+      o.frequency.setValueAtTime(380 * agudo, ti); o.frequency.exponentialRampToValueAtTime(230 * agudo, ti + 0.12);
+      cadena(o, fo, go, maestro); envolvente(go, vol * 0.35, 0.14, ti); o.start(ti); o.stop(ti + 0.16);
+    }
+  }
+  // Timbre de bicicleta: dos campanadas metálicas
+  function timbre(dist) {
+    if (!ctx || !n) return;
+    const t = t0(), vol = 0.22 * atenuar(dist);
+    for (const k of [0, 0.13]) for (const [f, a] of [[2350, 1], [3720, 0.5], [5100, 0.25]]) {
+      const o = osc('sine', f), g = ganancia(0);
+      cadena(o, g, maestro); envolvente(g, vol * a, 0.45, t + k); o.start(t + k); o.stop(t + k + 0.5);
+    }
+  }
+  // Claxon del jugador: dos tonos graves algo desafinados
+  function claxon() {
+    if (!ctx || !n) return;
+    const t = t0(), g = ganancia(0), f = filtro('lowpass', 2400, 1);
+    cadena(f, g, maestro);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.3, t + 0.02); g.gain.setValueAtTime(0.3, t + 0.5); g.gain.linearRampToValueAtTime(0, t + 0.6);
+    for (const fr of [349, 440]) { const o = osc('sawtooth', fr); o.connect(f); o.start(t); o.stop(t + 0.62); }
+  }
+  // Aplausos y vítores: muchas palmadas cortas al azar durante dur segundos
+  function aplausos(dur) {
+    if (!ctx || !n) return;
+    const t = t0();
+    for (let k = 0; k < dur * 45; k++) {
+      const ti = t + Math.random() * dur, b = filtro('bandpass', 900 + Math.random() * 1800, 1.5), g = ganancia(0);
+      cadena(b, g, maestro); envolvente(g, 0.12 * (1 - (ti - t) / dur * 0.6), 0.05, ti); rafagaRuido(b, ti, 0.05);
+    }
+    const o = filtro('bandpass', 600, 0.8), g = ganancia(0);   // griterío de fondo
+    cadena(o, g, maestro); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.08, t + 0.3); g.gain.linearRampToValueAtTime(0, t + dur);
+    rafagaRuido(o, t, dur);
+  }
+  // Fuego artificial: estallido y crepitar
+  function estallido() {
+    if (!ctx || !n) return;
+    const t = t0() + 0.15, f = filtro('lowpass', 900), g = ganancia(0);
+    cadena(f, g, maestro); envolvente(g, 0.6, 0.6, t); rafagaRuido(f, t, 0.6);
+    for (let k = 0; k < 18; k++) { const ti = t + 0.2 + Math.random() * 1.2, b = filtro('highpass', 3000), gb = ganancia(0); cadena(b, gb, maestro); envolvente(gb, 0.1, 0.03, ti); rafagaRuido(b, ti, 0.03); }
+  }
   function alternar() {
     activo = !activo;
     try { localStorage.setItem('cochesHuelva.sonido', activo ? 'si' : 'no'); } catch (err) { /* sin almacenamiento */ }
@@ -1550,7 +1834,7 @@ const Sonido = (() => {
     return activo;
   }
   document.addEventListener('visibilitychange', () => { if (ctx) { if (document.hidden) ctx.suspend(); else ctx.resume(); } });
-  return { iniciar, actualizar, golpe, bordillo, bocina, pitido, campana, clic, alternar, activo: () => activo };
+  return { iniciar, actualizar, golpe, bordillo, bocina, pitido, campana, clic, ladrido, timbre, claxon, aplausos, estallido, alternar, activo: () => activo };
 })();
 
 let renderer, scene, camara, reloj;
@@ -1560,19 +1844,18 @@ let cocheMesh = null;            // grupo del coche: posición y rumbo
 let cuerpoCoche = null;          // dentro de cocheMesh: la carrocería, que cabecea y se inclina
 let lucesCoche = null;           // halos de las luces de freno y de marcha atrás
 let sombraCoche = null;          // mancha oscura bajo el coche
-let cielo = null, sol = null, sombras = false;
+let cielo = null, sol = null, hemi = null, sombras = false;
 let contextoRecuperado = false;   // se pone a true si el contexto 3D vuelve tras perderse
 let coche = null;                // { x, z, h, v, dir, acera, golpe, rpm, marcha, cambio, gas, freno, tFreno, sx, sz, wGolpe, ... }
 let carrera = null;              // { cps, meshes, siguiente, vueltas, tVuelta, tiempos, longitud }
-let rutaLinea = null;           // flechas de la ruta (grupo de mallas)
 let modoCamara = 0;             // 0 detrás del coche, 1 cerca del coche, 2 dentro del coche
 let trafico = [], peatones = []; // coches de tráfico y peatones de la zona (se crean con cada carrera)
-let mallaTrafico = [], mallaPeatones = [], matFlechas = null, flechasDatos = null;
+let mallaTrafico = [], mallaPeatones = [];
 let lucesTrafico = null, sombrasTrafico = null;   // pilotos (dos por coche) y manchas de sombra del tráfico
 let estado = 'menu';             // menu | cuenta | corriendo | fin
 let cuenta = 0, tInicio = 0;
 let avisoTexto = '', avisoHasta = 0;
-let tramoActual = null, dTramo2 = Infinity;
+let tramoActual = null, tramoIdx = -1, dTramo2 = Infinity;
 const controles = { acel: false, freno: false, izq: false, der: false };
 const TECLAS = { ArrowUp: 'acel', KeyW: 'acel', ArrowDown: 'freno', KeyS: 'freno', ArrowLeft: 'izq', KeyA: 'izq', ArrowRight: 'der', KeyD: 'der' };
 const volante = { ang: 0, activo: false, aPrev: 0, muesca: 0 };   // ruleta táctil; ang en grados: positivo = giro a la derecha
@@ -1599,7 +1882,8 @@ function iniciarRender() {
   scene.background = new THREE.Color(COLOR_HORIZONTE);
   scene.fog = new THREE.Fog(COLOR_HORIZONTE, 700, 3200);
   camara = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 4000);
-  scene.add(new THREE.HemisphereLight(0xe4f0ff, 0x5b5847, 0.82));
+  hemi = new THREE.HemisphereLight(0xe4f0ff, 0x5b5847, 0.82);
+  scene.add(hemi);
   sol = new THREE.DirectionalLight(0xfff1dc, 0.82);
   sol.position.set(300, 500, 200);
   if (sombras) {
@@ -1613,6 +1897,7 @@ function iniciarRender() {
   scene.add(sol, sol.target);
   cielo = crearCielo(sol.position.clone().normalize());
   scene.add(cielo, Efectos.crear());
+  aplicarHora(horaElegida);
   reloj = new THREE.Clock();
   addEventListener('resize', () => {
     renderer.setSize(innerWidth, innerHeight);
@@ -1621,20 +1906,28 @@ function iniciarRender() {
   });
   requestAnimationFrame(bucle);
 }
-// Cielo: degradado del horizonte al azul de arriba, con el sol y su resplandor. Va siempre centrado en la cámara
+// Cielo: degradado del horizonte al color de arriba, con el sol (o la luna) y su resplandor, y estrellas de noche.
+// Va siempre centrado en la cámara
 function crearCielo(dirSol) {
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
-    uniforms: { uSol: { value: dirSol }, uArriba: { value: new THREE.Color(0x3f82d4) }, uHorizonte: { value: new THREE.Color(COLOR_HORIZONTE) } },
+    uniforms: {
+      uSol: { value: dirSol }, uArriba: { value: new THREE.Color(0x3f82d4) }, uHorizonte: { value: new THREE.Color(COLOR_HORIZONTE) },
+      uColSol: { value: new THREE.Color(1, 0.9, 0.7) }, uNoche: { value: 0 },
+    },
     vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: `uniform vec3 uSol; uniform vec3 uArriba; uniform vec3 uHorizonte; varying vec3 vD;
+    fragmentShader: `uniform vec3 uSol; uniform vec3 uArriba; uniform vec3 uHorizonte; uniform vec3 uColSol; uniform float uNoche; varying vec3 vD;
+      float hh(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
       void main(){
         vec3 d = normalize(vD);
         float h = max(d.y, 0.0);
         vec3 c = mix(uHorizonte, uArriba, pow(h, 0.5));
         c = mix(c, uHorizonte * 0.92, step(d.y, 0.0));
         float s = max(dot(d, normalize(uSol)), 0.0);
-        c += vec3(1.0, 0.9, 0.7) * (pow(s, 900.0) * 1.6 + pow(s, 14.0) * 0.16);
+        c += uColSol * (pow(s, mix(900.0, 2600.0, uNoche)) * 1.6 + pow(s, 14.0) * 0.16 * (1.0 - 0.75 * uNoche));
+        vec2 q = d.xz / (d.y + 0.3) * 160.0;
+        float estrella = step(0.997, hh(floor(q))) * smoothstep(0.04, 0.3, d.y) * smoothstep(0.5, 1.0, uNoche);
+        c += vec3(0.9, 0.92, 1.0) * estrella * (0.5 + 0.5 * hh(floor(q) + 3.0));
         gl_FragColor = vec4(c, 1.0);
       }`,
   });
@@ -1642,6 +1935,67 @@ function crearCielo(dirSol) {
   m.renderOrder = -10;
   m.frustumCulled = false;
   return m;
+}
+// --- hora del día: día, atardecer o noche. Cambia el cielo, el sol, la luz, la niebla, y de noche se encienden ventanas, farolas y faros ---
+const HORAS = {
+  dia: { arriba: 0x3f82d4, horiz: COLOR_HORIZONTE, sol: [300, 500, 200], colSol: 0xfff1dc, iSol: 0.82, cielo: 0xe4f0ff, suelo: 0x5b5847, iHemi: 0.82, niebla: [700, 3200], noche: 0 },
+  tarde: { arriba: 0x2f3f78, horiz: 0xf0a06a, sol: [-520, 110, 260], colSol: 0xffa860, iSol: 0.95, cielo: 0xffc49a, suelo: 0x4a3a38, iHemi: 0.55, niebla: [450, 2600], noche: 0.45 },
+  noche: { arriba: 0x040918, horiz: 0x18233d, sol: [-250, 420, -320], colSol: 0x9fb4ff, iSol: 0.16, cielo: 0x3d4d80, suelo: 0x0e1018, iHemi: 0.3, niebla: [260, 1700], noche: 1 },
+};
+let horaElegida = 'dia', dirSol = new THREE.Vector3(300, 500, 200).normalize();
+try { if (HORAS[localStorage.getItem('cochesHuelva.hora')]) horaElegida = localStorage.getItem('cochesHuelva.hora'); } catch (err) { /* sin almacenamiento */ }
+const uNoche = { value: 0 };     // compartido con las fachadas (ventanas encendidas) y las luces
+let lucesNoche = null;           // halos de las farolas y charcos de luz en el suelo
+function aplicarHora(h) {
+  horaElegida = HORAS[h] ? h : 'dia';
+  const H = HORAS[horaElegida], u = cielo.material.uniforms;
+  dirSol = new THREE.Vector3(...H.sol).normalize();
+  u.uSol.value.copy(dirSol); u.uArriba.value.setHex(H.arriba); u.uHorizonte.value.setHex(H.horiz); u.uColSol.value.setHex(H.colSol); u.uNoche.value = H.noche;
+  scene.background.setHex(H.horiz); scene.fog.color.setHex(H.horiz); scene.fog.near = H.niebla[0]; scene.fog.far = H.niebla[1];
+  sol.color.setHex(H.colSol); sol.intensity = H.iSol;
+  if (!coche) sol.position.copy(dirSol).multiplyScalar(600);
+  hemi.color.setHex(H.cielo); hemi.groundColor.setHex(H.suelo); hemi.intensity = H.iHemi;
+  uNoche.value = H.noche;
+  if (lucesNoche) lucesNoche.visible = H.noche > 0.2;
+  document.querySelector('meta[name=theme-color]').content = '#' + new THREE.Color(H.arriba).getHexString();
+}
+// Halos de las farolas y charcos de luz bajo ellas (solo se ven al atardecer y de noche)
+function mallaLucesFarolas(farolas) {
+  const grupo = new THREE.Group();
+  grupo.visible = uNoche.value > 0.2;
+  if (!farolas.length) return grupo;
+  const cabezas = farolas.map(f => [f.x + Math.cos(f.th) * 1.3, 5.6, f.z - Math.sin(f.th) * 1.3]);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(cabezas.flat(), 3));
+  const halos = new THREE.Points(geo, new THREE.PointsMaterial({ map: texturaHalo(), size: 3.4, sizeAttenuation: true, color: 0xffd7a0, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  const charcos = new THREE.InstancedMesh(new THREE.PlaneGeometry(11, 11).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ map: texturaHalo(), color: 0xc8955a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), cabezas.length);
+  const m = new THREE.Matrix4();
+  cabezas.forEach(([x, , z], i) => { m.makeTranslation(x, 0.17, z); charcos.setMatrixAt(i, m); });
+  charcos.instanceMatrix.needsUpdate = true;
+  for (const o of [halos, charcos]) { o.frustumCulled = false; grupo.add(o); }
+  lucesNoche = grupo;
+  return grupo;
+}
+// Textura del haz de los faros sobre el asfalto: un abanico que se apaga a lo lejos
+let texturaHazCache = null;
+function texturaHaz() {
+  if (!texturaHazCache) {
+    const cv = document.createElement('canvas');
+    cv.width = 64; cv.height = 128;
+    const g = cv.getContext('2d');
+    for (let y = 0; y < 128; y++) {
+      const u = y / 127, ancho = 10 + 54 * u, a = Math.pow(1 - u, 1.6) * Math.min(1, u * 8);
+      const gr = g.createLinearGradient(32 - ancho / 2, 0, 32 + ancho / 2, 0);
+      gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.5, `rgba(255,255,255,${a.toFixed(3)})`); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr; g.fillRect(0, 127 - y, 64, 1);
+    }
+    texturaHazCache = new THREE.CanvasTexture(cv);
+  }
+  return texturaHazCache;
+}
+function materialHaz(color = 0xfff0c8, opacidad = 0.55) {
+  return new THREE.MeshBasicMaterial({ map: texturaHaz(), color, transparent: true, opacity: opacidad, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 });
 }
 // Textura redonda y difuminada (halos de luces, humo y sombra del coche)
 let texturaHaloCache = null;
@@ -2118,6 +2472,8 @@ const FRAGMENTO_FACHADA = `#include <color_fragment>
         if(type>1.5&&ground){float bar=clamp(step(0.86,fract(wp.x/0.12))+step(abs(wp.y-wh*0.12),0.025)+step(abs(wp.y-wh*0.88),0.025),0.0,1.0);wc=mix(wc,vec3(0.035),mix(0.2,bar*0.95,aB));}
         if(bal>0.5){float rail=step(wp.y,1.0)*clamp(step(0.82,fract(wp.x/0.11))+step(abs(wp.y-1.0),0.03),0.0,1.0);wc=mix(wc,vec3(0.04),step(wp.y,1.0)*mix(0.25,rail*0.95/max(step(wp.y,1.0),0.001),aB));}
         col=mix(col,wc,0.35+0.65*aa);
+        float encendida=uNoche*step(0.42,r3)*(1.0-blind*0.55);
+        totalEmissiveRadiance+=vec3(1.0,0.74,0.4)*encendida*(0.55+0.5*r2)*(0.35+0.65*aa);
       }
       if(inDoor>0.5){vec2 dp=vec2(dx+dW*0.5,v);
         vec3 dc=carp*(0.9+0.1*n1);
@@ -2137,6 +2493,7 @@ let matFachadas = null;
 function materialFachadas() {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   m.onBeforeCompile = sh => {
+    sh.uniforms.uNoche = uNoche;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
 attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF;
@@ -2145,7 +2502,7 @@ varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa;`)
 vWw = aW; vZc = aZ; vCp = aC; vFa = aF;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; uniform float uNoche;
 float hh(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}`)
       .replace('#include <color_fragment>', FRAGMENTO_FACHADA);
   };
@@ -2253,10 +2610,18 @@ function construirCoche(color) {
 }
 // Halos de las luces traseras del coche del jugador: rojos al frenar, blancos con la marcha atrás
 function crearLucesCoche() {
-  const grupo = new THREE.Group(), frenos = [], atras = [];
+  const grupo = new THREE.Group(), frenos = [], atras = [], faros = [];
   const halo = color => new THREE.Sprite(new THREE.SpriteMaterial({ map: texturaHalo(), color, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
-  for (let i = 0; i < 2; i++) { const f = halo(0xff2a1a); f.scale.set(1.1, 0.7, 1); frenos.push(f); const a = halo(0xffffff); a.scale.set(0.7, 0.5, 1); atras.push(a); grupo.add(f, a); }
-  return { grupo, frenos, atras };
+  for (let i = 0; i < 2; i++) {
+    const f = halo(0xff2a1a); f.scale.set(1.1, 0.7, 1); frenos.push(f);
+    const a = halo(0xffffff); a.scale.set(0.7, 0.5, 1); atras.push(a);
+    const d = halo(0xfff4d8); d.scale.set(1.3, 0.9, 1); faros.push(d);
+    grupo.add(f, a, d);
+  }
+  // haz de los faros sobre el asfalto (de noche)
+  const haz = new THREE.Mesh(new THREE.PlaneGeometry(9, 30).rotateX(-Math.PI / 2).rotateY(Math.PI).translate(0, 0.17, 17), materialHaz());
+  haz.frustumCulled = false;
+  return { grupo, frenos, atras, faros, haz };
 }
 // Coloca los halos en la trasera del modelo (según su caja)
 function colocarLucesCoche(caja) {
@@ -2264,6 +2629,7 @@ function colocarLucesCoche(caja) {
   const y = caja.min.y + alto * 0.45, x = Math.max(0.3, ancho / 2 - 0.3), z = caja.min.z - 0.05;
   lucesCoche.frenos.forEach((f, i) => f.position.set(i ? x : -x, y, z));
   lucesCoche.atras.forEach((a, i) => a.position.set(i ? x - 0.3 : 0.3 - x, y - 0.08, z));
+  lucesCoche.faros.forEach((f, i) => f.position.set(i ? x : -x, caja.min.y + alto * 0.4, caja.max.z + 0.05));
 }
 // --- coches: el básico (caja roja) y modelos GLB, que se descargan al elegirlos ---
 // Galería de coches (Kenney y Quaternius, CC0): modelos/coches/catalogo.json con los mismos datos
@@ -2315,6 +2681,7 @@ async function montarCoche(clave) {
   cuerpoCoche.clear();
   cuerpoCoche.add(conSombra(modelo, true, false), lucesCoche.grupo);
   colocarLucesCoche(caja);
+  Abolladuras.preparar(modelo);
 }
 // Sombra de contacto: una mancha oscura y difuminada bajo el coche (se ve también sin sombras de verdad)
 function crearSombraCoche(largo = 5, ancho = 2.7) {
@@ -2329,14 +2696,14 @@ function construirMallaZona() {
   mallaZona = new THREE.Group();
   const m = zona.mundo;
   mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif));
-  mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas));
+  mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaLucesFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas));
   scene.add(mallaZona);
   if (!cocheMesh) {
     cocheMesh = new THREE.Group();
     cuerpoCoche = new THREE.Group();
     lucesCoche = crearLucesCoche();
     sombraCoche = crearSombraCoche();
-    cocheMesh.add(cuerpoCoche, sombraCoche);
+    cocheMesh.add(cuerpoCoche, sombraCoche, lucesCoche.haz);
     scene.add(cocheMesh);
   }
 }
@@ -2396,7 +2763,7 @@ async function cargarZona(archivo) {
   zona.foto = await cargarFoto(zip);
   construirMallaZona();
   $('btnNueva').disabled = false;
-  mostrarMenu(`Zona cargada: ${tramos.length} tramos conducibles, ${edif.length} casas, ${zona.mundo.arboles.length} árboles.`);
+  mostrarMenu(`Zona cargada: ${tramos.length} tramos conducibles, ${edif.length} casas, ${zona.mundo.arboles.length} árboles, ${zona.mundo.pasos.length} pasos de cebra.`);
 }
 
 $('archivo').addEventListener('change', async e => {
@@ -2411,6 +2778,8 @@ function mostrarMenu(texto) {
   estado = 'menu';
   $('pantalla').style.display = 'flex';
   $('estado').textContent = texto || '';
+  $('btnSeguir').style.display = 'none';
+  document.body.classList.remove('fuera');
 }
 function ocultarMenu() { $('pantalla').style.display = 'none'; }
 function mostrarAviso(texto, seg = 1.6) { avisoTexto = texto; avisoHasta = performance.now() / 1000 + seg; }
@@ -2422,7 +2791,8 @@ function formato(s) {
 // --- controles: teclado, pedales, botón de marcha y ruleta (gírala con el dedo; vuelve sola al centro) ---
 addEventListener('keydown', e => {
   Sonido.iniciar();
-  if (e.code === 'KeyM') { mostrarMenu(estado === 'menu' ? $('estado').textContent : 'Menú'); return; }
+  if (e.code === 'KeyM') { if (estado === 'menu' && estadoPausado) $('btnSeguir').click(); else if (estado !== 'menu') pausar(performance.now() / 1000, 'Pausa'); return; }
+  if (e.code === 'KeyH' && !e.repeat) { tocarClaxon(); return; }
   if (e.code === 'KeyC' && !e.repeat) { cambiarCamara(); return; }
   if (e.code === 'KeyN' && !e.repeat) { alternarSonido(); return; }
   if (e.code === 'KeyR' && !e.repeat) { pulsarSentido(); return; }
@@ -2496,11 +2866,15 @@ function alternarSonido() {
 }
 $('btnSonido').textContent = Sonido.activo() ? '🔊' : '🔇';
 $('btnSonido').addEventListener('click', alternarSonido);
-$('btnMenu').addEventListener('click', () => mostrarMenu('Menú'));
+$('btnMenu').addEventListener('click', () => { if (estado !== 'menu') pausar(performance.now() / 1000, 'Pausa'); });
+$('btnClaxon').addEventListener('pointerdown', ev => { ev.preventDefault(); $('btnClaxon').classList.add('pulsado'); tocarClaxon(); });
+for (const t of ['pointerup', 'pointerleave', 'pointercancel']) $('btnClaxon').addEventListener(t, () => $('btnClaxon').classList.remove('pulsado'));
 $('btnCamara').addEventListener('click', cambiarCamara);
 
 // --- tráfico, peatones y flechas: decoración que se mueve; los coches de tráfico frenan al jugador como un muro ---
-const N_TRAFICO = 40, N_PEATONES = 110, RADIO_TRAFICO = 320;
+const N_TRAFICO = 40, N_PEATONES = 120, N_CRUZAN = 14, MAX_PERROS = 24, N_CICLISTAS = 14, RADIO_TRAFICO = 320;
+const COLORES_PERRO = [0x8b5a2b, 0x1c1c1c, 0xe8dcc4, 0xc89b5a, 0x6e6e6e, 0xa0522d];
+let ciclistas = [], mallasPerros = null, mallasCiclistas = null, farosTrafico = null, hacesTrafico = null;
 // Peatones de modelos/peatones/ (Kenney Blocky Characters, CC0): 1,75 m, con el frontal hacia +Z
 const ARCHIVOS_PEATONES = [1, 2, 3, 4, 5, 6, 7, 8].map(n => `modelos/peatones/peaton-${n}.glb`);
 const COLORES_COCHE = [0xe63946, 0x1d3557, 0xf1faee, 0x457b9d, 0xf4a261, 0x2a9d8f, 0x6d6875, 0xffb703, 0x8d99ae];
@@ -2532,10 +2906,47 @@ function reiniciarCocheTrafico(c, nuevo) {
   c.x = p.x; c.z = p.z; c.h = p.h; c.hp = p.h;
 }
 // Un peatón nuevo en una acera cercana
+// Tipos de peatón: paseando, corriendo, paseando al perro o cruzando la calle por un paso de cebra
 function colocarPeaton(p) {
+  if (p.tipo === 'cruza' && colocarCruzante(p)) return;
   const candidatos = segmentosCerca(260, t => t.acera > 0 && t.ancho >= 4);
   if (!candidatos.length) return;
-  Object.assign(p, nuevoPeaton(zona.G, rngTrafico, candidatos[Math.floor(rngTrafico() * candidatos.length)]), { ex: 0, ez: 0, evx: 0, evz: 0, susto: 0 });
+  Object.assign(p, nuevoPeaton(zona.G, rngTrafico, candidatos[Math.floor(rngTrafico() * candidatos.length)]), { ex: 0, ez: 0, evx: 0, evz: 0, susto: 0, mira: null, paso: null });
+  if (p.tipo === 'corre') p.v = 2.6 + rngTrafico() * 0.8;
+  if (p.perro) p.perro.listo = false;
+}
+// Peatón que cruza: espera en un bordillo de un paso de cebra cercano y cruza cuando no viene nadie deprisa
+function colocarCruzante(p) {
+  const pasos = zona.mundo.pasos.filter(c => Math.hypot(c.x - coche.x, c.z - coche.z) < 240 && !peatones.some(o => o !== p && o.paso === c));
+  if (!pasos.length) return false;
+  const c = pasos[Math.floor(rngTrafico() * pasos.length)];
+  Object.assign(p, { paso: c, seg: c.seg, q: rngTrafico() < 0.5 ? -1 : 1, estado: 'espera', t: 1 + rngTrafico() * 5, a: (rngTrafico() - 0.5) * 2.6, v: 1.2 + rngTrafico() * 0.4,
+    ex: 0, ez: 0, evx: 0, evz: 0, susto: 0, mira: null, color: rngTrafico() });
+  return true;
+}
+// Posición del que cruza: q va de -1 (un bordillo) a 1 (el otro)
+function posicionCruzante(p) {
+  const c = p.paso, w = c.ancho / 2 + 0.9, nx = -c.tz, nz = c.tx;
+  return { x: c.x + nx * p.q * w + c.tx * p.a, z: c.z + nz * p.q * w + c.tz * p.a, h: Math.atan2(nx * (p.dir || 1), nz * (p.dir || 1)) };
+}
+// ¿Viene un coche deprisa hacia el paso? Entonces el peatón espera
+function vieneCoche(c) {
+  const mira = (x, z, vx, vz) => { const dx = c.x - x, dz = c.z - z, d = Math.hypot(dx, dz); return d < 35 && (dx * vx + dz * vz) / (d || 1) > 3; };
+  if (coche && mira(coche.x, coche.z, Math.sin(coche.h) * coche.v, Math.cos(coche.h) * coche.v)) return true;
+  return trafico.some(o => mira(o.x, o.z, o.vx || 0, o.vz || 0) && Math.hypot(o.x - c.x, o.z - c.z) < 20);
+}
+// Los peatones de alrededor de (x, z) se paran a mirar; los perros ladran y los ciclistas tocan el timbre
+function avisarPeatones(x, z, R, susto = true) {
+  const ahora = performance.now() / 1000;
+  let ladra = false, timbre = false;
+  for (const p of peatones) {
+    const pos = p.ultimo;
+    if (!pos || Math.hypot(pos.x - x, pos.z - z) > R) continue;
+    p.mira = { x, z, t: 2.5 + Math.random() };
+    if (susto && Math.hypot(pos.x - x, pos.z - z) < 12 && !(p.susto > 0)) p.salto = 0.35;
+    if (p.perro && !ladra && ahora - (p.perro.ladro || 0) > 2) { p.perro.ladro = ahora; p.perro.salto = 0.4; ladra = true; Sonido.ladrido(p.perro.listo ? Math.hypot(p.perro.x - coche.x, p.perro.z - coche.z) : 20, p.perro.tono); }
+  }
+  for (const c of ciclistas) if (!timbre && Math.hypot(c.x - x, c.z - z) < R && ahora - (c.timbre || 0) > 3) { c.timbre = ahora; timbre = true; Sonido.timbre(Math.hypot(c.x - coche.x, c.z - coche.z)); }
 }
 // Modelos de tráfico: los dos coches reales en versión ligera (un 10 % de los triángulos), cada uno unido en una sola geometría
 const ARCHIVOS_TRAFICO = [...GALERIA.map(g => g.archivo), 'modelos/trafico-concept.glb', 'modelos/trafico-toy.glb'];
@@ -2582,9 +2993,11 @@ function limpiarTrafico() {
   mallaTrafico = [];
   for (const im of mallaPeatones) scene.remove(im);
   mallaPeatones = [];
-  for (const im of [lucesTrafico, sombrasTrafico]) if (im) { scene.remove(im); im.geometry.dispose(); im.material.dispose(); }
-  lucesTrafico = sombrasTrafico = null;
-  trafico = []; peatones = [];
+  for (const im of [lucesTrafico, sombrasTrafico, farosTrafico, hacesTrafico]) if (im) { scene.remove(im); im.geometry.dispose(); im.material.dispose(); }
+  lucesTrafico = sombrasTrafico = farosTrafico = hacesTrafico = null;
+  if (mallasPerros) { scene.remove(mallasPerros.grupo); mallasPerros = null; }
+  if (mallasCiclistas) { scene.remove(mallasCiclistas.grupo); mallasCiclistas = null; }
+  trafico = []; peatones = []; ciclistas = [];
 }
 async function iniciarTrafico() {
   limpiarTrafico();
@@ -2611,15 +3024,26 @@ async function iniciarTrafico() {
     lucesTrafico.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(6 * n).fill(0.3), 3);
     sombrasTrafico = new THREE.InstancedMesh(new THREE.PlaneGeometry(2.6, 4.9).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ map: texturaHalo(), color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), n);
-    for (const im of [lucesTrafico, sombrasTrafico]) { im.frustumCulled = false; scene.add(im); }
+    farosTrafico = new THREE.InstancedMesh(new THREE.BoxGeometry(0.3, 0.12, 0.05), new THREE.MeshBasicMaterial({ color: 0xfff4d6 }), 2 * n);
+    hacesTrafico = new THREE.InstancedMesh(new THREE.PlaneGeometry(6, 18).rotateX(-Math.PI / 2).rotateY(Math.PI).translate(0, 0.17, 10.5), materialHaz(0xfff0c8, 0.4), n);
+    for (const im of [lucesTrafico, sombrasTrafico, farosTrafico, hacesTrafico]) { im.frustumCulled = false; scene.add(im); }
     trafico.forEach(c => {   // altura y anchura de los pilotos según el modelo
       const b = modelos[c.modelo].geo.boundingBox;
       c.luzX = Math.max(0.3, (b.max.x - b.min.x) / 2 - 0.32); c.luzY = b.min.y + (b.max.y - b.min.y) * 0.42; c.luzZ = b.min.z - 0.01;
     });
   }
-  peatones = Array.from({ length: N_PEATONES }, () => ({}));
+  peatones = Array.from({ length: N_PEATONES }, (_, i) => {
+    const r = rngTrafico();
+    return { tipo: i < N_CRUZAN ? 'cruza' : r < 0.2 ? 'perro' : r < 0.38 ? 'corre' : 'paseo' };
+  });
   peatones.forEach(p => colocarPeaton(p));
   peatones = peatones.filter(p => p.seg !== undefined);
+  peatones.filter(p => p.tipo === 'perro').slice(0, MAX_PERROS).forEach((p, i) => {
+    const r = rngTrafico();
+    p.perro = { i, color: COLORES_PERRO[Math.floor(r * COLORES_PERRO.length)], tam: 0.75 + rngTrafico() * 0.5, tono: 0.8 + rngTrafico() * 0.6, fase: 0, listo: false };
+  });
+  crearMallasPerros();
+  iniciarCiclistas();
   let modelosPeatones = null;
   try { modelosPeatones = await Promise.all(ARCHIVOS_PEATONES.map(geometriaModelo)); } catch (err) { modelosPeatones = null; }
   if (modelosPeatones && modelosPeatones.length) {
@@ -2668,6 +3092,13 @@ function distanciaDelante(c) {
   };
   for (const o of trafico) if (o !== c) mira(o, o.x, o.z, false);
   if (coche) mira(null, coche.x, coche.z, true);
+  // ciclistas de su carril y peatones cruzando por delante (a estos se les espera aunque estén un poco más a un lado)
+  for (const b of ciclistas) { const dx = b.x - c.x, dz = b.z - c.z, a = dx * fx + dz * fz; if (a > 1 && a < 16 && Math.abs(dx * fz - dz * fx) < 1.4 && a < dMin) dMin = a; }
+  for (const p of peatones) {
+    if (p.tipo !== 'cruza' || p.estado !== 'cruza' || !p.ultimo) continue;
+    const dx = p.ultimo.x - c.x, dz = p.ultimo.z - c.z, a = dx * fx + dz * fz;
+    if (a > 1 && a < 18 && Math.abs(dx * fz - dz * fx) < 4 && a < dMin) dMin = a;
+  }
   return { dMin, jugador };
 }
 function actualizarTrafico(dt) {
@@ -2697,6 +3128,11 @@ function actualizarTrafico(dt) {
     m.compose(v.set(c.x, 0, c.z), q.setFromAxisAngle(eje, c.h), uno);
     mallaTrafico[c.modelo].setMatrixAt(c.idx, m);
     if (sombrasTrafico) { m.compose(v.set(c.x, 0.08, c.z), q, uno); sombrasTrafico.setMatrixAt(n, m); }
+    if (hacesTrafico && uNoche.value > 0.2) {   // de noche, faros y haz delante
+      m.compose(v.set(c.x, 0, c.z), q, uno); hacesTrafico.setMatrixAt(n, m);
+      const sh = Math.sin(c.h), ch = Math.cos(c.h), fzL = c.luzZ !== undefined ? -c.luzZ : 2.1;
+      for (const lado of [-1, 1]) { const lx = lado * (c.luzX || 0.6); m.compose(v.set(c.x + lx * ch + fzL * sh, c.luzY || 0.6, c.z - lx * sh + fzL * ch), q, uno); farosTrafico.setMatrixAt(2 * n + (lado > 0 ? 1 : 0), m); }
+    }
     if (lucesTrafico && c.luzX !== undefined) {
       const sh = Math.sin(c.h), ch = Math.cos(c.h);
       for (const lado of [-1, 1]) {
@@ -2710,107 +3146,357 @@ function actualizarTrafico(dt) {
     }
   });
   mallaTrafico.forEach(im => { im.instanceMatrix.needsUpdate = true; });
-  for (const im of [lucesTrafico, sombrasTrafico]) if (im) im.instanceMatrix.needsUpdate = true;
+  for (const im of [lucesTrafico, sombrasTrafico, farosTrafico, hacesTrafico]) if (im) im.instanceMatrix.needsUpdate = true;
+  if (farosTrafico) farosTrafico.visible = hacesTrafico.visible = uNoche.value > 0.2;
   if (luz) luz.needsUpdate = true;
 }
 function actualizarPeatones(dt) {
   if (!mallaPeatones.length) return;
-  const ahora = performance.now() / 1000, m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  const ahora = performance.now() / 1000, m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
-  peatones.forEach((p, i) => {
-    if (!(p.susto > 0)) avanzaPeaton(zona.G, p, dt);
-    let pos = posicionPeaton(zona.G, p);
-    if (zona.enCalzadaAjena(pos.x, pos.z, p.seg) || Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = posicionPeaton(zona.G, p); }   // si su acera se corta en un cruce, busca otra
+  peatones.forEach(p => {
+    if (p.mira) { p.mira.t -= dt; if (p.mira.t <= 0) p.mira = null; }
+    let pos;
+    if (p.tipo === 'cruza' && p.paso) {
+      // espera en el bordillo y cruza cuando no viene nadie deprisa
+      if (p.estado === 'espera') { p.t -= dt; if (p.t <= 0 && !vieneCoche(p.paso) && !p.mira) { p.estado = 'cruza'; p.dir = -p.q; } }
+      else if (!(p.susto > 0) && !p.mira) {
+        p.q += p.dir * p.v * dt / (p.paso.ancho / 2 + 0.9);
+        if (p.q * p.dir >= 1) { p.q = p.dir; p.estado = 'espera'; p.t = 3 + rngTrafico() * 8; }
+      }
+      pos = posicionCruzante(p);
+      if (p.estado === 'espera') pos.h = Math.atan2(p.q * p.paso.tz, -p.q * p.paso.tx);   // en el bordillo, mirando a la calle
+      if (Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = p.paso ? posicionCruzante(p) : posicionPeaton(zona.G, p); }   // sin paso libre cerca, pasea
+    } else {
+      if (!(p.susto > 0) && !p.mira) avanzaPeaton(zona.G, p, dt);
+      pos = posicionPeaton(zona.G, p);
+      if (zona.enCalzadaAjena(pos.x, pos.z, p.seg) || Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = p.tipo === 'cruza' && p.paso ? posicionCruzante(p) : posicionPeaton(zona.G, p); }   // si su acera se corta en un cruce, busca otra
+    }
     // si el coche se le echa encima, se aparta de un salto hacia el lado contrario; luego vuelve despacio a su sitio
     const dx = pos.x + p.ex - coche.x, dz = pos.z + p.ez - coche.z;
     if (!(p.susto > 0) && dx * dx + dz * dz < 20 && Math.abs(coche.v) > 1.5) {
       const lado = Math.sign(dx * fz - dz * fx) || 1;
       p.evx = fz * lado * 5; p.evz = -fx * lado * 5; p.susto = 0.45;
+      if (p.tipo === 'cruza' && p.estado === 'cruza' && Math.abs(coche.v) > 5) mostrarAviso('⚠ ¡Cuidado, paso de peatones!', 1.2);
+      avisarPeatones(pos.x, pos.z, 14, false);
     }
     let salto = 0;
     if (p.susto > 0) { p.susto -= dt; p.ex += p.evx * dt; p.ez += p.evz * dt; salto = Math.sin(Math.max(0, p.susto) / 0.45 * Math.PI) * 0.45; }
     else { const k = Math.exp(-0.6 * dt); p.ex *= k; p.ez *= k; }
-    const bote = Math.abs(Math.sin(ahora * 6 + p.color * 6.28)) * 0.05;   // el paso se nota en el vaivén
-    m.compose(new THREE.Vector3(pos.x + p.ex, bote + salto, pos.z + p.ez), q.setFromAxisAngle(eje, pos.h), uno);
+    if (p.salto > 0) { p.salto -= dt; salto = Math.max(salto, Math.sin(Math.max(0, p.salto) / 0.35 * Math.PI) * 0.3); }
+    const quieto = p.mira || (p.tipo === 'cruza' && p.estado === 'espera');
+    const ritmo = p.tipo === 'corre' ? 9 : 6, bote = quieto ? 0 : Math.abs(Math.sin(ahora * ritmo + p.color * 6.28)) * (p.tipo === 'corre' ? 0.1 : 0.05);
+    const x = pos.x + p.ex, z = pos.z + p.ez;
+    const h = p.mira ? Math.atan2(p.mira.x - x, p.mira.z - z) : pos.h;   // se vuelve a mirar el golpe o el claxon
+    p.ultimo = { x, z, h };
+    m.compose(v.set(x, bote + salto, z), q.setFromAxisAngle(eje, h), uno);
     const im = mallaPeatones[p.modelo];
     if (im) im.setMatrixAt(p.idx, m);
   });
   mallaPeatones.forEach(im => { im.instanceMatrix.needsUpdate = true; });
+  actualizarPerros(dt, ahora);
 }
-// Flechas pintadas en la calzada: cada una apunta por donde hay que seguir. Un contorno oscuro debajo las separa del asfalto
-function mallaFlechas(flechas) {
-  const grupo = new THREE.Group();
-  if (!flechas.length) return grupo;
+// --- perros: cuerpo, patas que trotan y rabo que se mueve, con su correa; van delante de su dueño y ladran al coche ---
+function unirGeometrias(lista) {
+  const pos = [], nor = [];
+  for (const g of lista) {
+    const n = g.index ? g.toNonIndexed() : g;
+    pos.push(...n.attributes.position.array); nor.push(...n.attributes.normal.array);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  return geo;
+}
+const caja = (w, h, l, x, y, z) => new THREE.BoxGeometry(w, h, l).translate(x, y, z);
+function crearMallasPerros() {
+  const perros = peatones.filter(p => p.perro), n = Math.max(1, perros.length);
+  const grupo = new THREE.Group(), mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const cuerpo = new THREE.InstancedMesh(unirGeometrias([
+    caja(0.24, 0.24, 0.62, 0, 0.42, 0), caja(0.17, 0.2, 0.18, 0, 0.55, 0.3), caja(0.2, 0.19, 0.24, 0, 0.66, 0.42),
+    caja(0.11, 0.1, 0.15, 0, 0.62, 0.58), caja(0.06, 0.11, 0.04, -0.07, 0.8, 0.38), caja(0.06, 0.11, 0.04, 0.07, 0.8, 0.38),
+  ]), mat, n);
+  const patas = new THREE.InstancedMesh(caja(0.07, 0.32, 0.07, 0, -0.16, 0), mat, 4 * n);
+  const rabo = new THREE.InstancedMesh(caja(0.05, 0.05, 0.26, 0, 0, -0.13), mat, n);
+  const nariz = new THREE.InstancedMesh(caja(0.05, 0.04, 0.03, 0, 0.64, 0.66), new THREE.MeshBasicMaterial({ color: 0x111111 }), n);
+  perros.forEach((p, i) => {
+    const c = new THREE.Color(p.perro.color);
+    cuerpo.setColorAt(i, c); rabo.setColorAt(i, c);
+    for (let k = 0; k < 4; k++) patas.setColorAt(4 * i + k, c);
+  });
+  const correas = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6 * n), 3)), new THREE.LineBasicMaterial({ color: 0xc0392b }));
+  for (const o of [cuerpo, patas, rabo, nariz, correas]) { o.frustumCulled = false; grupo.add(o); }
+  conSombra(grupo, true, false);
+  scene.add(grupo);
+  mallasPerros = { grupo, cuerpo, patas, rabo, nariz, correas, perros };
+}
+const CADERAS = [[-0.08, 0.32, 0.22], [0.08, 0.32, 0.22], [-0.08, 0.32, -0.22], [0.08, 0.32, -0.22]];
+function actualizarPerros(dt, ahora) {
+  const M = mallasPerros;
+  if (!M) return;
+  const B = new THREE.Matrix4(), L = new THREE.Matrix4(), R = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), esc = new THREE.Vector3();
+  const correa = M.correas.geometry.attributes.position.array;
+  M.perros.forEach((p, i) => {
+    const d = p.perro, t = prepararTramo(zona.G.tramos[p.seg]);
+    // va 1,8 m por delante del dueño, un poco hacia la calle
+    const s = Math.min(t.len, p.s + 1.8), e = enPolilinea(p.fwd ? t.pts : t.ptsRev, p.fwd ? t.cum : t.cumRev, s);
+    const off = p.lado * (t.ancho / 2 + t.acera / 2 - 0.45);
+    const tx = e.x - e.tz * off + p.ex, tz = e.z + e.tx * off + p.ez;
+    if (!d.listo) { d.x = tx; d.z = tz; d.h = 0; d.listo = true; }
+    const mx = (tx - d.x) * Math.min(1, dt * 3.5), mz = (tz - d.z) * Math.min(1, dt * 3.5), rap = Math.hypot(mx, mz) / Math.max(dt, 1e-3);
+    d.x += mx; d.z += mz;
+    if (rap > 0.2) d.h = Math.atan2(mx, mz);
+    // ladra si el coche pasa cerca y deprisa
+    const dc = Math.hypot(d.x - coche.x, d.z - coche.z);
+    if (dc < 11 && Math.abs(coche.v) > 3 && ahora - (d.ladro || 0) > 2.5) { d.ladro = ahora; d.salto = 0.4; Sonido.ladrido(dc, d.tono); }
+    const mira = d.ladro && ahora - d.ladro < 1.2 ? Math.atan2(coche.x - d.x, coche.z - d.z) : d.h;
+    let salto = 0;
+    if (d.salto > 0) { d.salto -= dt; salto = Math.sin(Math.max(0, d.salto) / 0.4 * Math.PI) * 0.18; }
+    d.fase += dt * (4 + rap * 5);
+    B.compose(v.set(d.x, salto, d.z), q.setFromAxisAngle(eje, mira), esc.set(d.tam, d.tam, d.tam));
+    M.cuerpo.setMatrixAt(i, B); M.nariz.setMatrixAt(i, B);
+    CADERAS.forEach(([hx, hy, hz], k) => {
+      L.makeRotationX(rap > 0.2 ? Math.sin(d.fase + (k === 0 || k === 3 ? 0 : Math.PI)) * 0.6 : 0).setPosition(hx, hy, hz);
+      M.patas.setMatrixAt(4 * i + k, R.multiplyMatrices(B, L));
+    });
+    L.makeRotationFromEuler(new THREE.Euler(-0.7, Math.sin(ahora * (d.ladro && ahora - d.ladro < 3 ? 22 : 9) + i) * 0.6, 0, 'YXZ')).setPosition(0, 0.5, -0.3);
+    M.rabo.setMatrixAt(i, R.multiplyMatrices(B, L));
+    // correa: de la mano del dueño al cuello del perro
+    const u = p.ultimo || { x: d.x, z: d.z, h: 0 };
+    correa.set([u.x + Math.cos(u.h) * 0.25, 0.95, u.z - Math.sin(u.h) * 0.25, d.x + Math.sin(mira) * 0.3 * d.tam, (0.55 + salto) * d.tam, d.z + Math.cos(mira) * 0.3 * d.tam], i * 6);
+  });
+  for (const o of [M.cuerpo, M.patas, M.rabo, M.nariz]) o.instanceMatrix.needsUpdate = true;
+  M.correas.geometry.attributes.position.needsUpdate = true;
+}
+// --- ciclistas: bicicletas por el borde derecho de la calzada; si el coche les da, se caen y luego se levantan ---
+function colocarCiclista(c) {
+  const candidatos = segmentosCerca(260, t => t.ancho >= 5.5 && !AUTOVIAS.has(t.tipo) && !/tierra|grava/.test(t.dib));
+  if (!candidatos.length) return;
+  for (let k = 0; k < 15; k++) {
+    const seg = candidatos[Math.floor(rngTrafico() * candidatos.length)];
+    const nuevo = nuevoCocheTrafico(zona.G, rngTrafico, seg, rngTrafico() < 0.5, rngTrafico() * zona.G.tramos[seg].len);
+    Object.assign(c, nuevo, { k: 0.85 + rngTrafico() * 0.35, caido: 0, ox: 0, oz: 0, svx: 0, svz: 0, fase: rngTrafico() * 6, factor: 1, rodar: 0 });
+    const p = posicionCiclista(c);
+    c.x = p.x; c.z = p.z; c.h = p.h;
+    if (Math.hypot(p.x - coche.x, p.z - coche.z) > 50) return;
+  }
+}
+function posicionCiclista(c) {
+  const t = prepararTramo(zona.G.tramos[c.seg]);
+  const e = enPolilinea(c.fwd ? t.pts : t.ptsRev, c.fwd ? t.cum : t.cumRev, c.s), carril = t.ancho / 2 - 0.9;
+  return { x: e.x - e.tz * carril, z: e.z + e.tx * carril, h: Math.atan2(e.tx, e.tz) };
+}
+function iniciarCiclistas() {
+  ciclistas = Array.from({ length: N_CICLISTAS }, () => ({}));
+  ciclistas.forEach(colocarCiclista);
+  ciclistas = ciclistas.filter(c => c.seg !== undefined);
+  const n = Math.max(1, ciclistas.length), grupo = new THREE.Group();
+  const rueda = r => new THREE.TorusGeometry(0.33, 0.035, 6, 18).rotateY(Math.PI / 2).translate(0, 0.35, r);
+  const tubo = (x0, y0, z0, x1, y1, z1, g = 0.035) => {
+    const l = Math.hypot(x1 - x0, y1 - y0, z1 - z0), geo = new THREE.BoxGeometry(g, g, l);
+    geo.lookAt(new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0));
+    return geo.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+  };
+  const bici = new THREE.InstancedMesh(unirGeometrias([rueda(0.52), rueda(-0.52), tubo(0, 0.35, -0.52, 0, 0.82, -0.1), tubo(0, 0.82, -0.1, 0, 0.85, 0.42),
+    tubo(0, 0.35, -0.05, 0, 0.82, -0.1), tubo(0, 0.35, -0.05, 0, 0.85, 0.42), tubo(0, 0.35, 0.52, 0, 1.0, 0.45), tubo(-0.25, 1.0, 0.45, 0.25, 1.0, 0.45, 0.04),
+    caja(0.12, 0.05, 0.24, 0, 0.92, -0.15), tubo(0, 0.35, -0.52, 0, 0.35, -0.05)]), new THREE.MeshLambertMaterial({ color: 0xffffff }), n);
+  // ciclista: tronco inclinado con los brazos al manillar (color de maillot), cabeza con casco y piernas que pedalean
+  const tronco = caja(0.32, 0.55, 0.2, 0, 0, 0).rotateX(0.75).translate(0, 1.22, 0.05);
+  const cuerpo = new THREE.InstancedMesh(unirGeometrias([tronco, tubo(-0.17, 1.38, 0.2, -0.23, 1.02, 0.45, 0.08), tubo(0.17, 1.38, 0.2, 0.23, 1.02, 0.45, 0.08),
+    new THREE.SphereGeometry(0.15, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 1.6, 0.3)]), new THREE.MeshLambertMaterial({ color: 0xffffff }), n);
+  const cabeza = new THREE.InstancedMesh(new THREE.SphereGeometry(0.12, 10, 8).translate(0, 1.56, 0.3), new THREE.MeshLambertMaterial({ color: 0xe0b48f }), n);
+  const piernas = new THREE.InstancedMesh(caja(0.12, 0.62, 0.12, 0, -0.31, 0), new THREE.MeshLambertMaterial({ color: 0x23272e }), 2 * n);
+  ciclistas.forEach((c, i) => {
+    bici.setColorAt(i, new THREE.Color().setHSL(rngTrafico(), 0.6, 0.35));
+    cuerpo.setColorAt(i, new THREE.Color().setHSL(rngTrafico(), 0.75, 0.5));
+  });
+  for (const o of [bici, cuerpo, cabeza, piernas]) { o.frustumCulled = false; grupo.add(o); }
+  conSombra(grupo, true, false);
+  scene.add(grupo);
+  mallasCiclistas = { grupo, bici, cuerpo, cabeza, piernas };
+}
+function actualizarCiclistas(dt) {
+  const M = mallasCiclistas;
+  if (!M) return;
+  const ahora = performance.now() / 1000, B = new THREE.Matrix4(), L = new THREE.Matrix4(), R = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), uno = new THREE.Vector3(1, 1, 1), eu = new THREE.Euler();
+  ciclistas.forEach((c, i) => {
+    const t = prepararTramo(zona.G.tramos[c.seg]), fx = Math.sin(c.h), fz = Math.cos(c.h);
+    // frena si tiene delante al jugador o un coche; al jugador le toca el timbre
+    let dMin = Infinity, jugador = false;
+    const mira = (x, z, esJugador) => { const dx = x - c.x, dz = z - c.z, a = dx * fx + dz * fz; if (a > 0.5 && a < 9 && Math.abs(dx * fz - dz * fx) < 1.6 && a < dMin) { dMin = a; jugador = esJugador; } };
+    mira(coche.x, coche.z, true);
+    for (const o of trafico) mira(o.x, o.z, false);
+    const objetivo = Math.max(0, Math.min(1, (dMin - 3) / 5));
+    c.factor += (objetivo - c.factor) * Math.min(1, dt * 3);
+    if (jugador && dMin < 6 && ahora - (c.timbre || 0) > 4) { c.timbre = ahora; Sonido.timbre(Math.hypot(c.x - coche.x, c.z - coche.z)); }
+    if (c.caido > 0) { c.caido -= dt; c.factor = 0; }
+    const rapidez = 5.3 * c.k * c.factor;
+    if (!avanzaTrafico(zona.G, c, dt * rapidez / (t.velocidad / 3.6), rngTrafico)) colocarCiclista(c);
+    let p = posicionCiclista(c);
+    c.ox += c.svx * dt; c.oz += c.svz * dt;
+    const roz = Math.exp(-3 * dt); c.svx *= roz; c.svz *= roz;
+    if (c.caido <= 0) { const k = Math.exp(-1.2 * dt); c.ox *= k; c.oz *= k; }
+    if (Math.hypot(p.x - coche.x, p.z - coche.z) > 330) { colocarCiclista(c); p = posicionCiclista(c); }
+    c.x = p.x + c.ox; c.z = p.z + c.oz; c.h = p.h;
+    c.fase += dt * rapidez * 2.3;
+    // caído: tumbado de lado; al levantarse vuelve poco a poco
+    const tumbado = c.caido > 1 ? 1.4 : c.caido > 0 ? 1.4 * c.caido : 0;
+    eu.set(0, c.h, tumbado, 'YXZ');
+    B.compose(v.set(c.x, tumbado ? 0.1 : 0, c.z), q.setFromEuler(eu), uno);
+    M.bici.setMatrixAt(i, B); M.cuerpo.setMatrixAt(i, B); M.cabeza.setMatrixAt(i, B);
+    for (let k = 0; k < 2; k++) {
+      L.makeRotationX(Math.sin(c.fase + k * Math.PI) * 0.55 - 0.35).setPosition(k ? 0.1 : -0.1, 1.0, -0.08);
+      M.piernas.setMatrixAt(2 * i + k, R.multiplyMatrices(B, L));
+    }
+  });
+  for (const o of [M.bici, M.cuerpo, M.cabeza, M.piernas]) o.instanceMatrix.needsUpdate = true;
+}
+// Si el coche le da a un ciclista, este se cae (y el coche se lleva un golpecito)
+function golpearCiclistas(c) {
+  const fx = Math.sin(c.h), fz = Math.cos(c.h);
+  for (const b of ciclistas) {
+    if (b.caido > 0 || Math.abs(c.v) < 1.5) continue;
+    if (distSeg2(b.x, b.z, c.x - fx * 2.1, c.z - fz * 2.1, c.x + fx * 2.1, c.z + fz * 2.1) > 1.35 * 1.35) continue;
+    const impacto = Math.abs(c.v);
+    b.caido = 3.5;
+    b.svx = fx * c.v * 0.5 + (b.x - c.x) * 1.5; b.svz = fz * c.v * 0.5 + (b.z - c.z) * 1.5;
+    c.v *= 0.9;
+    Sonido.golpe('bici', impacto);
+    mostrarAviso('🚲 ¡Has tirado a un ciclista!', 1.6);
+    sumarDano(c.dano, 'delante', danoGolpe(impacto, 'bici'));
+    avisarPeatones(b.x, b.z, 30);
+    if (c.dano.total >= 100) c.destrozado = true;
+  }
+}
+// Claxon del jugador: los peatones de delante se vuelven y saltan, los perros ladran y los ciclistas responden con el timbre
+function tocarClaxon() {
+  if (!coche) return;
+  Sonido.claxon();
+  const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
+  avisarPeatones(coche.x + fx * 10, coche.z + fz * 10, 24);
+}
+
+// --- guía de la ruta: flechas pintadas en la calzada y una línea a lo largo del camino hasta el siguiente punto ---
+// Normalmente son verdes; si el coche se sale del camino, se calcula cómo volver desde donde está y se pintan en rojo
+const COLOR_RUTA = { verde: [0.18, 0.95, 0.42], roja: [1, 0.2, 0.16] };
+function crearFlechas(pts, color) {
+  const grupo = new THREE.Group(), flechas = flechasRuta(pts, 14), n = Math.max(1, flechas.length);
   const forma = (ancho, largo) => {   // flecha que apunta a +Z: punta, dos alas y una muesca en la cola
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute([
       0, 0, largo, 0, 0, -0.1 * largo, -ancho, 0, -0.6 * largo,
       0, 0, largo, ancho, 0, -0.6 * largo, 0, 0, -0.1 * largo,
     ], 3));
-    g.computeVertexNormals();
     return g;
   };
-  matFlechas = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });   // el color lo pone cada flecha
-  const matContorno = new THREE.MeshBasicMaterial({ color: 0x1b2026, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
-  const n = flechas.length;
-  const amarillas = new THREE.InstancedMesh(forma(1.5, 2.1), matFlechas, n);
-  const contorno = new THREE.InstancedMesh(forma(1.95, 2.6), matContorno, n);
-  amarillas.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3 * n).fill(1), 3);   // brillo propio de cada flecha
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  const matContorno = new THREE.MeshBasicMaterial({ color: 0x14181d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const color_ = new THREE.InstancedMesh(forma(1.5, 2.1), mat, n), contorno = new THREE.InstancedMesh(forma(1.95, 2.6), matContorno, n);
+  color_.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3 * n).fill(1), 3);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
-  const mA = new Float32Array(16 * n), mC = new Float32Array(16 * n);   // todas las matrices; actualizarFlechas elige la ventana
+  const mA = new Float32Array(16 * n), mC = new Float32Array(16 * n);
   flechas.forEach((f, i) => {
     const r = q.setFromAxisAngle(eje, f.h);
     m.compose(new THREE.Vector3(f.x, 0.09, f.z), r, uno).toArray(mC, i * 16);
     m.compose(new THREE.Vector3(f.x, 0.095, f.z), r, uno).toArray(mA, i * 16);
   });
-  flechasDatos = { n, mA, mC, pos: flechas, amarillas, contorno, piernas: [], prog: -1, pierna: -1 };
-  amarillas.frustumCulled = false; contorno.frustumCulled = false;
-  grupo.add(contorno, amarillas);
-  return grupo;
+  color_.count = contorno.count = 0;
+  // línea fina y luminosa por el centro del camino
+  const linea = nuevaMalla();
+  bandasH(linea, pts, -0.16, 0.16, 0.085, [1, 1, 1]);
+  const matLinea = new THREE.MeshBasicMaterial({ color: new THREE.Color(...color), transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const mLinea = new THREE.Mesh(linea.geo(), matLinea);
+  for (const o of [color_, contorno, mLinea]) { o.frustumCulled = false; grupo.add(o); }
+  return { grupo, pts, flechas, mA, mC, color_, contorno, matLinea, color, prog: 0 };
 }
-// Solo se marcan las flechas de la pierna actual (del último checkpoint al siguiente), desde el coche en adelante;
-// un destello sube por ellas hacia el checkpoint. Se sigue el avance del coche para no saltar a otro trozo de la misma pierna
-function actualizarFlechas(ahora) {
-  if (!flechasDatos || !carrera || !flechasDatos.piernas.length) return;
-  const F = flechasDatos, { mA, mC, pos, amarillas, contorno } = F;
-  const [a, b] = F.piernas[carrera.siguiente] || [0, -1];
-  if (b < a) { amarillas.count = contorno.count = 0; return; }
-  if (F.pierna !== carrera.siguiente) { F.pierna = carrera.siguiente; F.prog = a; }
-  let i0 = masCercanaEntre(pos, coche.x, coche.z, Math.max(a, F.prog - 6), Math.min(b, F.prog + 40));
-  if (Math.hypot(pos[i0].x - coche.x, pos[i0].z - coche.z) > 45) i0 = masCercanaEntre(pos, coche.x, coche.z, a, b);   // atajo o vuelta atrás
+function borrarFlechas(F) {
+  if (!F) return;
+  scene.remove(F.grupo);
+  F.grupo.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+}
+// Muestra las flechas desde la más cercana al coche (siguiendo su avance) hasta el final; un destello corre hacia el destino
+function pintarFlechas(F, ahora) {
+  const { flechas, mA, mC, color_, contorno, color } = F, n = flechas.length;
+  if (!n) return;
+  let i0 = masCercanaEntre(flechas, coche.x, coche.z, Math.max(0, F.prog - 6), Math.min(n - 1, F.prog + 40));
+  if (Math.hypot(flechas[i0].x - coche.x, flechas[i0].z - coche.z) > 45) i0 = masCercanaEntre(flechas, coche.x, coche.z, 0, n - 1);
   F.prog = i0;
-  const W = b - i0 + 1, brillo = amarillas.instanceColor;
+  const W = n - i0, brillo = color_.instanceColor;
   for (let k = 0; k < W; k++) {
     const i = i0 + k;
-    amarillas.instanceMatrix.array.set(mA.subarray(i * 16, i * 16 + 16), k * 16);
+    color_.instanceMatrix.array.set(mA.subarray(i * 16, i * 16 + 16), k * 16);
     contorno.instanceMatrix.array.set(mC.subarray(i * 16, i * 16 + 16), k * 16);
-    const s = 0.5 + 0.5 * Math.sin(ahora * 7 - k * 0.8);   // entre ámbar y amarillo claro
-    brillo.setXYZ(k, 1, 0.72 + 0.28 * s, 0.2 + 0.45 * s);
+    const s = 0.75 + 0.25 * Math.sin(ahora * 7 - k * 0.8);
+    brillo.setXYZ(k, Math.min(1, color[0] * s + 0.15 * (1 - s)), Math.min(1, color[1] * s + 0.15 * (1 - s)), Math.min(1, color[2] * s + 0.15 * (1 - s)));
   }
-  amarillas.count = W; contorno.count = W;
-  amarillas.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true; brillo.needsUpdate = true;
+  color_.count = contorno.count = W;
+  color_.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true; brillo.needsUpdate = true;
+  F.matLinea.opacity = 0.55 + 0.2 * Math.sin(ahora * 4);
 }
+const Ruta = (() => {
+  let verde = null, roja = null, destino = -1, fuera = 0, tRoja = 0, progVerde = 0;
+  function quitarRoja() { borrarFlechas(roja); roja = null; document.body.classList.remove('fuera'); }
+  // Camino a seguir (polilínea) hasta el nodo destino
+  function poner(pts, nodoDestino) {
+    limpiar();
+    destino = nodoDestino;
+    if (pts && pts.length >= 2) { verde = crearFlechas(pts, COLOR_RUTA.verde); scene.add(verde.grupo); }
+  }
+  function limpiar() { borrarFlechas(verde); verde = null; quitarRoja(); fuera = 0; progVerde = 0; }
+  function recalcular(ahora) {
+    tRoja = ahora;
+    const r = rutaDesde(zona.G, zona.rejSeg, coche.x, coche.z, coche.h, destino);
+    borrarFlechas(roja); roja = null;
+    if (r && r.pts.length >= 2) { roja = crearFlechas(r.pts, COLOR_RUTA.roja); scene.add(roja.grupo); }
+    document.body.classList.add('fuera');
+  }
+  function actualizar(ahora, dt) {
+    if (!verde) return;
+    // ¿Sigue el coche por el camino verde? Se mira cerca de donde iba, y en todo el camino si no lo encuentra
+    const pts = verde.pts;
+    let r = distanciaPolilinea(pts, coche.x, coche.z, progVerde - 8, progVerde + 60);
+    if (r.d > 20) r = distanciaPolilinea(pts, coche.x, coche.z);
+    if (r.d < 25) progVerde = r.k;
+    if (r.d > 22) fuera += dt; else if (r.d < 12) { fuera = 0; if (roja) { quitarRoja(); mostrarAviso('¡De vuelta en la ruta!', 1.2); } }
+    if (fuera > 1.2) {
+      // fuera de ruta: camino rojo desde el coche; se rehace cada 3 s o si también se aleja de él
+      const lejosRoja = roja && distanciaPolilinea(roja.pts, coche.x, coche.z, roja.prog - 4, roja.prog + 60).d > 18;
+      if (!roja || lejosRoja || ahora - tRoja > 3) { if (!roja) { mostrarAviso('Fuera de ruta', 1.2); Sonido.pitido(330, 0.25, 0.15); } recalcular(ahora); }
+    }
+    verde.grupo.visible = !roja;
+    if (roja) pintarFlechas(roja, ahora); else pintarFlechas(verde, ahora);
+  }
+  return { poner, limpiar, actualizar, fuera: () => !!roja };
+})();
 
-// --- carrera ---
+// --- partida: circuito de tres vueltas o exploración por la ciudad ---
+let modoJuego = 'circuito';
+try { if (['circuito', 'exploracion'].includes(localStorage.getItem('cochesHuelva.modo'))) modoJuego = localStorage.getItem('cochesHuelva.modo'); } catch (err) { /* sin almacenamiento */ }
+let estadoPausado = null, tPausa = 0;   // al abrir el menú en plena partida, para poder seguir
 function limpiarCarrera() {
-  if (carrera) carrera.meshes.forEach(g => { scene.remove(g); g.traverse(o => { if (o.material) o.material.dispose(); }); });
-  if (rutaLinea) { scene.remove(rutaLinea); rutaLinea.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
+  if (carrera) {
+    for (const g of [...carrera.meshes, carrera.deco, ...carrera.talleres.map(t => t.grupo), carrera.destino && carrera.destino.baliza].filter(Boolean)) {
+      scene.remove(g);
+      g.traverse(o => { if (o.material && !o.material.compartido) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); });
+    }
+  }
+  Ruta.limpiar();
   limpiarTrafico();
   Efectos.limpiar();
-  carrera = null; rutaLinea = null; matFlechas = null; flechasDatos = null;
+  carrera = null;
 }
 // Checkpoint: columna de luz que se desvanece hacia arriba, con bandas que suben, y un aro en el suelo
 const geoBaliza = new THREE.CylinderGeometry(5, 5, 26, 32, 1, true).translate(0, 13, 0);
 const geoAro = new THREE.RingGeometry(4.3, 5.2, 48).rotateX(-Math.PI / 2);
-function crearBaliza() {
+function crearBaliza(color = 0xffd166) {
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uColor: { value: new THREE.Color(0xffd166) }, uAlfa: { value: 0.6 }, uT: { value: 0 } },
+    uniforms: { uColor: { value: new THREE.Color(color) }, uAlfa: { value: 0.75 }, uT: { value: 0 } },
     vertexShader: 'varying float vY; void main(){ vY = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: 'uniform vec3 uColor; uniform float uAlfa; uniform float uT; varying float vY; void main(){ float b = 0.7 + 0.3 * sin(vY * 28.0 - uT * 5.0); gl_FragColor = vec4(uColor, uAlfa * pow(1.0 - vY, 1.6) * b); }',
     transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
   });
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(geoBaliza, mat), new THREE.Mesh(geoAro, new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })));
+  g.add(new THREE.Mesh(geoBaliza, mat), new THREE.Mesh(geoAro, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })));
   g.children.forEach(m => { m.frustumCulled = false; });
   return g;
 }
@@ -2821,40 +3507,251 @@ function pintarCheckpoints() {
     const color = actual ? (meta ? 0x2ecc71 : 0xffd166) : 0xffffff;
     const [haz, aro] = g.children;
     haz.material.uniforms.uColor.value.setHex(color);
-    haz.material.uniforms.uAlfa.value = 0.75;
-    haz.visible = actual;                    // solo el siguiente checkpoint tiene columna de luz
+    haz.visible = actual;
     aro.material.color.setHex(color);
     aro.material.opacity = actual ? 0.85 : 0.12;
   });
 }
+// --- decoración de carrera: arco de salida con semáforo, línea a cuadros, pancartas, público y arcos en los checkpoints ---
+// Textura de texto sobre un fondo; ajedrez: cuadros blancos y negros en los bordes
+function texturaTexto(texto, fondo, tinta, ajedrez = false, w = 512, h = 128) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const g = cv.getContext('2d');
+  g.fillStyle = fondo; g.fillRect(0, 0, w, h);
+  if (ajedrez) for (let i = 0; i < w / 16; i++) for (const j of [0, 1, h / 16 - 2, h / 16 - 1]) { g.fillStyle = (i + j) % 2 ? '#111' : '#fff'; g.fillRect(i * 16, j * 16, 16, 16); }
+  g.fillStyle = tinta; g.font = `900 ${Math.round(h * (ajedrez ? 0.36 : 0.5))}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(texto, w / 2, h / 2 + 2, w * 0.92);
+  const t = new THREE.CanvasTexture(cv);
+  t.anisotropy = 4;
+  return t;
+}
+function texturaAjedrez() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const g = cv.getContext('2d');
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { g.fillStyle = (i + j) % 2 ? '#141414' : '#f4f4f4'; g.fillRect(i * 16, j * 16, 16, 16); }
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const PANCARTAS = [['GRAN PREMIO DE HUELVA', '#c0392b', '#fff'], ['COSTA DE LA LUZ', '#1d5fa8', '#ffd166'], ['🏁  CARRERAS  🏁', '#111', '#fff'],
+  ['RÍA DE HUELVA', '#0f7b5f', '#fff'], ['VELOCIDAD · 3 VUELTAS', '#f5b041', '#1b1b1b'], ['PUNTA UMBRÍA ⟶', '#6b2d8f', '#fff']];
+// Punto de la ruta a d metros (negativo: antes de la meta, contando desde el final) con su dirección y el ancho de la calle
+function puntoRuta(ruta, cum, d) {
+  const L = cum[cum.length - 1], e = enPolilinea(ruta, cum, ((d % L) + L) % L);
+  const r = calleMasCercana(zona.rejSeg, zona.tramos, e.x, e.z, 15);
+  return { ...e, ancho: r ? r.t.ancho : 7, acera: r ? r.t.acera : 0, i: r ? r.i : -1 };
+}
+// Arco sobre la calle en el punto e (perpendicular a la ruta)
+function arcoSobre(e, alto, mat, grueso = 0.55) {
+  const luz = e.ancho + Math.min(e.acera, 1.6) * 2 + 0.6;
+  const arco = new THREE.Mesh(new THREE.TorusGeometry(luz / 2, grueso, 10, 30, Math.PI), mat);
+  arco.scale.y = alto / (luz / 2);
+  return { arco, luz };
+}
+function decoracionCircuito(plan, cum) {
+  const deco = new THREE.Group(), obst = [];
+  const local = (e, lado, adelante, y = 0) => new THREE.Vector3(e.x - e.tz * lado + e.tx * adelante, y, e.z + e.tx * lado + e.tz * adelante);
+  const libre = (x, z, i) => !dentroDeOtraCasa(zona.edif, zona.rejilla, x, z, -1) && !(i >= 0 && zona.enCalzadaAjena(x, z, i)) && !contactoMundo(zona.mundo, x, z, 0.8);
+  // arco de salida y meta, 10 m por delante de la salida, con la pancarta y el semáforo de cinco luces mirando al coche
+  const e0 = puntoRuta(plan.ruta, cum, 10), luz0 = e0.ancho + Math.min(e0.acera, 1.6) * 2 + 0.8;
+  const arco = new THREE.Group();
+  arco.position.set(e0.x, 0, e0.z);
+  arco.rotation.y = Math.atan2(e0.tx, e0.tz);
+  const rayas = new THREE.MeshLambertMaterial({ color: 0xe8e8e8, map: texturaTexto('', '#e8e8e8', '#000', true, 64, 64) });
+  for (const lado of [-1, 1]) {
+    const pilar = new THREE.Mesh(new THREE.BoxGeometry(0.7, 6.6, 0.7), rayas);
+    pilar.position.set(lado * luz0 / 2, 3.3, 0);
+    arco.add(pilar);
+    const p = local(e0, lado * luz0 / 2, 0);
+    obst.push([p.x, p.z, 0.6]);
+  }
+  const textoMeta = new THREE.MeshLambertMaterial({ map: texturaTexto('SALIDA · META', '#c0392b', '#fff', true, 1024, 160), emissive: 0x220000 });
+  const viga = new THREE.Mesh(new THREE.BoxGeometry(luz0 + 0.8, 1.5, 0.5), [rayas, rayas, rayas, rayas, textoMeta, textoMeta]);
+  viga.position.y = 6.6;
+  const barra = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.8, 0.4), new THREE.MeshLambertMaterial({ color: 0x15181c }));
+  barra.position.set(0, 5.45, -0.15);
+  arco.add(viga, barra);
+  const semaforo = [];
+  for (let k = 0; k < 5; k++) {
+    const m = new THREE.MeshBasicMaterial({ color: 0x2a0806 });
+    const disco = new THREE.Mesh(new THREE.CircleGeometry(0.27, 18).rotateY(Math.PI), m);
+    disco.position.set((2 - k) * 0.85, 5.45, -0.36);   // vistas desde el coche, se encienden de izquierda a derecha
+    arco.add(disco);
+    semaforo.push(m);
+  }
+  const linea = new THREE.Mesh(new THREE.PlaneGeometry(e0.ancho, 1.2).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: texturaAjedrez(), polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+  linea.material.map.repeat.set(e0.ancho / 1.2, 1);
+  linea.position.y = 0.08;
+  arco.add(linea);
+  deco.add(arco);
+  // pancartas a los lados de la recta de salida, con público detrás
+  const publico = [];
+  let n = 0;
+  for (const d of [-55, -40, -25, 26, 40, 55, 70]) {
+    const e = puntoRuta(plan.ruta, cum, 10 + d);
+    for (const lado of [-1, 1]) {
+      const off = e.ancho / 2 + Math.max(0.5, Math.min(e.acera, 2.5) * 0.55);
+      const c = local(e, lado * off, 0);
+      if (!libre(c.x, c.z, e.i)) continue;
+      const [txt, fondo, tinta] = PANCARTAS[n++ % PANCARTAS.length];
+      const tex = new THREE.MeshLambertMaterial({ map: texturaTexto(txt, fondo, tinta) });
+      const valla = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.95, 0.08), [rayas, rayas, rayas, rayas, tex, tex]);
+      valla.position.set(c.x, 0.85, c.z);
+      valla.rotation.y = Math.atan2(e.tx, e.tz) + Math.PI / 2;
+      for (const pata of [-1.6, 1.6]) {
+        const pt = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), rayas);
+        pt.position.set(pata, -0.6, 0);
+        valla.add(pt);
+      }
+      deco.add(valla);
+      for (const a of [-1.2, 0, 1.2]) { const q = local(e, lado * off, a); obst.push([q.x, q.z, 0.45]); }
+      for (const a of [-1, 0.3, 1.4]) {   // espectadores detrás de la pancarta, mirando a la calle
+        const q = local(e, lado * (off + 1.1), a + (Math.random() - 0.5) * 0.4);
+        if (libre(q.x, q.z, e.i)) publico.push({ x: q.x, z: q.z, h: Math.atan2(e.tz * lado, -e.tx * lado), fase: Math.random() * 6 });
+      }
+    }
+  }
+  // arcos hinchables en los checkpoints, de colores, con su número
+  const colores = ['#e74c3c', '#1d78d6', '#8e44ad'];
+  plan.cortes.slice(0, -1).forEach((D, k) => {
+    const e = puntoRuta(plan.ruta, cum, D - 4);
+    const mat = new THREE.MeshLambertMaterial({ map: texturaTexto('', colores[k], '#fff', false, 64, 64), emissive: new THREE.Color(colores[k]).multiplyScalar(0.25) });
+    const { arco: a, luz } = arcoSobre(e, 6.5, mat);
+    const g = new THREE.Group();
+    g.position.set(e.x, 0, e.z);
+    g.rotation.y = Math.atan2(e.tx, e.tz) + Math.PI / 2;
+    a.rotation.y = Math.PI / 2;
+    const cartel = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.85), new THREE.MeshBasicMaterial({ map: texturaTexto(`CHECKPOINT ${k + 1}`, colores[k], '#fff'), side: THREE.DoubleSide }));
+    cartel.position.y = 6.4;
+    cartel.rotation.y = Math.PI / 2;
+    g.add(a, cartel);
+    deco.add(g);
+    for (const lado of [-1, 1]) { const p = local(e, lado * luz / 2, 0); obst.push([p.x, p.z, 0.6]); }
+  });
+  conSombra(deco, true, false);
+  return { deco, semaforo, publico, obst };
+}
+// Público: figuras de peatones que botan y levantan los brazos (botan más cuando pasa el coche o hay fiesta)
+async function crearPublico(lista) {
+  if (!lista.length) return null;
+  let modelos;
+  try { modelos = await Promise.all(ARCHIVOS_PEATONES.slice(0, 4).map(geometriaModelo)); } catch (err) { return null; }
+  const cuenta = modelos.map(() => 0);
+  lista.forEach((p, i) => { p.modelo = i % modelos.length; p.idx = cuenta[p.modelo]++; });
+  const mallas = modelos.map((m, k) => { const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k])); im.frustumCulled = false; im.castShadow = sombras; return im; });
+  return { mallas, lista };
+}
+function actualizarPublico(ahora) {
+  const P = carrera && carrera.publico;
+  if (!P) return;
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
+  const fiesta = ahora < (carrera.fiesta || 0);
+  for (const p of P.lista) {
+    const cerca = Math.hypot(p.x - coche.x, p.z - coche.z) < 35;
+    const salto = fiesta || cerca ? Math.abs(Math.sin(ahora * 9 + p.fase)) * 0.35 : Math.abs(Math.sin(ahora * 2 + p.fase)) * 0.03;
+    m.compose(v.set(p.x, salto, p.z), q.setFromAxisAngle(eje, p.h + (cerca ? Math.sin(ahora * 5 + p.fase) * 0.3 : 0)), uno);
+    P.mallas[p.modelo].setMatrixAt(p.idx, m);
+  }
+  P.mallas.forEach(im => { im.instanceMatrix.needsUpdate = true; });
+}
+// --- talleres: un aro azul con una llave flotando; parado (o despacio) dentro, el coche se arregla ---
+let texturaLlaveCache = null;
+function crearTaller(x, z, rotulo) {
+  if (!texturaLlaveCache) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#1d78d6'; g.beginPath(); g.arc(64, 64, 60, 0, Math.PI * 2); g.fill();
+    g.lineWidth = 6; g.strokeStyle = '#fff'; g.stroke();
+    g.font = '72px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('🔧', 64, 70);
+    texturaLlaveCache = new THREE.CanvasTexture(cv);
+  }
+  const grupo = new THREE.Group();
+  grupo.position.set(x, 0, z);
+  const aro = new THREE.Mesh(new THREE.RingGeometry(5, 6, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3aa0ff, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+  const llave = new THREE.Sprite(new THREE.SpriteMaterial({ map: texturaLlaveCache, depthWrite: false }));
+  llave.scale.set(2.4, 2.4, 1);
+  llave.position.y = 4.2;
+  const letrero = new THREE.Sprite(new THREE.SpriteMaterial({ map: texturaTexto(rotulo, '#1d78d6', '#fff', false, 256, 64), depthWrite: false }));
+  letrero.scale.set(3.6, 0.9, 1);
+  letrero.position.y = 2.5;
+  grupo.add(aro, llave, letrero);
+  grupo.children.forEach(o => { o.frustumCulled = false; });
+  scene.add(grupo);
+  return { x, z, grupo, llave };
+}
+// Exploración: talleres a 250–700 m del coche; los que quedan a más de 1,2 km se vuelven a poner cerca
+function colocarTalleres(rng) {
+  const lejos = carrera.talleres.filter(t => Math.hypot(t.x - coche.x, t.z - coche.z) > 1200);
+  for (const t of lejos) { scene.remove(t.grupo); carrera.talleres.splice(carrera.talleres.indexOf(t), 1); }
+  for (let intento = 0; carrera.talleres.length < 3 && intento < 200; intento++) {
+    const n = zona.G.nodos[Math.floor(rng() * zona.G.nodos.length)];
+    const d = Math.hypot(n.x - coche.x, n.z - coche.z);
+    if (!n.comp || d < 250 || d > 700 || carrera.talleres.some(t => Math.hypot(t.x - n.x, t.z - n.z) < 300)) continue;
+    carrera.talleres.push(crearTaller(n.x, n.z, 'TALLER'));
+  }
+}
+function actualizarTalleres(ahora, dt) {
+  let dentro = null;
+  for (const t of carrera.talleres) {
+    t.llave.position.y = 4.2 + Math.sin(ahora * 2.2 + t.x) * 0.35;
+    if (Math.hypot(t.x - coche.x, t.z - coche.z) < 6.5) dentro = t;
+  }
+  const d = coche.dano;
+  if (dentro && d.total > 0 && Math.abs(coche.v) < 7 && !coche.destrozado) {
+    const antes = d.total, paso = 16 * dt;
+    d.total = Math.max(0, d.total - paso);
+    for (const z of ['delante', 'detras', 'izq', 'der']) d[z] = Math.max(0, d[z] - paso * 1.5);
+    Abolladuras.reparar(antes > 0 ? 1 - d.total / antes : 1);
+    if (Math.floor(ahora * 6) !== Math.floor((ahora - dt) * 6)) Sonido.clic();
+    mostrarAviso(d.total > 0 ? `🔧 Reparando… ${Math.round(d.total)} %` : '🔧 ¡Coche como nuevo!', 0.6);
+    if (d.total === 0) Abolladuras.reparar(1);
+  }
+  if (modoJuego === 'exploracion' && ahora - (carrera.tTalleres || 0) > 2) { carrera.tTalleres = ahora; colocarTalleres(Math.random); }
+}
+function tallerMasCercano() {
+  let mejor = null, md = Infinity;
+  for (const t of carrera.talleres) { const d = Math.hypot(t.x - coche.x, t.z - coche.z); if (d < md) { md = d; mejor = t; } }
+  return mejor ? { t: mejor, d: md } : null;
+}
+// --- nueva partida ---
 async function nuevaCarrera() {
   if (!zona) return;
   Sonido.iniciar();
   $('estado').textContent = 'Cargando el coche…';
   await montarCoche(cocheElegido);
   const rng = mulberry32((Date.now() & 0xffffff) || 1);
+  // la salida (y en el circuito, la vuelta) la busca planearVuelta: una calle libre, mirando hacia donde sigue la calle
   const plan = planearVuelta(zona.G, rng, 1200, 3500, (x, z) => !choca(zona.edif, zona.rejilla, x, z, RADIO_COCHE) && !chocaMundo(zona.mundo, x, z, RADIO_COCHE));
-  if (!plan) { mostrarMenu('No he encontrado un circuito. Pulsa otra vez.'); return; }
+  if (!plan) { mostrarMenu('No he encontrado un sitio para empezar. Pulsa otra vez.'); return; }
   limpiarCarrera();
   ocultarMenu();
-  carrera = {
-    cps: plan.checkpoints, siguiente: 0, vueltas: 0, tVuelta: 0, tiempos: [], longitud: plan.longitud,
-    meshes: plan.checkpoints.map(cp => {
-      const g = crearBaliza();
-      g.position.set(cp.x, 0, cp.z);
-      scene.add(g);
-      return g;
-    }),
-  };
-  const flechas = flechasRuta(plan.ruta);
-  rutaLinea = mallaFlechas(flechas);   // flechas pintadas en la calzada, solo las del tramo hasta el siguiente checkpoint
-  if (flechasDatos) flechasDatos.piernas = piernasFlechas(flechas, plan.cortes);
-  scene.add(rutaLinea);
-  pintarCheckpoints();
+  estadoPausado = null;
+  const cum = acumulados(plan.ruta);
+  carrera = { modo: modoJuego, plan, cum, meshes: [], deco: null, semaforo: [], obstaculos: [], publico: null, talleres: [], destino: null, recorrido: 0, reparaciones: 0, penal: 0, tDestrozo: 0 };
   coche = {
     x: plan.inicio.x, z: plan.inicio.z, h: plan.inicio.h, v: 0, dir: 0, acera: false, golpe: 0, rpm: FISICA.ralenti, marcha: 1, cambio: 0, gas: 0, freno: 0, tFreno: 0,
     atrasAuto: false, sx: 0, sz: 0, wGolpe: 0, exceso: 0, derrape: 0, roce: 0, sacudida: 0, aLong: 0, aLat: 0, vPrev: 0, ultimoGolpe: 0,
+    dano: { delante: 0, detras: 0, izq: 0, der: 0, total: 0 }, destrozado: false, potencia: 1, agarreDano: 1,
   };
+  if (carrera.modo === 'circuito') {
+    Object.assign(carrera, { cps: plan.checkpoints, siguiente: 0, vueltas: 0, tVuelta: 0, tiempos: [], longitud: plan.longitud });
+    carrera.meshes = plan.checkpoints.map(cp => { const g = crearBaliza(); g.position.set(cp.x, 0, cp.z); scene.add(g); return g; });
+    const d = decoracionCircuito(plan, cum);
+    Object.assign(carrera, { deco: d.deco, semaforo: d.semaforo, obstaculos: d.obst });
+    scene.add(d.deco);
+    crearPublico(d.publico).then(P => { if (P && carrera && carrera.deco === d.deco) { carrera.publico = P; P.mallas.forEach(im => d.deco.add(im)); } });
+    const box = enPolilinea(plan.ruta, cum, 40);
+    carrera.talleres.push(crearTaller(box.x, box.z, 'BOXES'));
+    pintarCheckpoints();
+    ponerPierna();
+  } else {
+    Object.assign(carrera, { paradas: 0, usados: new Set(), visitados: [[plan.inicio.x, plan.inicio.z]], nodoActual: plan.checkpoints[plan.checkpoints.length - 1].nodo });
+    siguienteDestino(rng);
+    colocarTalleres(rng);
+  }
   actualizarMalla(0);
   await iniciarTrafico();
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
@@ -2862,6 +3759,26 @@ async function nuevaCarrera() {
   camara.lookAt(coche.x + fx * 6, 1.2, coche.z + fz * 6);
   cuenta = 3;
   estado = 'cuenta';
+}
+// Circuito: flechas del tramo que va del último checkpoint al siguiente
+function ponerPierna() {
+  const { plan, cum } = carrera, k = carrera.siguiente;
+  Ruta.poner(subPolilinea(plan.ruta, cum, k ? plan.cortes[k - 1] : 0, plan.cortes[k]), plan.checkpoints[k].nodo);
+}
+// Exploración: el siguiente destino, por calles que aún no se han recorrido
+function siguienteDestino(rng = Math.random) {
+  const D = elegirDestino(zona.G, rng, carrera.nodoActual, carrera.usados, carrera.visitados);
+  if (carrera.destino) { scene.remove(carrera.destino.baliza); carrera.destino = null; }
+  if (!D) { mostrarAviso('No quedan destinos nuevos: ¡has visto toda la zona!', 3); return; }
+  const n = zona.G.nodos[D.nodo], nombre = nombreNodo(zona.G, D.nodo) || 'un cruce sin nombre';
+  for (const e of D.camino) carrera.usados.add(e.seg);
+  carrera.visitados.push([n.x, n.z]);
+  const baliza = crearBaliza(0x3fd0ff);
+  baliza.position.set(n.x, 0, n.z);
+  scene.add(baliza);
+  carrera.destino = { nodo: D.nodo, x: n.x, z: n.z, nombre, baliza, tInicio: performance.now() / 1000 };
+  const r = rutaDesde(zona.G, zona.rejSeg, coche.x, coche.z, coche.h, D.nodo);
+  Ruta.poner(r ? r.pts : polilinea(zona.G, D.camino), D.nodo);
 }
 $('btnNueva').addEventListener('click', nuevaCarrera);
 // Botones para elegir coche, uno por cada entrada del catálogo
@@ -2882,8 +3799,60 @@ function pintarSelectorCoches() {
   }
 }
 pintarSelectorCoches();
+// Modo de juego y hora del día: se recuerdan para la próxima vez
+function pintarSelector(id, attr, actual, alElegir) {
+  $(id).querySelectorAll('button').forEach(b => {
+    b.classList.toggle('activo', b.dataset[attr] === actual);
+    b.onclick = () => { $(id).querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b)); alElegir(b.dataset[attr]); };
+  });
+}
+pintarSelector('modos', 'modo', modoJuego, m => { modoJuego = m; try { localStorage.setItem('cochesHuelva.modo', m); } catch (err) { /* nada */ } });
+pintarSelector('horas', 'hora', horaElegida, h => { aplicarHora(h); try { localStorage.setItem('cochesHuelva.hora', h); } catch (err) { /* nada */ } });
+// Seguir: vuelve a la partida desde el menú (y si el coche estaba destrozado, lo arregla con una penalización)
+$('btnSeguir').addEventListener('click', () => {
+  if (!estadoPausado || !carrera) return;
+  const ahora = performance.now() / 1000, pausa = ahora - tPausa;
+  tInicio += pausa;
+  if (carrera.tVuelta) carrera.tVuelta += pausa;
+  if (coche.destrozado) {
+    coche.destrozado = false;
+    Object.assign(coche.dano, { delante: 0, detras: 0, izq: 0, der: 0, total: 0 });
+    Abolladuras.reparar(1);
+    coche.v = 0; coche.sx = coche.sz = 0;
+    carrera.reparaciones++;
+    if (carrera.modo === 'circuito') { tInicio -= 30; if (carrera.tVuelta) carrera.tVuelta -= 30; carrera.penal += 30; mostrarAviso('Grúa y taller: +30 s', 2); }
+    else mostrarAviso('La grúa te ha dejado el coche como nuevo', 2);
+  }
+  estado = estadoPausado;
+  estadoPausado = null;
+  ocultarMenu();
+});
 
-function actualizarCarrera(ahora) {
+function actualizarCarrera(ahora, dt) {
+  carrera.recorrido += Math.abs(coche.v) * dt;
+  actualizarTalleres(ahora, dt);
+  if (tramoIdx >= 0 && carrera.usados) carrera.usados.add(tramoIdx);
+  // coche destrozado: a los tres segundos, al menú (con la opción de arreglarlo)
+  if (coche.destrozado) {
+    if (!carrera.tDestrozo) carrera.tDestrozo = ahora;
+    if (ahora - carrera.tDestrozo > 3) {
+      carrera.tDestrozo = 0;
+      pausar(ahora, `💥 ¡Coche destrozado! ${carrera.modo === 'circuito' ? 'Puedes llamar a la grúa (+30 s) o empezar otra carrera.' : 'Llama a la grúa para seguir explorando.'}`,
+        carrera.modo === 'circuito' ? 'Grúa y taller (+30 s)' : 'Llamar a la grúa');
+    }
+    return;
+  }
+  if (carrera.modo === 'exploracion') {
+    const D = carrera.destino;
+    if (D && Math.hypot(coche.x - D.x, coche.z - D.z) < 22) {
+      carrera.paradas++;
+      carrera.nodoActual = D.nodo;
+      mostrarAviso(`📍 Parada ${carrera.paradas}: ${D.nombre}`, 2.2);
+      Sonido.campana(carrera.paradas % 5 === 0);
+      siguienteDestino();
+    }
+    return;
+  }
   const cp = carrera.cps[carrera.siguiente];
   if (Math.hypot(coche.x - cp.x, coche.z - cp.z) > 25) return;
   if (carrera.siguiente === carrera.cps.length - 1) {
@@ -2892,30 +3861,52 @@ function actualizarCarrera(ahora) {
     carrera.vueltas++;
     carrera.tVuelta = ahora;
     carrera.siguiente = 0;
+    carrera.fiesta = ahora + 4;
     mostrarAviso(`Vuelta ${carrera.vueltas}: ${formato(vuelta)}`);
     Sonido.campana(true);
-    if (carrera.vueltas >= VUELTAS) terminar(ahora);
+    Sonido.aplausos(2.5);
+    if (carrera.vueltas >= VUELTAS) { terminar(ahora); return; }
   } else {
     carrera.siguiente++;
     Sonido.campana(false);
   }
   pintarCheckpoints();
+  ponerPierna();
 }
+// Meta: fuegos artificiales sobre el arco, aplausos, y a los cinco segundos el resumen
 function terminar(ahora) {
   estado = 'fin';
+  carrera.fiesta = ahora + 6;
+  Ruta.limpiar();
+  const e = enPolilinea(carrera.plan.ruta, carrera.cum, 10);
+  for (let k = 0; k < 7; k++) setTimeout(() => { Efectos.fuegos(e.x + (Math.random() - 0.5) * 30, 28 + Math.random() * 14, e.z + (Math.random() - 0.5) * 30); Sonido.estallido(); }, k * 600 + Math.random() * 300);
+  Sonido.aplausos(5);
   const total = ahora - tInicio;
+  mostrarAviso(`🏁 ¡META! ${formato(total)}`, 5);
   const lista = carrera.tiempos.map((t, i) => `V${i + 1}: ${formato(t)}`).join(' · ');
-  mostrarMenu(`Carrera terminada en ${formato(total)}. ${lista}. Pulsa Nueva carrera.`);
+  const danoFinal = Math.round(coche.dano.total);
+  setTimeout(() => { if (estado === 'fin') mostrarMenu(`🏁 Carrera terminada en ${formato(total)}${carrera.penal ? ` (con ${carrera.penal} s de grúa)` : ''}. ${lista}. Daño del coche: ${danoFinal} % — ${valoracionDano(danoFinal)}`); }, 5000);
+}
+function valoracionDano(d) {
+  return d < 5 ? 'impecable.' : d < 25 ? 'unos rasguños.' : d < 50 ? 'bastante abollado.' : d < 80 ? 'para el desguace casi.' : 'siniestro total.';
+}
+// Abre el menú en mitad de la partida; textoSeguir: lo que pone el botón de seguir
+function pausar(ahora, texto, textoSeguir = 'Continuar') {
+  if (estado === 'corriendo' || estado === 'cuenta') { estadoPausado = estado; tPausa = ahora; }
+  mostrarMenu(texto);
+  $('btnSeguir').textContent = textoSeguir;
+  $('btnSeguir').style.display = estadoPausado ? '' : 'none';
 }
 
 // --- choques: casas, agua, árboles, farolas, quitamiedos, isletas y tráfico ---
 // El coche choca con tres círculos a lo largo de su eje (delante, en medio y detrás), del ancho del coche
 const CIRCULOS_COCHE = [1.15, 0, -1.15], RADIO_CIRCULO = 1.0;
 // Rebote (e) y roce (mu) de cada cosa: los quitamiedos desvían el coche y dejan que siga, las casas y los árboles lo paran
-const MATERIAL_CHOQUE = { casa: [0.2, 0.55], agua: [0.05, 0.6], riel: [0.12, 0.18], arbol: [0.3, 0.6], farola: [0.25, 0.5], isla: [0.3, 0.35], bordillo: [0.3, 0.25] };
+const MATERIAL_CHOQUE = { valla: [0.3, 0.5], casa: [0.2, 0.55], agua: [0.05, 0.6], riel: [0.12, 0.18], arbol: [0.3, 0.6], farola: [0.25, 0.5], isla: [0.3, 0.35], bordillo: [0.3, 0.25] };
 function contactoCoche(x, z, R) {
   let c = conTipo(contactoPoligonos(zona.edif, zona.rejilla, x, z, R), 'casa');
   c = masHondo(c, contactoMundo(zona.mundo, x, z, R));
+  if (carrera) for (const [ox, oz, r] of carrera.obstaculos) c = masHondo(c, conTipo(contactoDesde(x, z, ox, oz, R + r, false), 'valla'));   // pancartas y arcos de la carrera
   return masHondo(c, contactoTrafico(x, z, R));
 }
 function obstaculo(x, z, R = RADIO_COCHE) { return !!contactoCoche(x, z, R); }
@@ -2975,7 +3966,7 @@ function resolverChoques(c) {
 // Bordillos: subir a la acera de lado y despacio da un bote; de frente y deprisa, el bordillo hace de muro y el coche rebota
 function bordillos(c, x0, z0) {
   const r = calleMasCercana(zona.rejSeg, zona.tramos, c.x, c.z, 25);
-  tramoActual = r ? r.t : null; dTramo2 = r ? r.d * r.d : Infinity;
+  tramoActual = r ? r.t : null; tramoIdx = r ? r.i : -1; dTramo2 = r ? r.d * r.d : Infinity;
   let enAcera = false;
   if (r) {
     const t = r.t, mitad = t.ancho / 2;
@@ -2988,7 +3979,7 @@ function bordillos(c, x0, z0) {
       c.x = x0; c.z = z0;
       const [e, mu] = MATERIAL_CHOQUE.bordillo, rb = rebote(Vx, Vz, -r.nx, -r.nz, e, mu);
       ponerVelocidad(c, rb.vx, rb.vz);
-      efectoGolpe({ impacto: rb.impacto, tipo: 'bordillo', x: c.x + r.nx, z: c.z + r.nz });
+      efectoGolpe({ impacto: rb.impacto, tipo: 'bordillo', x: c.x + r.nx, z: c.z + r.nz, nx: -r.nx, nz: -r.nz });
       return;
     }
     c.golpe = 0.5; c.v *= 0.85; c.sacudida = Math.max(c.sacudida, 0.25);
@@ -2997,7 +3988,7 @@ function bordillos(c, x0, z0) {
   } else if (!enAcera && c.acera) Sonido.bordillo(0.35);   // baja de la acera
   c.acera = enAcera;
 }
-// Sonido, sacudida, chispas y aviso de un golpe
+// Sonido, sacudida, chispas, daño y abolladura de un golpe; los peatones de alrededor se vuelven a mirar
 function efectoGolpe(g) {
   const ahora = performance.now() / 1000;
   if (g.impacto < 1.2) return;
@@ -3010,15 +4001,35 @@ function efectoGolpe(g) {
     requestAnimationFrame(() => { d.style.transition = 'opacity .5s'; d.style.opacity = '0'; });
     if (g.tipo === 'coche') setTimeout(() => Sonido.bocina(8), 350);
   }
+  if (g.impacto > 5) avisarPeatones(g.x, g.z, 35);
+  // daño: la zona del golpe según de dónde viene, y una abolladura en la chapa
+  const cuanto = danoGolpe(g.impacto, g.tipo);
+  if (cuanto > 0 && g.nx !== undefined && !coche.destrozado) {
+    const fx = Math.sin(coche.h), fz = Math.cos(coche.h), zonaG = zonaGolpe(fx, fz, g.nx, g.nz);
+    sumarDano(coche.dano, zonaG, cuanto);
+    if (g.tipo !== 'bordillo') Abolladuras.abollar(new THREE.Vector3(g.x, 0.65, g.z), new THREE.Vector3(g.nx, -0.15, g.nz).normalize(), Math.min(1, cuanto / 25));
+    const NOMBRE = { delante: 'delantero', detras: 'trasero', izq: 'izquierdo', der: 'derecho' };
+    if (cuanto > 6) mostrarAviso(`Golpe ${NOMBRE[zonaG]} · daño ${Math.round(coche.dano.total)} %`, 1.3);
+    if (coche.dano.total >= 100) {
+      coche.destrozado = true;
+      mostrarAviso('💥 ¡Coche destrozado!', 3);
+      Sonido.golpe('casa', 20);
+    }
+  }
 }
 
 // --- física del coche ---
-function fisica(dt) {
+function fisica(dt, soloFrenar = false) {
   const c = coche, x0 = c.x, z0 = c.z;
-  const objetivoDir = direccion() * (c.acera ? 0.6 : 1);   // en la acera, el volante responde menos
+  // el daño quita potencia y velocidad punta, empeora el agarre y tuerce la dirección; destrozado, el motor se para
+  const ef = efectosDano(c.dano);
+  c.potencia = c.destrozado ? 0 : ef.potencia; c.agarreDano = ef.agarre;
+  const objetivoDir = (soloFrenar ? 0 : direccion()) * (c.acera ? 0.6 : 1) + ef.tiron * Math.min(1, Math.abs(c.v) / 6);   // en la acera, el volante responde menos
   c.dir += (objetivoDir - c.dir) * Math.min(1, dt * 8);
-  pasoMotor(c, controles.acel, controles.freno, dt);   // motor, caja automática y frenos
+  if (soloFrenar) pasoMotor(c, false, Math.abs(c.v) > 0.5, dt);   // tras la meta o destrozado: frena solo
+  else pasoMotor(c, controles.acel && !c.destrozado, controles.freno, dt);   // motor, caja automática y frenos
   if (c.acera && Math.abs(c.v) > 7) c.v -= Math.sign(c.v) * (Math.abs(c.v) - 7) * Math.min(1, dt * 2.5);   // en la acera, a 25 km/h como mucho
+  if (Math.abs(c.v) > ef.velMax) c.v -= Math.sign(c.v) * (Math.abs(c.v) - ef.velMax) * Math.min(1, dt * 1.5);   // con daño no pasa de cierta velocidad
   const sentido = c.v >= 0 ? 1 : -1;
   const w = giroCoche(c, dt) * sentido;
   c.h += (w + c.wGolpe) * dt;
@@ -3043,6 +4054,7 @@ function fisica(dt) {
   }
   if (peor) efectoGolpe(peor);
   bordillos(c, x0, z0);
+  golpearCiclistas(c);
   // aceleraciones para inclinar la carrocería y para los derrapes
   c.aLong += ((c.v - c.vPrev) / dt - c.aLong) * Math.min(1, dt * 6);
   c.aLat += (c.v * w - c.aLat) * Math.min(1, dt * 6);
@@ -3081,10 +4093,23 @@ function actualizarMalla(dt) {
   cuerpoCoche.rotation.x = Math.max(-0.05, Math.min(0.05, -coche.aLong * 0.0045));
   cuerpoCoche.rotation.z = Math.max(-0.07, Math.min(0.07, coche.aLat * 0.007));
   sombraCoche.position.y = coche.acera ? 0.18 : 0.08;
-  cocheMesh.visible = modoVisto() !== 2;   // dentro del coche no se ve la carrocería
+  cuerpoCoche.visible = sombraCoche.visible = modoVisto() !== 2;   // dentro del coche no se ve la carrocería (los faros sí alumbran)
+  // luces: con la trasera o el morro muy tocados, se rompen (primero una y luego las dos)
+  const d = coche.dano, rotasAtras = d.detras > 85 ? 2 : d.detras > 55 ? 1 : 0, rotasDelante = d.delante > 85 ? 2 : d.delante > 55 ? 1 : 0;
   const frena = coche.freno > 0.2 || (coche.marcha === 0 && coche.atrasAuto && controles.acel), atras = coche.marcha === 0;
-  lucesCoche.frenos.forEach(f => { f.material.opacity += ((frena ? 0.95 : 0.12) - f.material.opacity) * Math.min(1, dt * 18); });
-  lucesCoche.atras.forEach(a => { a.material.opacity = atras ? 0.8 : 0; });
+  lucesCoche.frenos.forEach((f, i) => { const viva = i >= rotasAtras; f.material.opacity += ((frena && viva ? 0.95 : viva ? 0.12 : 0) - f.material.opacity) * Math.min(1, dt * 18); });
+  lucesCoche.atras.forEach((a, i) => { a.material.opacity = atras && i >= rotasAtras ? 0.8 : 0; });
+  const noche = uNoche.value, apagado = coche.destrozado;
+  lucesCoche.faros.forEach((f, i) => { f.material.opacity = noche > 0.2 && i >= rotasDelante && !apagado ? 0.85 : 0; });
+  lucesCoche.haz.visible = noche > 0.2 && rotasDelante < 2 && !apagado;
+  lucesCoche.haz.material.opacity = 0.6 * (rotasDelante ? 0.5 : 1) * Math.min(1, noche * 1.4);
+  // motor tocado: humo blanco, luego negro, y llamas si está casi destrozado
+  const fx = Math.sin(coche.h), fz = Math.cos(coche.h), mx = coche.x + fx * 1.5, mz = coche.z + fz * 1.5;
+  if (d.total > 35 && dt > 0 && Math.random() < (d.total - 30) / 70 * dt * 22) {
+    const negro = Math.min(1, Math.max(0, (d.total - 55) / 35)), g = 0.85 - 0.7 * negro;
+    Efectos.humo(mx, 1.05, mz, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, new THREE.Color(g, g, g), 0.3 + 0.3 * negro, 2.4 + 2 * negro);
+  }
+  if ((d.total > 85 || apagado) && dt > 0 && Math.random() < dt * 30) Efectos.llama(mx, 0.9, mz);
 }
 // --- cámaras: detrás, cerca y dentro del coche (la tecla C o el botón Cámara pasan de una a otra) ---
 const NOMBRES_CAMARA = ['detrás del coche', 'cerca del coche', 'dentro del coche'];
@@ -3121,7 +4146,20 @@ function actualizarCamara(dt) {
 }
 
 // --- HUD ---
-let avisoPintado = '';
+let avisoPintado = '', danoPintado = -1;
+// Indicador de daño: silueta del coche con sus cuatro zonas de verde a rojo, y el total
+function colorDano(v) { return `hsl(${Math.round(120 * (1 - Math.min(100, v) / 100))}, 75%, 48%)`; }
+function pintarDano() {
+  const d = coche.dano, clave = [d.delante, d.detras, d.izq, d.der, d.total].map(Math.round).join() + coche.destrozado;
+  if (clave === danoPintado) return;
+  danoPintado = clave;
+  $('zDelante').setAttribute('fill', colorDano(d.delante)); $('zDetras').setAttribute('fill', colorDano(d.detras));
+  $('zIzq').setAttribute('fill', colorDano(d.izq)); $('zDer').setAttribute('fill', colorDano(d.der));
+  $('danoTxt').textContent = coche.destrozado ? 'Destrozado' : `Daño ${Math.round(d.total)} %`;
+  $('danoRelleno').style.width = Math.min(100, d.total) + '%';
+  $('danoRelleno').style.background = colorDano(d.total);
+  $('dano').classList.toggle('grave', d.total >= 60);
+}
 function actualizarHUD(ahora) {
   const kmh = Math.round(Math.abs(coche.v) * 3.6);
   $('vel').innerHTML = kmh + '<small>km/h</small>';
@@ -3151,16 +4189,24 @@ function actualizarHUD(ahora) {
     el.classList.remove('excede');
     $('fuera').textContent = 'Fuera de la calzada';
   }
+  pintarDano();
   if (carrera) {
-    const cp = carrera.cps[carrera.siguiente];
-    const dist = Math.round(Math.hypot(coche.x - cp.x, coche.z - cp.z));
-    const t = estado === 'corriendo' ? ahora - tInicio : 0;
-    // flecha hacia el checkpoint, según hacia dónde mira el coche (arriba = de frente)
-    const rumbo = Math.atan2(cp.x - coche.x, cp.z - coche.z), rel = -(rumbo - coche.h) * 180 / Math.PI;
-    $('carrera').innerHTML =
-      `Vuelta ${Math.min(carrera.vueltas + 1, VUELTAS)} / ${VUELTAS}<br>` +
-      `${formato(t)}<br>` +
-      `${carrera.siguiente === carrera.cps.length - 1 ? 'Meta' : 'Checkpoint ' + (carrera.siguiente + 1)}: ${dist} m<span id="flechaCp" style="transform:rotate(${rel.toFixed(0)}deg)">▲</span>`;
+    const t = estado === 'corriendo' || estado === 'fin' ? (estado === 'fin' ? carrera.tFin || (carrera.tFin = ahora) : ahora) - tInicio : 0;
+    // flecha hacia (x, z) según hacia dónde mira el coche (arriba = de frente)
+    const flecha = (x, z) => `<span id="flechaCp" style="transform:rotate(${(-(Math.atan2(x - coche.x, z - coche.z) - coche.h) * 180 / Math.PI).toFixed(0)}deg)">▲</span>`;
+    let html;
+    if (carrera.modo === 'circuito') {
+      const cp = carrera.cps[carrera.siguiente], dist = Math.round(Math.hypot(coche.x - cp.x, coche.z - cp.z));
+      html = `Vuelta ${Math.min(carrera.vueltas + 1, VUELTAS)} / ${VUELTAS}<br>${formato(t)}<br>` +
+        `${carrera.siguiente === carrera.cps.length - 1 ? 'Meta' : 'Checkpoint ' + (carrera.siguiente + 1)}: ${dist} m${flecha(cp.x, cp.z)}`;
+    } else {
+      const D = carrera.destino;
+      html = `Exploración · ${carrera.paradas} parada${carrera.paradas === 1 ? '' : 's'}<br>${formato(t)} · ${(carrera.recorrido / 1000).toFixed(1).replace('.', ',')} km<br>` +
+        (D ? `📍 ${D.nombre}: ${Math.round(Math.hypot(coche.x - D.x, coche.z - D.z))} m${flecha(D.x, D.z)}` : '¡Zona completa!');
+    }
+    const taller = coche.dano.total > 25 && tallerMasCercano();
+    if (taller) html += `<br><span style="color:#7cc4ff">🔧 ${carrera.modo === 'circuito' ? 'Boxes' : 'Taller'}: ${Math.round(taller.d)} m</span>${flecha(taller.t.x, taller.t.z)}`;
+    $('carrera').innerHTML = html;
   }
   const txt = ahora < avisoHasta ? avisoTexto : '';
   if (txt !== avisoPintado) {
@@ -3193,25 +4239,38 @@ function bucle() {
       cuentaPintada = 0;
       mostrarAviso('¡YA!', 0.9);
       Sonido.pitido(1046, 0.45);
+      if (carrera.modo === 'circuito') { carrera.fiesta = ahora + 2; Sonido.aplausos(2); }
     }
   }
-  if (estado === 'corriendo') { fisica(dt); actualizarCarrera(ahora); }
+  // semáforo de salida: se encienden las luces rojas una a una y al «¡YA!» se ponen verdes
+  if (carrera && carrera.semaforo.length) {
+    const encendidas = estado === 'cuenta' ? Math.min(5, Math.floor((3 - cuenta) / 3 * 5) + 1) : 0, verde = estado !== 'cuenta' && ahora - tInicio < 3;
+    carrera.semaforo.forEach((m, k) => m.color.setHex(verde ? 0x22ff55 : k < encendidas ? 0xff2412 : 0x2a0806));
+  }
+  if (estado === 'corriendo') { fisica(dt, coche.destrozado); actualizarCarrera(ahora, dt); }
+  if (estado === 'fin') fisica(dt, true);   // tras la meta, el coche frena solo
   if (coche) {
     actualizarTrafico(dt);
     actualizarPeatones(dt);
+    actualizarCiclistas(dt);
     actualizarArboles();
-    actualizarFlechas(ahora);
+    if (estado === 'corriendo') Ruta.actualizar(ahora, dt);
+    actualizarPublico(ahora);
     actualizarMalla(dt);
     actualizarCamara(dt);
     actualizarHUD(ahora);
-    if (carrera) carrera.meshes.forEach((g, i) => { g.children[0].material.uniforms.uT.value = ahora % 1000; g.children[1].rotation.y = ahora * (i === carrera.siguiente ? 1.2 : 0.3); });
+    if (carrera) {
+      const animar = (g, rapido) => { g.children[0].material.uniforms.uT.value = ahora % 1000; g.children[1].rotation.y = ahora * (rapido ? 1.2 : 0.3); };
+      carrera.meshes.forEach((g, i) => animar(g, i === carrera.siguiente));
+      if (carrera.destino) animar(carrera.destino.baliza, true);
+    }
     if (sombras) {   // la sombra sigue al coche
-      sol.position.set(coche.x + 300, 500, coche.z + 200);
+      sol.position.copy(dirSol).multiplyScalar(600).add(new THREE.Vector3(coche.x, 0, coche.z));
       sol.target.position.set(coche.x, 0, coche.z);
     }
   }
-  const enMarcha = coche && (estado === 'corriendo' || estado === 'cuenta');
-  Sonido.actualizar(enMarcha ? { rpm: coche.rpm, gas: coche.gas, v: Math.abs(coche.v), derrape: coche.derrape, roce: coche.roce, cambio: coche.cambio > 0, acera: coche.acera } : null);
+  const enMarcha = coche && (estado === 'corriendo' || estado === 'cuenta' || estado === 'fin');
+  Sonido.actualizar(enMarcha ? { rpm: coche.rpm, gas: coche.gas, v: Math.abs(coche.v), derrape: coche.derrape, roce: coche.roce, cambio: coche.cambio > 0, acera: coche.acera, dano: coche.dano.total / 100, apagado: coche.destrozado } : null);
   Efectos.actualizar(dt, camara, renderer);
   cielo.position.copy(camara.position);
   renderer.render(scene, camara);
