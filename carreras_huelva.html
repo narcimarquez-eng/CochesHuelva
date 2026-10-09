@@ -78,7 +78,7 @@
   <p>Prototipo. Carga el zip de la zona (el que exporta el paseo). Los límites de velocidad son solo informativos: puedes ir más deprisa.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
   <div id="estado"></div>
-  <div id="coches"><button data-coche="basico" class="activo">Coche básico</button><button data-coche="concept">CarConcept</button><button data-coche="toy">ToyCar</button></div>
+  <div id="coches"></div>
   <button id="btnNueva" disabled>Nueva carrera</button>
   <p style="font-size:13px;opacity:.7">Teclas: flechas o WASD. M abre el menú.</p>
   <p style="font-size:12px;opacity:.6">Datos: © colaboradores de OpenStreetMap (ODbL) · Dirección General del Catastro</p>
@@ -1096,7 +1096,6 @@ let rutaLinea = null;           // flechas de la ruta (grupo de mallas)
 let modoCamara = 0;             // 0 detrás del coche, 1 cerca del coche, 2 dentro del coche
 let trafico = [], peatones = []; // coches de tráfico y peatones de la zona (se crean con cada carrera)
 let mallaTrafico = [], mallaPeatones = null, matFlechas = null, flechasDatos = null;
-const VENTANA_FLECHAS = 45;   // como mucho 45 flechas (unos 700 m) a la vez, las que van hacia el siguiente checkpoint
 let estado = 'menu';             // menu | cuenta | corriendo | fin
 let cuenta = 0, tInicio = 0;
 let avisoTexto = '', avisoHasta = 0;
@@ -1634,11 +1633,14 @@ function construirCoche(color) {
   return g;
 }
 // --- coches: el básico (caja roja) y modelos GLB, que se descargan al elegirlos ---
-const CATALOGO_COCHES = {
-  basico: {},
-  concept: { archivo: 'modelos/carconcept.glb', giro: 0 },   // su frontal ya mira a +Z, hacia donde avanza el juego
-  toy: { archivo: 'modelos/toycar.glb', giro: 0 },
-};
+// Galería de coches (Kenney y Quaternius, CC0): modelos/coches/catalogo.json con los mismos datos
+const GALERIA = [];
+const CATALOGO_COCHES = Object.fromEntries([
+  ['basico', { nombre: 'Coche básico' }],
+  ...GALERIA.map(g => [g.id, { nombre: g.nombre, archivo: g.archivo, giro: 0 }]),
+  ['concept', { nombre: 'CarConcept', archivo: 'modelos/carconcept.glb', giro: 0 }],   // su frontal ya mira a +Z, hacia donde avanza el juego
+  ['toy', { nombre: 'ToyCar', archivo: 'modelos/toycar.glb', giro: 0 }],
+]);
 let cocheElegido = 'basico';
 const cochesCargados = {};
 // Escala, gira y apoya el modelo: 4,2 m de largo, centrado en el coche y con las ruedas sobre el suelo
@@ -1832,7 +1834,7 @@ function colocarPeaton(p) {
   Object.assign(p, nuevoPeaton(zona.G, rngTrafico, candidatos[Math.floor(rngTrafico() * candidatos.length)]));
 }
 // Modelos de tráfico: los dos coches reales en versión ligera (un 10 % de los triángulos), cada uno unido en una sola geometría
-const ARCHIVOS_TRAFICO = ['modelos/trafico-concept.glb', 'modelos/trafico-toy.glb'];
+const ARCHIVOS_TRAFICO = [...GALERIA.map(g => g.archivo), 'modelos/trafico-concept.glb', 'modelos/trafico-toy.glb'];
 let modelosTrafico = null;
 // Une las mallas de un modelo en una sola geometría (un grupo por material), en la posición que ya tiene el modelo
 function geometriaUnida(raiz) {
@@ -1894,7 +1896,7 @@ async function iniciarTrafico() {
     trafico.forEach(c => colocarCoche(c));
     trafico = trafico.filter(c => c.seg !== undefined);   // los que no han encontrado calle no se dibujan
     const cuenta = modelos.map(() => 0);
-    trafico.forEach(c => { c.modelo = rngTrafico() < 0.5 ? 0 : 1; c.idx = cuenta[c.modelo]++; });
+    trafico.forEach(c => { c.modelo = Math.floor(rngTrafico() * modelos.length); c.idx = cuenta[c.modelo]++; });
     mallaTrafico = modelos.map((m, k) => {
       const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k]));
       im.frustumCulled = false;
@@ -1987,7 +1989,7 @@ function actualizarFlechas(ahora) {
   const { n, mA, mC, pos, amarillas, contorno, cp } = flechasDatos;
   const i0 = masCercana(pos, coche.x, coche.z);
   const hasta = (cp[carrera.siguiente] - i0 + n) % n + 1;   // flechas desde el coche hasta el checkpoint
-  const W = Math.min(hasta, VENTANA_FLECHAS, n);
+  const W = hasta;
   const brillo = amarillas.instanceColor;
   for (let k = 0; k < W; k++) {
     const i = (i0 + k) % n;
@@ -2047,11 +2049,24 @@ async function nuevaCarrera() {
   estado = 'cuenta';
 }
 $('btnNueva').addEventListener('click', nuevaCarrera);
-document.querySelectorAll('#coches button').forEach(b => b.addEventListener('click', () => {
-  cocheElegido = b.dataset.coche;
-  document.querySelectorAll('#coches button').forEach(x => x.classList.toggle('activo', x === b));
-  cargarCoche(cocheElegido).catch(() => {});   // empieza a descargarlo ya
-}));
+// Botones para elegir coche, uno por cada entrada del catálogo
+function pintarSelectorCoches() {
+  const cont = $('coches');
+  cont.innerHTML = '';
+  for (const [clave, datos] of Object.entries(CATALOGO_COCHES)) {
+    const b = document.createElement('button');
+    b.dataset.coche = clave;
+    b.textContent = datos.nombre;
+    b.classList.toggle('activo', clave === cocheElegido);
+    b.addEventListener('click', () => {
+      cocheElegido = clave;
+      cont.querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b));
+      cargarCoche(cocheElegido).catch(() => {});   // empieza a descargarlo ya
+    });
+    cont.appendChild(b);
+  }
+}
+pintarSelectorCoches();
 
 function actualizarCarrera(ahora) {
   const cp = carrera.cps[carrera.siguiente];

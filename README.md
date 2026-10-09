@@ -9,11 +9,13 @@ Carrera de coches por Huelva
 2. La zona se carga sola desde `zona-huelva.zip`, que va junto al juego (es la zona exportada por «Paseo por el relieve»). Si abres el HTML desde el disco y no la encuentra, elige el zip con el selector.
 3. Pulsa **Nueva carrera**: 3 vueltas a un circuito generado sobre las calles de la zona.
 
-En la carrera hay tráfico: coches que circulan por la derecha de las calles y que frenan al jugador como un muro, y peatones por las aceras. La ruta se marca con flechas amarillas pintadas en la calzada, hacia el siguiente checkpoint.
+En la carrera hay tráfico: coches que circulan por la derecha de las calles y que frenan al jugador como un muro, y peatones por las aceras. La ruta se marca con flechas amarillas pintadas en la calzada, solo el tramo hasta el siguiente checkpoint.
 
 El suelo es la ortofoto aérea de la zona (la del paseo), con sus calles, campos y ríos. Encima se dibujan las calles con asfalto, aceras de losetas, bordillos, marcas viales, pasos de cebra, farolas y árboles en las avenidas, árboles en parques y praderas, agua (ríos, lagos, humedales y piscinas), quitamiedos en las curvas de las vías rápidas y rotondas con isleta. Si el coche sube a la acera da un bote, va más despacio y el volante responde menos.
 
 Controles: flechas o WASD. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro. En el móvil, la ruleta de la pantalla gira el coche y los botones ▲ (acelerar) y ■ (frenar) están abajo. `M` abre el menú. Los límites de velocidad son solo informativos.
+
+El coche tiene caja automática de seis marchas. Arriba a la izquierda se ven la marcha y el tacómetro: la caja sube hacia las 6200 rpm y baja al acelerar a fondo con pocas vueltas o al frenar hasta casi parar. Para ir marcha atrás, para del todo y pisa el freno medio segundo; otro frenazo parado vuelve a marcha adelante. La física es la de un turismo de unos 150 CV: de 0 a 100 km/h en unos 8 s, frenada de 100 a 0 en unos 45 m y punta de unos 200 km/h. El volante responde menos a más velocidad, y en las curvas rápidas el coche pierde velocidad si el asfalto no aguanta el giro.
 
 ## Instalar en el móvil
 
