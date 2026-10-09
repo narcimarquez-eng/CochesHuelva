@@ -36,6 +36,10 @@ En el tráfico de la carrera circulan los coches de la galería y versiones lige
 
 `vendor/GLTFLoader.js` es el cargador de GLTF de three.js r128 (licencia MIT).
 
+## Árboles y peatones
+
+Los árboles son modelos de Kenney Nature Kit (roble, álamo, pino y arbusto), con licencia CC0: están en `modelos/arboles/`. Los peatones son ocho figuras de Kenney Blocky Characters (CC0), en `modelos/peatones/`, de 1,75 m. Las licencias de cada paquete van junto a los modelos. Se dibujan solo los árboles cercanos al coche, para que el móvil no sufra.
+
 ## Datos
 
 `zona-huelva.zip` incluye datos de OpenStreetMap (© colaboradores de OpenStreetMap, licencia ODbL) y del Catastro (Dirección General del Catastro). El juego usa `calles.geojson` y `casas.geojson`, `mapa.geojson` (usos del suelo: parques, praderas, cultivos, agua), `datos/osm.json` (piscinas y rotondas) y `ortofoto.jpg` con `ortofoto.jgw` (foto aérea del suelo). Si faltan, la zona carga igual, sin ese paisaje.

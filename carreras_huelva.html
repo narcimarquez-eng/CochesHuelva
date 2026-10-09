@@ -1421,7 +1421,11 @@ function mallaAguas(aguas) {
 
 // Árboles: troncos y copas en instancias (una sola llamada de dibujo por parte)
 // --- árboles: modelos de Kenney (modelos/arboles/, CC0) por bloques de 150 m; solo se dibujan los bloques cercanos al coche ---
-const ARCHIVOS_ARBOLES = [];   // se rellena con los archivos de modelos/arboles/catalogo.json
+// Árboles de modelos/arboles/ (Kenney Nature Kit, CC0): sobre todo árboles altos, y algún arbusto
+const ARCHIVOS_ARBOLES = [
+  'modelos/arboles/roble.glb', 'modelos/arboles/roble.glb', 'modelos/arboles/roble.glb', 'modelos/arboles/alamo.glb',
+  'modelos/arboles/alamo.glb', 'modelos/arboles/pino.glb', 'modelos/arboles/pino.glb', 'modelos/arboles/arbusto.glb',
+];
 const BLOQUE_ARBOLES = 150;    // m
 const DIST_ARBOLES = 260;      // m: más allá de esta distancia no se dibujan
 let bloquesArboles = [];       // { malla, cx, cz }
@@ -1449,7 +1453,7 @@ async function mallaArbolesModelos(arboles) {
       const esc = 0.85 + 0.3 * tamano;
       m.compose(new THREE.Vector3(x, 0, z), q.setFromAxisAngle(eje, giro * Math.PI * 2), uno.set(esc, esc, esc));
       im.setMatrixAt(i, m);
-      im.setColorAt(i, c.setRGB(0.8 + 0.2 * tamano, 0.8 + 0.2 * tamano, 0.8 + 0.2 * tamano));   // ligera variación de tono
+      im.setColorAt(i, c.setRGB(0.78 + 0.12 * tamano, 0.95 + 0.05 * tamano, 0.55 + 0.1 * tamano));   // del verde azulado de los modelos a un verde más natural, con algo de variación
     });
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
@@ -1888,7 +1892,8 @@ $('btnCamara').addEventListener('click', cambiarCamara);
 
 // --- tráfico, peatones y flechas: decoración que se mueve; los coches de tráfico frenan al jugador como un muro ---
 const N_TRAFICO = 40, N_PEATONES = 110, RADIO_TRAFICO = 320;
-const ARCHIVOS_PEATONES = [];   // se rellena con los archivos de modelos/peatones/catalogo.json
+// Peatones de modelos/peatones/ (Kenney Blocky Characters, CC0): 1,75 m, con el frontal hacia +Z
+const ARCHIVOS_PEATONES = [1, 2, 3, 4, 5, 6, 7, 8].map(n => `modelos/peatones/peaton-${n}.glb`);
 const COLORES_COCHE = [0xe63946, 0x1d3557, 0xf1faee, 0x457b9d, 0xf4a261, 0x2a9d8f, 0x6d6875, 0xffb703, 0x8d99ae];
 let rngTrafico = mulberry32(1);
 // Tramos del grafo que empiezan a menos de R metros del coche y cumplen la condición
