@@ -834,6 +834,7 @@ function generarPasosCebra(tramos, rotondas, cruces) {
 // Cada farola es {x, z, th}: th es el giro (rad) del brazo, que apunta hacia la calzada
 function generarFarolas(tramos, rotondas, cruces, arboles) {
   const rejCruces = construirRejillaPuntos(cruces), rejArboles = construirRejillaPuntos(arboles), calles = construirRejillaCalles(tramos), farolas = [];
+  const enOtra = construirRejillaCalzadas(tramos);
   tramos.forEach((t, i) => {
     if (!(t.acera > 0) || t.ancho < 6 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) return;
     if (t.ancho >= 9 && t.acera >= 2.2) return;   // en las avenidas van árboles, no farolas
@@ -841,7 +842,7 @@ function generarFarolas(tramos, rotondas, cruces, arboles) {
     const lado = i % 2 ? 1 : -1, off = lado * (t.ancho / 2 + t.acera / 2);
     for (let d = 14; d < L - 14; d += 36) {
       const e = enPolilinea(t.pts, cum, d), x = e.x - e.tz * off, z = e.z + e.tx * off;
-      if (chocaPuntos(rejCruces, x, z, 16) || cercaDeCalle(calles, x, z, 2.5) || chocaPuntos(rejArboles, x, z, 1.5)) continue;   // ni en la calzada ni sobre un árbol
+      if (chocaPuntos(rejCruces, x, z, 16) || cercaDeCalle(calles, x, z, 2.5) || chocaPuntos(rejArboles, x, z, 1.5) || enOtra(x, z, i)) continue;   // ni en la calzada ni sobre un árbol
       farolas.push({ x, z, th: Math.atan2(e.tx * lado, e.tz * lado) });
     }
   });
@@ -850,14 +851,16 @@ function generarFarolas(tramos, rotondas, cruces, arboles) {
 // Árboles de alineación: en las avenidas (calzada de 9 m o más, aceras de 2,2 m o más), cada 14 m en el centro de la acera
 function generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, rejAguas) {
   const rejCruces = construirRejillaPuntos(cruces), calles = construirRejillaCalles(tramos), arboles = [];
-  for (const t of tramos) {
+  const enOtra = construirRejillaCalzadas(tramos);
+  for (let k = 0; k < tramos.length; k++) {
+    const t = tramos[k];
     if (!(t.acera >= 2.2) || t.ancho < 9 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) continue;
     const cum = acumulados(t.pts), L = cum[cum.length - 1];
     for (const lado of [-1, 1]) for (let d = 12; d < L - 12; d += 14) {
       const e = enPolilinea(t.pts, cum, d), off = lado * (t.ancho / 2 + t.acera / 2);
       const x = e.x - e.tz * off, z = e.z + e.tx * off;
       if (chocaPuntos(rejCruces, x, z, 16) || cercaDeCalle(calles, x, z, 3.5) || choca(aguas, rejAguas, x, z, 2) ||
-          dentroDeOtraCasa(edif, rejilla, x, z, -1)) continue;
+          dentroDeOtraCasa(edif, rejilla, x, z, -1) || enOtra(x, z, k)) continue;
       arboles.push([x, z]);
     }
   }
@@ -1078,6 +1081,41 @@ function giroCoche(c, dt) {
   if (Math.abs(w) > maxW) { w = Math.sign(w) * maxW; c.v *= Math.max(0, 1 - 0.15 * dt); }
   return w;
 }
+// Rejilla de calzadas: dice si un punto cae dentro de la calzada de otra calle distinta de `propio` (cruces, calzadas dobles, glorietas)
+function construirRejillaCalzadas(tramos) {
+  const C = 40, celdas = new Map(), clave = (i, j) => i + ',' + j;
+  tramos.forEach((t, k) => {
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of t.pts) { x0 = Math.min(x0, x); z0 = Math.min(z0, z); x1 = Math.max(x1, x); z1 = Math.max(z1, z); }
+    const m = t.ancho / 2 + 0.5;
+    for (let i = Math.floor((x0 - m) / C); i <= Math.floor((x1 + m) / C); i++)
+      for (let j = Math.floor((z0 - m) / C); j <= Math.floor((z1 + m) / C); j++) {
+        if (!celdas.has(clave(i, j))) celdas.set(clave(i, j), []);
+        celdas.get(clave(i, j)).push(k);
+      }
+  });
+  return (x, z, propio) => {
+    for (const k of celdas.get(clave(Math.floor(x / C), Math.floor(z / C))) || []) {
+      if (k === propio) continue;
+      const u = tramos[k];
+      if (distanciaTramo2(u, x, z) < (u.ancho / 2 + 0.3) ** 2) return true;
+    }
+    return false;
+  };
+}
+// Trozos de una franja (a `s` metros del eje del tramo) que no caen dentro de la calzada de otra calle: [[d0, d1], ...] en metros desde el inicio
+function trozosLibres(t, cum, s, enOtra, paso = 1.5) {
+  const L = cum[cum.length - 1], n = Math.max(2, Math.ceil(L / paso)), out = [];
+  let ini = -1;
+  for (let i = 0; i <= n; i++) {
+    const d = L * i / n, e = enPolilinea(t.pts, cum, d);
+    const libre = !enOtra(e.x - e.tz * s, e.z + e.tx * s);
+    if (libre && ini < 0) ini = d;
+    if (!libre && ini >= 0) { out.push([ini, d]); ini = -1; }
+  }
+  if (ini >= 0) out.push([ini, L]);
+  return out.filter(([a, b]) => b - a >= 2);
+}
 /*CORE-END*/
 
 /*RENDER-START*/
@@ -1246,18 +1284,28 @@ function mallaCarreteras(tramos) {
       for (const v of tr) m.v(v[0], v[1], v[2], c, 0, 0, sg * nx, 0, sg * nz);
     }
   };
-  for (const t of tramos) {
+  const enOtra = construirRejillaCalzadas(tramos);
+  for (let k = 0; k < tramos.length; k++) {
+    const t = tramos[k];
     const h = t.ancho / 2;
     const tierra = /tierra|grava/.test(t.dib), adoquin = /adoqu/.test(t.dib);
     const asfalto = tierra ? [0.5, 0.42, 0.3] : adoquin ? [0.52, 0.5, 0.47] : COLOR_CALZADA(t);
     bandasH(calzada, t.pts, -h, h, 0.05, asfalto, TU_ASFALTO, TU_ASFALTO);
     if (t.acera > 0 && !tierra) {
-      bandasH(aceras, t.pts, h + 0.2, h + t.acera, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
-      bandasH(aceras, t.pts, -h - t.acera, -h - 0.2, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
-      bandasH(aceras, t.pts, h, h + 0.2, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);   // canto claro del bordillo
-      bandasH(aceras, t.pts, -h - 0.2, -h, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);
-      caraV(bordillos, t.pts, h, 0.05, 0.15, BORDILLO);
-      caraV(bordillos, t.pts, -h, 0.05, 0.15, BORDILLO);
+      // aceras y bordillos solo donde no caen dentro de la calzada de otra calle (cruces y calzadas dobles)
+      const cum = acumulados(t.pts);
+      for (const [d0, d1] of trozosLibres(t, cum, h + t.acera / 2, (x, z) => enOtra(x, z, k))) {
+        const p = subPolilinea(t.pts, cum, d0, d1);
+        bandasH(aceras, p, h + 0.2, h + t.acera, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
+        bandasH(aceras, p, h, h + 0.2, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);   // canto claro del bordillo
+        caraV(bordillos, p, h, 0.05, 0.15, BORDILLO);
+      }
+      for (const [d0, d1] of trozosLibres(t, cum, -(h + t.acera / 2), (x, z) => enOtra(x, z, k))) {
+        const p = subPolilinea(t.pts, cum, d0, d1);
+        bandasH(aceras, p, -h - t.acera, -h - 0.2, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
+        bandasH(aceras, p, -h - 0.2, -h, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);
+        caraV(bordillos, p, -h, 0.05, 0.15, BORDILLO);
+      }
     } else if (/con arcén/.test(t.dib)) {   // arcén: franja junto a la calzada, sin acera
       bandasH(calzada, t.pts, h, h + 1.2, 0.045, ARCEN, TU_ASFALTO, TU_ASFALTO);
       bandasH(calzada, t.pts, -h - 1.2, -h, 0.045, ARCEN, TU_ASFALTO, TU_ASFALTO);
