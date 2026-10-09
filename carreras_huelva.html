@@ -13,6 +13,15 @@
   #hud{position:fixed;left:12px;top:12px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.7);pointer-events:none;line-height:1.35}
   #vel{font-size:44px;font-weight:700}
   #vel small{font-size:16px;font-weight:400;margin-left:4px}
+  #motor{display:flex;align-items:center;gap:8px;font-size:14px;margin:0 0 4px}
+  #marcha{font-size:22px;font-weight:700;min-width:30px;text-align:center;background:rgba(0,0,0,.45);border-radius:6px;padding:0 6px}
+  #marcha.cambia{background:#f5b041;color:#1b1b1b}
+  #rpm{position:relative;width:140px;height:10px;border-radius:5px;background:rgba(0,0,0,.45);overflow:hidden}
+  #rpm::after{content:"";position:absolute;left:88%;top:0;bottom:0;width:2px;background:#e74c3c}
+  #rpmBarra{position:absolute;left:0;top:0;bottom:0;width:0;background:#2ecc71}
+  #rpmBarra.alto{background:#f1c40f}
+  #rpmBarra.corte{background:#e74c3c}
+  #rpmTexto{min-width:72px;opacity:.9}
   #limite{font-size:14px;padding:3px 8px;border-radius:6px;background:rgba(0,0,0,.45);display:inline-block}
   #limite.excede{background:#c0392b}
   #fuera{font-size:14px;color:#ffd166;min-height:18px}
@@ -42,6 +51,7 @@
 <body>
 <div id="hud">
   <div id="vel">0<small>km/h</small></div>
+  <div id="motor"><span id="marcha">1</span><div id="rpm"><div id="rpmBarra"></div></div><span id="rpmTexto">800 rpm</span></div>
   <div id="limite">Límite: —</div>
   <div id="fuera"></div>
 </div>
@@ -963,12 +973,116 @@ function flechasRuta(ruta, paso = 16) {
   }
   return out;
 }
+// --- coche: motor, caja automática de seis marchas, dirección y agarre (SI: m, s, kg, N, rpm) ---
+// Un turismo de unos 150 CV: de 0 a 100 km/h en torno a 9 s; la velocidad punta la pone la marcha 6 y el aire
+const FISICA = {
+  masa: 1250,                                  // kg, con el conductor
+  radioRueda: 0.31,                            // m
+  relacion: [3.6, 2.1, 1.45, 1.08, 0.85, 0.7], // marchas 1 a 6
+  diferencial: 3.9,
+  rendimiento: 0.9,
+  ralenti: 800,                                // rpm
+  corte: 6900,                                 // rpm: el motor corta la inyección
+  subida: [2300, 6200],                        // rpm para cambiar a la marcha de arriba, con el gas suelto y a fondo
+  cambioS: 0.35,                               // s sin empuje mientras la caja cambia
+  frenoMax: 8.5,                               // m/s² (unos 0,87 g)
+  rodadura: 0.012,
+  aero: 0.42,                                  // N·s²/m²: ½ · densidad del aire · Cd · área frontal
+  distanciaEjes: 2.6,                          // m
+  agarre: 8.5,                                 // m/s²: aceleración lateral que aguanta el asfalto
+  fuerzaAtras: 4000,                           // N en marcha atrás
+  marchaAtras: 5,                              // m/s (18 km/h) como mucho en marcha atrás
+};
+// Par del motor (N·m) según las rpm: máximo hacia las 3500 y unos 110 kW hacia las 6000
+const PAR_MOTOR = [[0, 110], [800, 120], [2000, 185], [3500, 225], [4800, 212], [6000, 178], [6900, 150]];
+const G_TIERRA = 9.81;
+function parMotor(rpm) {
+  if (rpm >= FISICA.corte) return 0;
+  for (let i = 1; i < PAR_MOTOR.length; i++) {
+    const [r1, p1] = PAR_MOTOR[i];
+    if (rpm <= r1) {
+      const [r0, p0] = PAR_MOTOR[i - 1];
+      return p0 + (p1 - p0) * (rpm - r0) / (r1 - r0);
+    }
+  }
+  return PAR_MOTOR[PAR_MOTOR.length - 1][1];
+}
+// Relación entre el motor y las ruedas (la marcha 0 es la de atrás)
+function relacionTotal(marcha) {
+  return (marcha === 0 ? FISICA.relacion[0] : FISICA.relacion[marcha - 1]) * FISICA.diferencial;
+}
+// Vueltas del motor a esa velocidad en esa marcha, con el embrague enganchado
+function rpmEnMarcha(v, marcha) {
+  return Math.abs(v) * relacionTotal(marcha) * 60 / (2 * Math.PI * FISICA.radioRueda);
+}
+// Caja automática: sube al llegar a las vueltas de cambio (antes con poco gas) y baja al acelerar a fondo con pocas vueltas o al frenar hasta casi parar
+function cambioAutomatico(c, rapidez) {
+  const F = FISICA;
+  if (c.marcha < 6 && rpmEnMarcha(rapidez, c.marcha) >= F.subida[0] + (F.subida[1] - F.subida[0]) * c.gas) {
+    c.marcha++; c.cambio = F.cambioS;
+    return;
+  }
+  if (c.marcha > 1 && rpmEnMarcha(rapidez, c.marcha - 1) < F.corte - 900) {
+    const rpm = rpmEnMarcha(rapidez, c.marcha);
+    if ((c.gas > 0.6 && rpm < 2600) || (c.freno > 0.3 && rpm < 1500)) { c.marcha--; c.cambio = F.cambioS; }
+  }
+}
+// Un paso de pedales, embrague, caja y frenos. c.v es la velocidad con signo (negativa hacia atrás); c.marcha 0 es marcha atrás
+function pasoMotor(c, acel, freno, dt) {
+  const F = FISICA;
+  c.gas += ((acel ? 1 : 0) - c.gas) * Math.min(1, dt * 7);     // los pedales responden en unas décimas, no de golpe
+  c.freno += ((freno ? 1 : 0) - c.freno) * Math.min(1, dt * 9);
+  c.cambio = Math.max(0, c.cambio - dt);
+  const rapidez = Math.abs(c.v);
+  // parado y con el freno pisado medio segundo, la caja cambia entre adelante y atrás (para volver a cambiar hay que soltar el freno)
+  if (rapidez < 0.6 && c.gas < 0.1 && c.freno > 0.6) {
+    c.tFreno += dt;
+    if (c.tFreno > 0.5) { c.marcha = c.marcha === 0 ? 1 : 0; c.tFreno = -Infinity; }
+  } else c.tFreno = 0;
+  let fuerza = 0;                                               // N, positiva hacia delante
+  if (c.marcha === 0) {
+    fuerza = -F.fuerzaAtras * c.gas * Math.max(0, 1 - rapidez / F.marchaAtras);
+    c.rpm += (F.ralenti + c.gas * 1500 - c.rpm) * Math.min(1, dt * 6);
+  } else {
+    const patina = rapidez < 2.5;                               // al arrancar, el embrague patina: el motor sube sin mover el coche
+    if (c.cambio <= 0) cambioAutomatico(c, rapidez);
+    const rel = relacionTotal(c.marcha);
+    const objetivo = patina ? F.ralenti + c.gas * 2600 : Math.max(F.ralenti, rpmEnMarcha(c.v, c.marcha));
+    c.rpm += (Math.min(objetivo, F.corte) - c.rpm) * Math.min(1, dt * (patina ? 6 : 14));
+    if (c.cambio <= 0) fuerza = parMotor(c.rpm) * c.gas * rel * F.rendimiento / F.radioRueda;   // sin empuje mientras cambia
+    fuerza = Math.min(fuerza, 0.8 * G_TIERRA * F.masa);         // no pasa de lo que aguantan las ruedas
+    // rozamiento del motor; con el gas suelto aumenta mucho (freno motor)
+    if (!patina) fuerza -= Math.sign(c.v) * (8 + 0.002 * c.rpm + (1 - c.gas) * (16 + 0.003 * c.rpm)) * rel / F.radioRueda;
+  }
+  // arrastre de la caja automática: sin pisar nada, el coche avanza despacio hasta unos 8 km/h
+  if (c.gas < 0.05 && c.freno < 0.05 && rapidez < 2.2 && c.cambio <= 0) fuerza += (c.marcha === 0 ? -1 : 1) * 1800 * (1 - rapidez / 2.2);
+  // resistencias: el freno y la rodadura siempre frenan; el aire, según la velocidad al cuadrado
+  const frenado = c.freno * F.frenoMax * F.masa + F.rodadura * F.masa * G_TIERRA;
+  if (rapidez < 0.02) {
+    // parado: el freno y la rodadura solo sujetan hasta su valor; lo que sobra mueve el coche
+    const neta = Math.abs(fuerza) > frenado ? fuerza - Math.sign(fuerza) * frenado : 0;
+    c.v += neta / F.masa * dt;
+  } else {
+    const neta = fuerza - Math.sign(c.v) * (frenado + F.aero * c.v * c.v);
+    const nueva = c.v + neta / F.masa * dt;
+    c.v = Math.sign(nueva) !== Math.sign(c.v) ? 0 : nueva;   // frenando o rodando no cambia de sentido
+  }
+}
+// Velocidad de giro del coche (rad/s) con el volante en c.dir. Las ruedas giran menos a más velocidad; si el giro pide más agarre
+// del que tiene el asfalto, el coche se abre y pierde velocidad
+function giroCoche(c, dt) {
+  const F = FISICA, v = Math.abs(c.v);
+  const ruedas = c.dir * 0.6 / (1 + v / 12);                    // ángulo de las ruedas (rad)
+  let w = v * Math.tan(ruedas) / F.distanciaEjes;
+  const maxW = F.agarre / Math.max(v, 0.5);
+  if (Math.abs(w) > maxW) { w = Math.sign(w) * maxW; c.v *= Math.max(0, 1 - 0.15 * dt); }
+  return w;
+}
 /*CORE-END*/
 
 /*RENDER-START*/
 // ---------- Render, física del coche, carrera y menús ----------
 const $ = id => document.getElementById(id);
-const VMAX = 75;      // m/s (270 km/h): tope del coche básico
 const VUELTAS = 3;
 
 let renderer, scene, camara, reloj;
@@ -976,13 +1090,13 @@ let zona = null;                 // { tramos, G, edif, rejilla, mundo, caja }
 let mallaZona = null;            // grupo con suelo, calles, casas y mundo
 let cocheMesh = null;
 let contextoRecuperado = false;   // se pone a true si el contexto 3D vuelve tras perderse
-let coche = null;                // { x, z, h, v, dir, acera, golpe }
+let coche = null;                // { x, z, h, v, dir, acera, golpe, rpm, marcha, cambio, gas, freno, tFreno }
 let carrera = null;              // { cps, meshes, siguiente, vueltas, tVuelta, tiempos, longitud }
 let rutaLinea = null;           // flechas de la ruta (grupo de mallas)
 let modoCamara = 0;             // 0 detrás del coche, 1 cerca del coche, 2 dentro del coche
 let trafico = [], peatones = []; // coches de tráfico y peatones de la zona (se crean con cada carrera)
 let mallaTrafico = [], mallaPeatones = null, matFlechas = null, flechasDatos = null;
-const VENTANA_FLECHAS = 28;   // cuántas flechas se ven a la vez, desde la más cercana al coche
+const VENTANA_FLECHAS = 45;   // como mucho 45 flechas (unos 700 m) a la vez, las que van hacia el siguiente checkpoint
 let estado = 'menu';             // menu | cuenta | corriendo | fin
 let cuenta = 0, tInicio = 0;
 let avisoTexto = '', avisoHasta = 0;
@@ -1843,8 +1957,9 @@ function mallaFlechas(flechas) {
   matFlechas = new THREE.MeshBasicMaterial({ color: 0xffc83d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
   const matContorno = new THREE.MeshBasicMaterial({ color: 0x1b2026, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   const n = flechas.length;
-  const amarillas = new THREE.InstancedMesh(forma(1.1, 1.5), matFlechas, n);
-  const contorno = new THREE.InstancedMesh(forma(1.45, 1.9), matContorno, n);
+  const amarillas = new THREE.InstancedMesh(forma(1.5, 2.1), matFlechas, n);
+  const contorno = new THREE.InstancedMesh(forma(1.95, 2.6), matContorno, n);
+  amarillas.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3 * n).fill(1), 3);   // brillo propio de cada flecha
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
   const mA = new Float32Array(16 * n), mC = new Float32Array(16 * n);   // todas las matrices; actualizarFlechas elige la ventana
   flechas.forEach((f, i) => {
@@ -1852,28 +1967,37 @@ function mallaFlechas(flechas) {
     m.compose(new THREE.Vector3(f.x, 0.09, f.z), r, uno).toArray(mC, i * 16);
     m.compose(new THREE.Vector3(f.x, 0.095, f.z), r, uno).toArray(mA, i * 16);
   });
-  flechasDatos = { n, mA, mC, pos: flechas, amarillas, contorno };
+  flechasDatos = { n, mA, mC, pos: flechas, amarillas, contorno, cp: [] };
   amarillas.frustumCulled = false; contorno.frustumCulled = false;
   grupo.add(contorno, amarillas);
   return grupo;
 }
-// Muestra solo una ventana de flechas: la más cercana al coche (con una detrás) y las que vienen después
-function actualizarFlechas() {
-  if (!flechasDatos) return;
-  const { n, mA, mC, pos, amarillas, contorno } = flechasDatos;
+// Índice de la flecha más cercana a un punto
+function masCercana(pos, x, z) {
   let mejor = 0, md = Infinity;
-  for (let i = 0; i < n; i++) {
-    const d = (pos[i].x - coche.x) ** 2 + (pos[i].z - coche.z) ** 2;
+  for (let i = 0; i < pos.length; i++) {
+    const d = (pos[i].x - x) ** 2 + (pos[i].z - z) ** 2;
     if (d < md) { md = d; mejor = i; }
   }
-  const W = Math.min(VENTANA_FLECHAS, n);
+  return mejor;
+}
+// Solo se marcan las flechas del coche hasta el siguiente checkpoint; un destello sube por ellas hacia el checkpoint
+function actualizarFlechas(ahora) {
+  if (!flechasDatos || !carrera || !flechasDatos.cp.length) return;
+  const { n, mA, mC, pos, amarillas, contorno, cp } = flechasDatos;
+  const i0 = masCercana(pos, coche.x, coche.z);
+  const hasta = (cp[carrera.siguiente] - i0 + n) % n + 1;   // flechas desde el coche hasta el checkpoint
+  const W = Math.min(hasta, VENTANA_FLECHAS, n);
+  const brillo = amarillas.instanceColor;
   for (let k = 0; k < W; k++) {
-    const i = (mejor + k - 1 + n) % n;
+    const i = (i0 + k) % n;
     amarillas.instanceMatrix.array.set(mA.subarray(i * 16, i * 16 + 16), k * 16);
     contorno.instanceMatrix.array.set(mC.subarray(i * 16, i * 16 + 16), k * 16);
+    const b = 0.45 + 0.55 * Math.max(0, Math.sin(ahora * 7 - k * 0.8));
+    brillo.setXYZ(k, b, b, b);
   }
   amarillas.count = W; contorno.count = W;
-  amarillas.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true;
+  amarillas.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true; brillo.needsUpdate = true;
 }
 
 // --- carrera ---
@@ -1910,9 +2034,10 @@ async function nuevaCarrera() {
     }),
   };
   rutaLinea = mallaFlechas(flechasRuta(plan.ruta));   // flechas pintadas en la calzada, hacia el siguiente checkpoint
+  if (flechasDatos) flechasDatos.cp = plan.checkpoints.map(cp => masCercana(flechasDatos.pos, cp.x, cp.z));
   scene.add(rutaLinea);
   pintarCheckpoints();
-  coche = { x: plan.inicio.x, z: plan.inicio.z, h: plan.inicio.h, v: 0, dir: 0, acera: false, golpe: 0 };
+  coche = { x: plan.inicio.x, z: plan.inicio.z, h: plan.inicio.h, v: 0, dir: 0, acera: false, golpe: 0, rpm: FISICA.ralenti, marcha: 1, cambio: 0, gas: 0, freno: 0, tFreno: 0 };
   actualizarMalla();
   await iniciarTrafico();
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
@@ -1961,14 +2086,11 @@ function fisica(dt) {
   const c = coche;
   const objetivoDir = direccion() * (c.acera ? 0.6 : 1);   // en la acera, el volante responde menos
   c.dir += (objetivoDir - c.dir) * Math.min(1, dt * 8);
-  if (controles.acel) c.v += 22 * (1 - Math.max(c.v, 0) / VMAX) * dt;
-  if (controles.freno) c.v = c.v > 0.5 ? c.v - 28 * dt : Math.max(c.v - 8 * dt, -12);
+  pasoMotor(c, controles.acel, controles.freno, dt);   // motor, caja automática y frenos
   if (c.acera) c.v = Math.min(c.v, 7);   // subido al bordillo: la conducción se pone dura, no pasa de 25 km/h
-  const ds = (0.6 + 0.0012 * c.v * c.v) * dt;     // rozamiento + arrastre
-  if (Math.abs(c.v) <= ds) c.v = 0; else c.v -= Math.sign(c.v) * ds;
   const vAbs = Math.abs(c.v);
   const sentido = c.v >= 0 ? 1 : -1;
-  c.h += c.dir * 1.9 * Math.min(vAbs / 8, 1) * (1 - 0.5 * Math.min(vAbs / VMAX, 1)) * sentido * dt;
+  c.h += giroCoche(c, dt) * sentido * dt;
   if (c.acera) c.h += Math.sin(performance.now() / 1000 * 23) * 0.9 * Math.min(vAbs / 4, 1) * dt;   // tirones del bordillo
   if (c.golpe > 0) c.golpe = Math.max(0, c.golpe - dt);
   const recorrido = c.v * dt;
@@ -2041,6 +2163,12 @@ function buscarTramo() {
 function actualizarHUD(ahora) {
   const kmh = Math.round(Math.abs(coche.v) * 3.6);
   $('vel').innerHTML = kmh + '<small>km/h</small>';
+  $('marcha').textContent = coche.marcha === 0 ? 'R' : coche.marcha;
+  $('marcha').classList.toggle('cambia', coche.cambio > 0);
+  $('rpmBarra').style.width = Math.min(100, coche.rpm / 7000 * 100).toFixed(1) + '%';
+  $('rpmBarra').classList.toggle('alto', coche.rpm >= 5200);
+  $('rpmBarra').classList.toggle('corte', coche.rpm >= 6200);
+  $('rpmTexto').textContent = Math.round(coche.rpm / 10) * 10 + ' rpm';
   if (ahora - ultimoBusqueda > 0.25) { ultimoBusqueda = ahora; buscarTramo(); }
   if (tramoActual) {
     const t = tramoActual;
@@ -2084,14 +2212,10 @@ function bucle() {
   if (coche) {
     actualizarTrafico(dt);
     actualizarPeatones(dt);
-    actualizarFlechas();
+    actualizarFlechas(ahora);
     actualizarMalla();
     actualizarCamara(dt);
     actualizarHUD(ahora);
-  }
-  if (matFlechas) {   // las flechas laten un poco para llamar la atención
-    const pulso = 0.5 + 0.5 * Math.sin(ahora * 3.2);
-    matFlechas.color.setRGB(1, 0.8 + 0.1 * pulso, 0.22 + 0.16 * pulso);
   }
   renderer.render(scene, camara);
 }
