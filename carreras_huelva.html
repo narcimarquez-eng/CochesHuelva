@@ -82,7 +82,7 @@
   <button id="btnNueva" disabled>Nueva carrera</button>
   <p style="font-size:13px;opacity:.7">Teclas: flechas o WASD. M abre el menú.</p>
   <p style="font-size:12px;opacity:.6">Datos: © colaboradores de OpenStreetMap (ODbL) · Dirección General del Catastro</p>
-  <p style="font-size:12px;opacity:.6">Modelos: CarConcept © Eric Chadwick (Darmstadt Graphics Group), CC BY 4.0 · ToyCar © Guido Odendahl y Eric Chadwick, CC0</p>
+  <p style="font-size:12px;opacity:.6">Modelos: CarConcept © Eric Chadwick (Darmstadt Graphics Group), CC BY 4.0 · ToyCar © Guido Odendahl y Eric Chadwick, CC0 · Galería © Kenney (kenney.nl), CC0</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -1634,7 +1634,16 @@ function construirCoche(color) {
 }
 // --- coches: el básico (caja roja) y modelos GLB, que se descargan al elegirlos ---
 // Galería de coches (Kenney y Quaternius, CC0): modelos/coches/catalogo.json con los mismos datos
-const GALERIA = [];
+const GALERIA = [
+  { id: 'sedan', nombre: 'Berlina', archivo: 'modelos/coches/sedan.glb' },
+  { id: 'hatch', nombre: 'Hatchback', archivo: 'modelos/coches/hatch.glb' },
+  { id: 'deportivo', nombre: 'Deportivo', archivo: 'modelos/coches/deportivo.glb' },
+  { id: 'suv', nombre: 'SUV', archivo: 'modelos/coches/suv.glb' },
+  { id: 'suv-lujo', nombre: 'SUV de lujo', archivo: 'modelos/coches/suv-lujo.glb' },
+  { id: 'taxi', nombre: 'Taxi', archivo: 'modelos/coches/taxi.glb' },
+  { id: 'policia', nombre: 'Patrulla', archivo: 'modelos/coches/policia.glb' },
+  { id: 'furgoneta', nombre: 'Furgoneta', archivo: 'modelos/coches/furgoneta.glb' },
+];
 const CATALOGO_COCHES = Object.fromEntries([
   ['basico', { nombre: 'Coche básico' }],
   ...GALERIA.map(g => [g.id, { nombre: g.nombre, archivo: g.archivo, giro: 0 }]),
@@ -1956,7 +1965,7 @@ function mallaFlechas(flechas) {
     g.computeVertexNormals();
     return g;
   };
-  matFlechas = new THREE.MeshBasicMaterial({ color: 0xffc83d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  matFlechas = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });   // el color lo pone cada flecha
   const matContorno = new THREE.MeshBasicMaterial({ color: 0x1b2026, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   const n = flechas.length;
   const amarillas = new THREE.InstancedMesh(forma(1.5, 2.1), matFlechas, n);
@@ -1995,8 +2004,8 @@ function actualizarFlechas(ahora) {
     const i = (i0 + k) % n;
     amarillas.instanceMatrix.array.set(mA.subarray(i * 16, i * 16 + 16), k * 16);
     contorno.instanceMatrix.array.set(mC.subarray(i * 16, i * 16 + 16), k * 16);
-    const b = 0.45 + 0.55 * Math.max(0, Math.sin(ahora * 7 - k * 0.8));
-    brillo.setXYZ(k, b, b, b);
+    const s = 0.5 + 0.5 * Math.sin(ahora * 7 - k * 0.8);   // entre ámbar y amarillo claro
+    brillo.setXYZ(k, 1, 0.72 + 0.28 * s, 0.2 + 0.45 * s);
   }
   amarillas.count = W; contorno.count = W;
   amarillas.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true; brillo.needsUpdate = true;

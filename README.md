@@ -23,12 +23,16 @@ Activa GitHub Pages en Settings → Pages, eligiendo la rama del juego y la carp
 
 ## Coches
 
-En la pantalla de inicio se elige el coche: el básico (una caja roja), CarConcept o ToyCar. Los dos modelos están optimizados y vienen de los modelos de ejemplo de Khronos glTF:
+En la pantalla de inicio se elige el coche: el básico (una caja roja), uno de la galería, CarConcept o ToyCar.
+
+La galería son ocho turismos de Kenney Car Kit, © Kenney (kenney.nl), licencia CC0 1.0: Berlina, Hatchback, Deportivo, SUV, SUV de lujo, Taxi, Patrulla y Furgoneta. Están en `modelos/coches/`, con sus datos en `catalogo.json`. Miden 4,2 m de largo y el frontal mira a +Z, que es el sentido en el que avanza el juego.
+
+CarConcept y ToyCar vienen de los modelos de ejemplo de Khronos glTF y están optimizados:
 
 - CarConcept, © Eric Chadwick (Darmstadt Graphics Group), licencia CC BY 4.0.
 - ToyCar, © Guido Odendahl y Eric Chadwick, licencia CC0.
 
-En el tráfico de la carrera circulan versiones ligeras de estos dos coches (`modelos/trafico-*.glb`, con un 10 % de los triángulos), hechas con Blender a partir de los originales.
+En el tráfico de la carrera circulan los coches de la galería y versiones ligeras de CarConcept y ToyCar (`modelos/trafico-*.glb`, con un 10 % de los triángulos), hechas con Blender a partir de los originales.
 
 `vendor/GLTFLoader.js` es el cargador de GLTF de three.js r128 (licencia MIT).
 
