@@ -1133,7 +1133,7 @@ let carrera = null;              // { cps, meshes, siguiente, vueltas, tVuelta, 
 let rutaLinea = null;           // flechas de la ruta (grupo de mallas)
 let modoCamara = 0;             // 0 detrás del coche, 1 cerca del coche, 2 dentro del coche
 let trafico = [], peatones = []; // coches de tráfico y peatones de la zona (se crean con cada carrera)
-let mallaTrafico = [], mallaPeatones = null, matFlechas = null, flechasDatos = null;
+let mallaTrafico = [], mallaPeatones = [], matFlechas = null, flechasDatos = null;
 let estado = 'menu';             // menu | cuenta | corriendo | fin
 let cuenta = 0, tInicio = 0;
 let avisoTexto = '', avisoHasta = 0;
@@ -1420,7 +1420,58 @@ function mallaAguas(aguas) {
 }
 
 // Árboles: troncos y copas en instancias (una sola llamada de dibujo por parte)
+// --- árboles: modelos de Kenney (modelos/arboles/, CC0) por bloques de 150 m; solo se dibujan los bloques cercanos al coche ---
+const ARCHIVOS_ARBOLES = [];   // se rellena con los archivos de modelos/arboles/catalogo.json
+const BLOQUE_ARBOLES = 150;    // m
+const DIST_ARBOLES = 260;      // m: más allá de esta distancia no se dibujan
+let bloquesArboles = [];       // { malla, cx, cz }
+const geometriasModelo = {};   // archivo → promesa de { geo, materiales }, se carga una sola vez
+function geometriaModelo(archivo) {
+  if (!geometriasModelo[archivo]) geometriasModelo[archivo] = new Promise((res, rej) =>
+    new THREE.GLTFLoader().load(archivo, g => res(geometriaUnida(g.scene)), undefined, rej));
+  return geometriasModelo[archivo];
+}
+async function mallaArbolesModelos(arboles) {
+  const modelos = await Promise.all(ARCHIVOS_ARBOLES.map(geometriaModelo));
+  const rng = mulberry32(99), m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), c = new THREE.Color();
+  const bloques = new Map();
+  for (const [x, z] of arboles) {
+    const bx = Math.floor(x / BLOQUE_ARBOLES), bz = Math.floor(z / BLOQUE_ARBOLES), k = Math.floor(rng() * modelos.length);
+    const clave = bx + ',' + bz + ',' + k;
+    if (!bloques.has(clave)) bloques.set(clave, { bx, bz, k, lista: [] });
+    bloques.get(clave).lista.push([x, z, rng(), rng()]);
+  }
+  const grupo = new THREE.Group(), mallas = [];
+  for (const { bx, bz, k, lista } of bloques.values()) {
+    const im = new THREE.InstancedMesh(modelos[k].geo, modelos[k].materiales, lista.length);
+    im.frustumCulled = false;
+    lista.forEach(([x, z, giro, tamano], i) => {
+      const esc = 0.85 + 0.3 * tamano;
+      m.compose(new THREE.Vector3(x, 0, z), q.setFromAxisAngle(eje, giro * Math.PI * 2), uno.set(esc, esc, esc));
+      im.setMatrixAt(i, m);
+      im.setColorAt(i, c.setRGB(0.8 + 0.2 * tamano, 0.8 + 0.2 * tamano, 0.8 + 0.2 * tamano));   // ligera variación de tono
+    });
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    grupo.add(im);
+    mallas.push({ malla: im, cx: (bx + 0.5) * BLOQUE_ARBOLES, cz: (bz + 0.5) * BLOQUE_ARBOLES });
+  }
+  bloquesArboles = mallas;
+  return grupo;
+}
 function mallaArboles(arboles) {
+  const grupo = new THREE.Group();
+  if (!arboles.length) return grupo;
+  if (!ARCHIVOS_ARBOLES.length) return mallaArbolesProcedural(arboles);
+  bloquesArboles = [];
+  mallaArbolesModelos(arboles).then(g => grupo.add(g), () => grupo.add(mallaArbolesProcedural(arboles)));   // si no cargan, árboles sencillos
+  return grupo;
+}
+// Solo se dibujan los bloques de árboles cercanos al coche
+function actualizarArboles() {
+  for (const b of bloquesArboles) b.malla.visible = Math.hypot(b.cx - coche.x, b.cz - coche.z) < DIST_ARBOLES + BLOQUE_ARBOLES;
+}
+function mallaArbolesProcedural(arboles) {
   const n = arboles.length, grupo = new THREE.Group();
   if (!n) return grupo;
   const troncos = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.28, 2.6, 4, 1, true).translate(0, 1.3, 0), new THREE.MeshLambertMaterial({ color: 0x6b4a2b }), n);
@@ -1837,8 +1888,8 @@ $('btnCamara').addEventListener('click', cambiarCamara);
 
 // --- tráfico, peatones y flechas: decoración que se mueve; los coches de tráfico frenan al jugador como un muro ---
 const N_TRAFICO = 40, N_PEATONES = 110, RADIO_TRAFICO = 320;
+const ARCHIVOS_PEATONES = [];   // se rellena con los archivos de modelos/peatones/catalogo.json
 const COLORES_COCHE = [0xe63946, 0x1d3557, 0xf1faee, 0x457b9d, 0xf4a261, 0x2a9d8f, 0x6d6875, 0xffb703, 0x8d99ae];
-const COLORES_ROPA = [0x264653, 0x2a9d8f, 0xe76f51, 0xf4a261, 0x3d405b, 0x81b29a, 0xf2cc8f, 0x9d4edd];
 let rngTrafico = mulberry32(1);
 // Tramos del grafo que empiezan a menos de R metros del coche y cumplen la condición
 function segmentosCerca(R, cumple) {
@@ -1906,17 +1957,11 @@ function cargarModelosTrafico() {
   return modelosTrafico;
 }
 // Malla de peatones: cuerpo de color y cabeza, en instancias
-function mallaPeatonesInst(n) {
-  const cuerpo = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.24, 1.05, 6).translate(0, 0.62, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }), n);
-  const cabeza = new THREE.InstancedMesh(new THREE.SphereGeometry(0.15, 6, 4).translate(0, 1.3, 0), new THREE.MeshLambertMaterial({ color: 0xe0b48f }), n);
-  cuerpo.frustumCulled = false; cabeza.frustumCulled = false;
-  return { cuerpo, cabeza };
-}
 function limpiarTrafico() {
   for (const im of mallaTrafico) scene.remove(im);
   mallaTrafico = [];
-  if (mallaPeatones) for (const h of Object.values(mallaPeatones)) { scene.remove(h); h.geometry.dispose(); h.material.dispose(); }
-  mallaPeatones = null;
+  for (const im of mallaPeatones) scene.remove(im);
+  mallaPeatones = [];
   trafico = []; peatones = [];
 }
 async function iniciarTrafico() {
@@ -1941,9 +1986,25 @@ async function iniciarTrafico() {
   peatones = Array.from({ length: N_PEATONES }, () => ({}));
   peatones.forEach(p => colocarPeaton(p));
   peatones = peatones.filter(p => p.seg !== undefined);
-  mallaPeatones = mallaPeatonesInst(peatones.length);
-  peatones.forEach((p, i) => mallaPeatones.cuerpo.setColorAt(i, new THREE.Color(COLORES_ROPA[Math.floor(p.color * COLORES_ROPA.length)])));
-  scene.add(mallaPeatones.cuerpo, mallaPeatones.cabeza);
+  let modelosPeatones = null;
+  try { modelosPeatones = await Promise.all(ARCHIVOS_PEATONES.map(geometriaModelo)); } catch (err) { modelosPeatones = null; }
+  if (modelosPeatones && modelosPeatones.length) {
+    const cuenta = modelosPeatones.map(() => 0);
+    peatones.forEach(p => { p.modelo = Math.floor(rngTrafico() * modelosPeatones.length); p.idx = cuenta[p.modelo]++; });
+    mallaPeatones = modelosPeatones.map((m, k) => {
+      const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k]));
+      im.frustumCulled = false;
+      scene.add(im);
+      return im;
+    });
+  } else {
+    // sin modelos de peatones: un cilindro de color por peatón
+    const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.24, 1.7, 6).translate(0, 0.85, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, peatones.length));
+    im.frustumCulled = false;
+    peatones.forEach((p, i) => { p.modelo = 0; p.idx = i; im.setColorAt(i, new THREE.Color().setHSL(p.color, 0.5, 0.45)); });
+    mallaPeatones = [im];
+    scene.add(im);
+  }
 }
 // ¿Choca el coche (radio R) con un coche de tráfico? Cada uno ocupa unos 2 m de radio
 function chocaTrafico(x, z, R) {
@@ -1964,7 +2025,7 @@ function actualizarTrafico(dt) {
   mallaTrafico.forEach(im => { im.instanceMatrix.needsUpdate = true; });
 }
 function actualizarPeatones(dt) {
-  if (!mallaPeatones) return;
+  if (!mallaPeatones.length) return;
   const ahora = performance.now() / 1000, m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
   peatones.forEach((p, i) => {
     avanzaPeaton(zona.G, p, dt);
@@ -1972,9 +2033,10 @@ function actualizarPeatones(dt) {
     if (zona.enCalzadaAjena(pos.x, pos.z, p.seg) || Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = posicionPeaton(zona.G, p); }   // si su acera se corta en un cruce, busca otra
     const bote = Math.abs(Math.sin(ahora * 6 + p.color * 6.28)) * 0.05;   // el paso se nota en el vaivén
     m.compose(new THREE.Vector3(pos.x, bote, pos.z), q.setFromAxisAngle(eje, pos.h), uno);
-    mallaPeatones.cuerpo.setMatrixAt(i, m); mallaPeatones.cabeza.setMatrixAt(i, m);
+    const im = mallaPeatones[p.modelo];
+    if (im) im.setMatrixAt(p.idx, m);
   });
-  mallaPeatones.cuerpo.instanceMatrix.needsUpdate = true; mallaPeatones.cabeza.instanceMatrix.needsUpdate = true;
+  mallaPeatones.forEach(im => { im.instanceMatrix.needsUpdate = true; });
 }
 // Flechas pintadas en la calzada: cada una apunta por donde hay que seguir. Un contorno oscuro debajo las separa del asfalto
 function mallaFlechas(flechas) {
@@ -2260,6 +2322,7 @@ function bucle() {
   if (coche) {
     actualizarTrafico(dt);
     actualizarPeatones(dt);
+    actualizarArboles();
     actualizarFlechas(ahora);
     actualizarMalla();
     actualizarCamara(dt);
