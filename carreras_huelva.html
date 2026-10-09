@@ -1184,43 +1184,19 @@ const COLOR_CALZADA = t => {
 };
 // --- texturas de calzada y aceras, dibujadas aquí (sin imágenes externas) ---
 const TU_ASFALTO = 6, TU_ADOQUIN = 2;   // metros que ocupa una repetición de cada textura
-let texturaCalzada_ = null, texturaAdoquin_ = null;
-function lienzoTextura(tam, pintar) {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = tam;
-  pintar(cv.getContext('2d'), tam);
-  const t = new THREE.CanvasTexture(cv);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 4;
-  return t;
+// Texturas de calzada y acera: imágenes de texturas/ (generadas con Blender). Mientras cargan, se ven los colores de vértice
+const texturasCalle = {};
+function texturaImagen(archivo) {
+  if (!texturasCalle[archivo]) {
+    const t = new THREE.TextureLoader().load(archivo);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 4;
+    texturasCalle[archivo] = t;
+  }
+  return texturasCalle[archivo];
 }
-function texturaAsfalto() {   // asfalto con grano
-  return texturaCalzada_ || (texturaCalzada_ = lienzoTextura(256, (g, n) => {
-    g.fillStyle = '#c4c4c4'; g.fillRect(0, 0, n, n);
-    const r = mulberry32(3);
-    for (let i = 0; i < 9000; i++) {
-      const v = Math.floor(r() * 255);
-      g.fillStyle = `rgba(${v},${v},${v},${(0.08 + r() * 0.2).toFixed(2)})`;
-      g.fillRect(Math.floor(r() * n), Math.floor(r() * n), 1 + (r() < 0.25 ? 1 : 0), 1);
-    }
-  }));
-}
-function texturaAdoquin() {   // losetas de 0,5 m con juntas
-  return texturaAdoquin_ || (texturaAdoquin_ = lienzoTextura(256, (g, n) => {
-    g.fillStyle = '#7f7a70'; g.fillRect(0, 0, n, n);
-    const r = mulberry32(11), c = n / 4;
-    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
-      const v = 196 + Math.floor(r() * 36);
-      g.fillStyle = `rgb(${v},${v - 4},${v - 10})`;
-      g.fillRect(i * c + 2, j * c + 2, c - 4, c - 4);
-      for (let k = 0; k < 40; k++) {
-        const w = Math.floor(r() * 255);
-        g.fillStyle = `rgba(${w},${w},${w},0.12)`;
-        g.fillRect(i * c + 2 + Math.floor(r() * (c - 4)), j * c + 2 + Math.floor(r() * (c - 4)), 1, 1);
-      }
-    }
-  }));
-}
+const texturaAsfalto = () => texturaImagen('texturas/asfalto.jpg');
+const texturaAdoquin = () => texturaImagen('texturas/adoquin.jpg');
 
 // Malla que se va llenando por trozos: posición, color, normal y coordenadas de textura por vértice
 function nuevaMalla() {
