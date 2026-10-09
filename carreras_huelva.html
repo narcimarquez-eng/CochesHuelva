@@ -978,7 +978,8 @@ let carrera = null;              // { cps, meshes, siguiente, vueltas, tVuelta, 
 let rutaLinea = null;           // flechas de la ruta (grupo de mallas)
 let modoCamara = 0;             // 0 detrás del coche, 1 cerca del coche, 2 dentro del coche
 let trafico = [], peatones = []; // coches de tráfico y peatones de la zona (se crean con cada carrera)
-let mallaTrafico = null, mallaPeatones = null, matFlechas = null;
+let mallaTrafico = null, mallaPeatones = null, matFlechas = null, flechasDatos = null;
+const VENTANA_FLECHAS = 28;   // cuántas flechas se ven a la vez, desde la más cercana al coche
 let estado = 'menu';             // menu | cuenta | corriendo | fin
 let cuenta = 0, tInicio = 0;
 let avisoTexto = '', avisoHasta = 0;
@@ -1789,15 +1790,34 @@ function mallaFlechas(flechas) {
   const amarillas = new THREE.InstancedMesh(forma(1.1, 1.5), matFlechas, n);
   const contorno = new THREE.InstancedMesh(forma(1.45, 1.9), matContorno, n);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  const mA = new Float32Array(16 * n), mC = new Float32Array(16 * n);   // todas las matrices; actualizarFlechas elige la ventana
   flechas.forEach((f, i) => {
     const r = q.setFromAxisAngle(eje, f.h);
-    contorno.setMatrixAt(i, m.compose(new THREE.Vector3(f.x, 0.09, f.z), r, uno));
-    amarillas.setMatrixAt(i, m.compose(new THREE.Vector3(f.x, 0.095, f.z), r, uno));
+    m.compose(new THREE.Vector3(f.x, 0.09, f.z), r, uno).toArray(mC, i * 16);
+    m.compose(new THREE.Vector3(f.x, 0.095, f.z), r, uno).toArray(mA, i * 16);
   });
-  amarillas.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true;
+  flechasDatos = { n, mA, mC, pos: flechas, amarillas, contorno };
   amarillas.frustumCulled = false; contorno.frustumCulled = false;
   grupo.add(contorno, amarillas);
   return grupo;
+}
+// Muestra solo una ventana de flechas: la más cercana al coche (con una detrás) y las que vienen después
+function actualizarFlechas() {
+  if (!flechasDatos) return;
+  const { n, mA, mC, pos, amarillas, contorno } = flechasDatos;
+  let mejor = 0, md = Infinity;
+  for (let i = 0; i < n; i++) {
+    const d = (pos[i].x - coche.x) ** 2 + (pos[i].z - coche.z) ** 2;
+    if (d < md) { md = d; mejor = i; }
+  }
+  const W = Math.min(VENTANA_FLECHAS, n);
+  for (let k = 0; k < W; k++) {
+    const i = (mejor + k - 1 + n) % n;
+    amarillas.instanceMatrix.array.set(mA.subarray(i * 16, i * 16 + 16), k * 16);
+    contorno.instanceMatrix.array.set(mC.subarray(i * 16, i * 16 + 16), k * 16);
+  }
+  amarillas.count = W; contorno.count = W;
+  amarillas.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true;
 }
 
 // --- carrera ---
@@ -1805,7 +1825,7 @@ function limpiarCarrera() {
   if (carrera) carrera.meshes.forEach(m => { scene.remove(m); m.material.dispose(); });
   if (rutaLinea) { scene.remove(rutaLinea); rutaLinea.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
   limpiarTrafico();
-  carrera = null; rutaLinea = null; matFlechas = null;
+  carrera = null; rutaLinea = null; matFlechas = null; flechasDatos = null;
 }
 function pintarCheckpoints() {
   carrera.meshes.forEach((m, i) => {
@@ -1933,7 +1953,9 @@ function actualizarCamara(dt) {
     return;
   }
   const cerca = modoCamara === 1;
-  const atras = cerca ? 7 : 13, alto = cerca ? 2.6 : 5.5;
+  let atras = cerca ? 7 : 13;
+  while (atras > 2 && choca(zona.edif, zona.rejilla, coche.x - fx * atras, coche.z - fz * atras, 0.8)) atras -= 1;   // no dentro de una casa
+  const alto = cerca ? 2.6 : 5.5;
   const objetivo = new THREE.Vector3(coche.x - fx * atras, alto + Math.min(Math.abs(coche.v) / 15, 2) + salto, coche.z - fz * atras);
   camara.position.lerp(objetivo, 1 - Math.exp(-(cerca ? 10 : 6) * dt));
   camara.lookAt(coche.x + fx * (cerca ? 4 : 6), cerca ? 1.1 : 1.2, coche.z + fz * (cerca ? 4 : 6));
@@ -1999,6 +2021,7 @@ function bucle() {
   if (coche) {
     actualizarTrafico(dt);
     actualizarPeatones(dt);
+    actualizarFlechas();
     actualizarMalla();
     actualizarCamara(dt);
     actualizarHUD(ahora);
