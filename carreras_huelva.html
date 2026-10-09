@@ -24,6 +24,9 @@
   button{font:inherit;font-size:17px;padding:12px 20px;border-radius:10px;border:0;background:#f5b041;color:#1b1b1b;font-weight:600;cursor:pointer}
   button:disabled{opacity:.45}
   #btnMenu{position:fixed;right:12px;top:12px;padding:6px 12px;font-size:14px;background:rgba(255,255,255,.8)}
+  #btnCamara{position:fixed;right:12px;top:50px;padding:6px 12px;font-size:14px;background:rgba(255,255,255,.8)}
+  #salpicadero{display:none;position:fixed;left:0;right:0;bottom:0;height:30%;pointer-events:none;border-radius:50% 50% 0 0/16% 16% 0 0;background:linear-gradient(180deg,rgba(18,20,24,0) 0%,rgba(30,33,39,.96) 22%,#15171b 100%);box-shadow:inset 0 12px 20px rgba(0,0,0,.55)}
+  body.dentro #salpicadero{display:block}
   #controles{position:fixed;left:0;right:0;bottom:14px;display:flex;justify-content:space-between;align-items:flex-end;padding:0 14px;pointer-events:none}
   #controles .grupo{display:flex;gap:12px;pointer-events:auto}
   #controles button{width:84px;height:84px;font-size:30px;padding:0;border-radius:50%;background:rgba(255,255,255,.35);color:#fff;touch-action:none}
@@ -44,7 +47,9 @@
 </div>
 <div id="carrera"></div>
 <div id="aviso"></div>
+<div id="salpicadero"></div>
 <button id="btnMenu">Menú</button>
+<button id="btnCamara" title="Cambiar de cámara (C)">Cámara</button>
 <div id="controles">
   <div id="volante" title="Arrastra el volante para girar">
     <svg viewBox="0 0 100 100" id="svgVolante">
@@ -782,11 +787,11 @@ function generarMarcas(tramos, rotondas, cruces) {
     const b = chocaPuntos(rejCruces, p[p.length - 1][0], p[p.length - 1][1], 0.5) ? L - 12 : L;
     if (b - a < 4) continue;
     if (t.ancho >= 6.4 && !t.unSentido && !AUTOVIAS.has(t.tipo)) {
-      for (let d = a; d + 3 <= b; d += 9) marcas.push({ pts: subPolilinea(p, cum, d, d + 3), s0: -0.06, s1: 0.06 });
+      for (let d = a; d + 3 <= b; d += 9) marcas.push({ pts: subPolilinea(p, cum, d, d + 3), s0: -0.08, s1: 0.08 });
     }
     if (['primary', 'secondary'].includes(tipoBase(t.tipo))) {
       const o = t.ancho / 2 - 0.35, tr = subPolilinea(p, cum, a, b);
-      marcas.push({ pts: tr, s0: o - 0.06, s1: o + 0.06 }, { pts: tr, s0: -o - 0.06, s1: -o + 0.06 });
+      marcas.push({ pts: tr, s0: o - 0.08, s1: o + 0.08 }, { pts: tr, s0: -o - 0.08, s1: -o + 0.08 });
     }
   }
   return marcas;
@@ -885,6 +890,77 @@ function calcularCaja(tramos, edif) {
   for (const e of edif) mirar(e.pts);
   return [x0 - 60, z0 - 60, x1 + 60, z1 + 60];
 }
+// --- tráfico, peatones y flechas de la ruta: se mueven por el grafo de calles y por las aceras ---
+// Cada tramo guarda su trazado al revés y las distancias acumuladas (se calculan una vez)
+function prepararTramo(t) {
+  if (!t.cum) { t.cum = acumulados(t.pts); t.ptsRev = t.pts.slice().reverse(); t.cumRev = acumulados(t.ptsRev); }
+  return t;
+}
+// Tramos del grupo principal de calles que empiezan a menos de R metros de (x, z)
+function tramosCerca(G, x, z, R) {
+  return G.tramos.filter(t => G.nodos[t.a].comp && Math.hypot(t.pts[0][0] - x, t.pts[0][1] - z) < R);
+}
+// Coche de tráfico sobre el tramo seg, en sentido fwd y a s metros de su inicio de sentido
+function nuevoCocheTrafico(G, rng, seg, fwd, s) {
+  const t = prepararTramo(G.tramos[seg]);
+  return { seg, fwd, s, origen: fwd ? t.a : t.b, k: 0.75 + rng() * 0.25, color: rng() };
+}
+// Siguiente tramo al llegar a un nodo: uno cualquiera, sin volver por donde se venía (si no hay otro, se da la vuelta)
+function siguienteArista(G, nodo, desde, rng) {
+  const adj = G.nodos[nodo].adj;
+  const opciones = adj.filter(e => e.to !== desde && G.nodos[e.to].comp);
+  const lista = opciones.length ? opciones : adj;
+  return lista.length ? lista[Math.floor(rng() * lista.length)] : null;
+}
+// Avanza el coche dt segundos; false si se ha quedado en un callejón sin salida (hay que reciclarlo)
+function avanzaTrafico(G, c, dt, rng) {
+  let t = prepararTramo(G.tramos[c.seg]);
+  c.s += (t.velocidad / 3.6) * c.k * dt;
+  let vueltas = 0;
+  while (c.s >= t.len && vueltas++ < 8) {
+    const llegada = c.fwd ? t.b : t.a;
+    const e = siguienteArista(G, llegada, c.origen, rng);
+    if (!e) return false;
+    c.s -= t.len;
+    c.origen = llegada;
+    c.seg = e.seg; c.fwd = e.fwd;
+    t = prepararTramo(G.tramos[c.seg]);
+  }
+  return true;
+}
+// Posición y rumbo del coche: circula por la derecha, a un cuarto del ancho de la calle
+function posicionTrafico(G, c) {
+  const t = prepararTramo(G.tramos[c.seg]);
+  const e = enPolilinea(c.fwd ? t.pts : t.ptsRev, c.fwd ? t.cum : t.cumRev, c.s);
+  const carril = t.ancho / 4;
+  return { x: e.x - e.tz * carril, z: e.z + e.tx * carril, h: Math.atan2(e.tx, e.tz) };
+}
+// Peatón sobre una acera del tramo seg (lado -1 o 1): camina de un extremo al otro y da la vuelta
+function nuevoPeaton(G, rng, seg) {
+  const t = prepararTramo(G.tramos[seg]);
+  return { seg, fwd: rng() < 0.5, s: rng() * t.len, lado: rng() < 0.5 ? -1 : 1, v: 1.0 + rng() * 0.5, color: rng() };
+}
+function avanzaPeaton(G, p, dt) {
+  const t = G.tramos[p.seg];
+  p.s += p.v * dt;
+  if (p.s >= t.len) { p.s -= t.len; p.fwd = !p.fwd; }
+}
+// Posición y rumbo del peatón, en el centro de su acera
+function posicionPeaton(G, p) {
+  const t = prepararTramo(G.tramos[p.seg]);
+  const e = enPolilinea(p.fwd ? t.pts : t.ptsRev, p.fwd ? t.cum : t.cumRev, p.s);
+  const off = p.lado * (t.ancho / 2 + t.acera / 2);
+  return { x: e.x - e.tz * off, z: e.z + e.tx * off, h: Math.atan2(e.tx, e.tz) };
+}
+// Flechas de la ruta: una cada `paso` metros a lo largo del trazado, con el rumbo de la calle
+function flechasRuta(ruta, paso = 16) {
+  const cum = acumulados(ruta), L = cum[cum.length - 1], out = [];
+  for (let d = paso / 2; d < L - 6; d += paso) {
+    const e = enPolilinea(ruta, cum, d);
+    out.push({ x: e.x, z: e.z, h: Math.atan2(e.tx, e.tz) });
+  }
+  return out;
+}
 /*CORE-END*/
 
 /*RENDER-START*/
@@ -899,7 +975,10 @@ let mallaZona = null;            // grupo con suelo, calles, casas y mundo
 let cocheMesh = null;
 let coche = null;                // { x, z, h, v, dir, acera, golpe }
 let carrera = null;              // { cps, meshes, siguiente, vueltas, tVuelta, tiempos, longitud }
-let rutaLinea = null;
+let rutaLinea = null;           // flechas de la ruta (grupo de mallas)
+let modoCamara = 0;             // 0 detrás del coche, 1 cerca del coche, 2 dentro del coche
+let trafico = [], peatones = []; // coches de tráfico y peatones de la zona (se crean con cada carrera)
+let mallaTrafico = null, mallaPeatones = null, matFlechas = null;
 let estado = 'menu';             // menu | cuenta | corriendo | fin
 let cuenta = 0, tInicio = 0;
 let avisoTexto = '', avisoHasta = 0;
@@ -1555,6 +1634,7 @@ function formato(s) {
 // --- controles: teclado y volante (arrástralo para girar; vuelve solo al centro) ---
 addEventListener('keydown', e => {
   if (e.code === 'KeyM') { mostrarMenu(estado === 'menu' ? $('estado').textContent : 'Menú'); return; }
+  if (e.code === 'KeyC' && !e.repeat) { cambiarCamara(); return; }
   const c = TECLAS[e.code];
   if (c) { controles[c] = true; e.preventDefault(); }
 });
@@ -1591,12 +1671,141 @@ function direccion() {
   return teclas;
 }
 $('btnMenu').addEventListener('click', () => mostrarMenu('Menú'));
+$('btnCamara').addEventListener('click', cambiarCamara);
+
+// --- tráfico, peatones y flechas: decoración que se mueve; los coches de tráfico frenan al jugador como un muro ---
+const N_TRAFICO = 40, N_PEATONES = 110, RADIO_TRAFICO = 320;
+const COLORES_COCHE = [0xe63946, 0x1d3557, 0xf1faee, 0x457b9d, 0xf4a261, 0x2a9d8f, 0x6d6875, 0xffb703, 0x8d99ae];
+const COLORES_ROPA = [0x264653, 0x2a9d8f, 0xe76f51, 0xf4a261, 0x3d405b, 0x81b29a, 0xf2cc8f, 0x9d4edd];
+let rngTrafico = mulberry32(1);
+// Tramos del grafo que empiezan a menos de R metros del coche y cumplen la condición
+function segmentosCerca(R, cumple) {
+  const out = [];
+  zona.G.tramos.forEach((t, i) => {
+    if (zona.G.nodos[t.a].comp && Math.hypot(t.pts[0][0] - coche.x, t.pts[0][1] - coche.z) < R && cumple(t)) out.push(i);
+  });
+  return out;
+}
+// Un coche de tráfico nuevo en una calle cercana, a más de 60 m del jugador
+function colocarCoche(c) {
+  const candidatos = segmentosCerca(RADIO_TRAFICO, t => t.ancho >= 5);
+  if (!candidatos.length) return;
+  for (let k = 0; k < 20; k++) {
+    const seg = candidatos[Math.floor(rngTrafico() * candidatos.length)];
+    const nuevo = nuevoCocheTrafico(zona.G, rngTrafico, seg, rngTrafico() < 0.5, rngTrafico() * zona.G.tramos[seg].len);
+    const p = posicionTrafico(zona.G, nuevo);
+    if (Math.hypot(p.x - coche.x, p.z - coche.z) > 60) { Object.assign(c, nuevo); return; }
+  }
+  Object.assign(c, nuevoCocheTrafico(zona.G, rngTrafico, candidatos[0], true, 0));
+}
+// Un peatón nuevo en una acera cercana
+function colocarPeaton(p) {
+  const candidatos = segmentosCerca(260, t => t.acera > 0 && t.ancho >= 4);
+  if (!candidatos.length) return;
+  Object.assign(p, nuevoPeaton(zona.G, rngTrafico, candidatos[Math.floor(rngTrafico() * candidatos.length)]));
+}
+// Malla de coches: carrocería de color por coche y techo oscuro, en instancias
+function mallaCochesTrafico(n) {
+  const cuerpo = new THREE.InstancedMesh(new THREE.BoxGeometry(1.9, 0.75, 4.2).translate(0, 0.6, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }), n);
+  const techo = new THREE.InstancedMesh(new THREE.BoxGeometry(1.6, 0.5, 2.0).translate(0, 1.2, -0.2), new THREE.MeshLambertMaterial({ color: 0x20262e }), n);
+  cuerpo.frustumCulled = false; techo.frustumCulled = false;
+  return { cuerpo, techo };
+}
+// Malla de peatones: cuerpo de color y cabeza, en instancias
+function mallaPeatonesInst(n) {
+  const cuerpo = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.24, 1.05, 6).translate(0, 0.62, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }), n);
+  const cabeza = new THREE.InstancedMesh(new THREE.SphereGeometry(0.15, 6, 4).translate(0, 1.3, 0), new THREE.MeshLambertMaterial({ color: 0xe0b48f }), n);
+  cuerpo.frustumCulled = false; cabeza.frustumCulled = false;
+  return { cuerpo, cabeza };
+}
+function limpiarTrafico() {
+  for (const m of [mallaTrafico, mallaPeatones]) if (m) for (const h of Object.values(m)) { scene.remove(h); h.geometry.dispose(); h.material.dispose(); }
+  mallaTrafico = mallaPeatones = null;
+  trafico = []; peatones = [];
+}
+function iniciarTrafico() {
+  limpiarTrafico();
+  rngTrafico = mulberry32((Date.now() & 0xffffff) || 3);
+  trafico = Array.from({ length: N_TRAFICO }, () => ({}));
+  trafico.forEach(c => colocarCoche(c));
+  trafico = trafico.filter(c => c.seg !== undefined);   // los que no han encontrado calle no se dibujan
+  mallaTrafico = mallaCochesTrafico(trafico.length);
+  trafico.forEach((c, i) => mallaTrafico.cuerpo.setColorAt(i, new THREE.Color(COLORES_COCHE[Math.floor(rngTrafico() * COLORES_COCHE.length)])));
+  scene.add(mallaTrafico.cuerpo, mallaTrafico.techo);
+  peatones = Array.from({ length: N_PEATONES }, () => ({}));
+  peatones.forEach(p => colocarPeaton(p));
+  peatones = peatones.filter(p => p.seg !== undefined);
+  mallaPeatones = mallaPeatonesInst(peatones.length);
+  peatones.forEach((p, i) => mallaPeatones.cuerpo.setColorAt(i, new THREE.Color(COLORES_ROPA[Math.floor(p.color * COLORES_ROPA.length)])));
+  scene.add(mallaPeatones.cuerpo, mallaPeatones.cabeza);
+}
+// ¿Choca el coche (radio R) con un coche de tráfico? Cada uno ocupa unos 2 m de radio
+function chocaTrafico(x, z, R) {
+  for (const c of trafico) if ((c.x - x) ** 2 + (c.z - z) ** 2 < (R + 1.9) ** 2) return true;
+  return false;
+}
+function actualizarTrafico(dt) {
+  if (!mallaTrafico) return;
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  trafico.forEach((c, i) => {
+    if (!avanzaTrafico(zona.G, c, dt, rngTrafico)) colocarCoche(c);   // callejón sin salida: se recicla
+    let p = posicionTrafico(zona.G, c);
+    if (Math.hypot(p.x - coche.x, p.z - coche.z) > 420) { colocarCoche(c); p = posicionTrafico(zona.G, c); }
+    c.x = p.x; c.z = p.z;
+    m.compose(new THREE.Vector3(p.x, 0, p.z), q.setFromAxisAngle(eje, p.h), uno);
+    mallaTrafico.cuerpo.setMatrixAt(i, m); mallaTrafico.techo.setMatrixAt(i, m);
+  });
+  mallaTrafico.cuerpo.instanceMatrix.needsUpdate = true; mallaTrafico.techo.instanceMatrix.needsUpdate = true;
+}
+function actualizarPeatones(dt) {
+  if (!mallaPeatones) return;
+  const ahora = performance.now() / 1000, m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  peatones.forEach((p, i) => {
+    avanzaPeaton(zona.G, p, dt);
+    let pos = posicionPeaton(zona.G, p);
+    if (Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = posicionPeaton(zona.G, p); }
+    const bote = Math.abs(Math.sin(ahora * 6 + p.color * 6.28)) * 0.05;   // el paso se nota en el vaivén
+    m.compose(new THREE.Vector3(pos.x, bote, pos.z), q.setFromAxisAngle(eje, pos.h), uno);
+    mallaPeatones.cuerpo.setMatrixAt(i, m); mallaPeatones.cabeza.setMatrixAt(i, m);
+  });
+  mallaPeatones.cuerpo.instanceMatrix.needsUpdate = true; mallaPeatones.cabeza.instanceMatrix.needsUpdate = true;
+}
+// Flechas pintadas en la calzada: cada una apunta por donde hay que seguir. Un contorno oscuro debajo las separa del asfalto
+function mallaFlechas(flechas) {
+  const grupo = new THREE.Group();
+  if (!flechas.length) return grupo;
+  const forma = (ancho, largo) => {   // flecha que apunta a +Z: punta, dos alas y una muesca en la cola
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, largo, 0, 0, -0.1 * largo, -ancho, 0, -0.6 * largo,
+      0, 0, largo, ancho, 0, -0.6 * largo, 0, 0, -0.1 * largo,
+    ], 3));
+    g.computeVertexNormals();
+    return g;
+  };
+  matFlechas = new THREE.MeshBasicMaterial({ color: 0xffc83d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  const matContorno = new THREE.MeshBasicMaterial({ color: 0x1b2026, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+  const n = flechas.length;
+  const amarillas = new THREE.InstancedMesh(forma(1.1, 1.5), matFlechas, n);
+  const contorno = new THREE.InstancedMesh(forma(1.45, 1.9), matContorno, n);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  flechas.forEach((f, i) => {
+    const r = q.setFromAxisAngle(eje, f.h);
+    contorno.setMatrixAt(i, m.compose(new THREE.Vector3(f.x, 0.09, f.z), r, uno));
+    amarillas.setMatrixAt(i, m.compose(new THREE.Vector3(f.x, 0.095, f.z), r, uno));
+  });
+  amarillas.instanceMatrix.needsUpdate = true; contorno.instanceMatrix.needsUpdate = true;
+  amarillas.frustumCulled = false; contorno.frustumCulled = false;
+  grupo.add(contorno, amarillas);
+  return grupo;
+}
 
 // --- carrera ---
 function limpiarCarrera() {
   if (carrera) carrera.meshes.forEach(m => { scene.remove(m); m.material.dispose(); });
-  if (rutaLinea) { scene.remove(rutaLinea); rutaLinea.geometry.dispose(); rutaLinea.material.dispose(); }
-  carrera = null; rutaLinea = null;
+  if (rutaLinea) { scene.remove(rutaLinea); rutaLinea.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); }
+  limpiarTrafico();
+  carrera = null; rutaLinea = null; matFlechas = null;
 }
 function pintarCheckpoints() {
   carrera.meshes.forEach((m, i) => {
@@ -1624,12 +1833,12 @@ async function nuevaCarrera() {
       return m;
     }),
   };
-  const puntos = plan.ruta.map(p => new THREE.Vector3(p[0], 0.3, p[1]));
-  rutaLinea = new THREE.Line(new THREE.BufferGeometry().setFromPoints(puntos), new THREE.LineBasicMaterial({ color: 0xffd166 }));
+  rutaLinea = mallaFlechas(flechasRuta(plan.ruta));   // flechas pintadas en la calzada, hacia el siguiente checkpoint
   scene.add(rutaLinea);
   pintarCheckpoints();
   coche = { x: plan.inicio.x, z: plan.inicio.z, h: plan.inicio.h, v: 0, dir: 0, acera: false, golpe: 0 };
   actualizarMalla();
+  iniciarTrafico();
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
   camara.position.set(coche.x - fx * 13, 6, coche.z - fz * 13);
   camara.lookAt(coche.x + fx * 6, 1.2, coche.z + fz * 6);
@@ -1668,7 +1877,7 @@ function terminar(ahora) {
 
 // --- ¿Choca el coche con algo? Casas, agua, árboles, quitamiedos o isletas ---
 function obstaculo(x, z) {
-  return choca(zona.edif, zona.rejilla, x, z, RADIO_COCHE) || chocaMundo(zona.mundo, x, z, RADIO_COCHE);
+  return choca(zona.edif, zona.rejilla, x, z, RADIO_COCHE) || chocaMundo(zona.mundo, x, z, RADIO_COCHE) || chocaTrafico(x, z, RADIO_COCHE);
 }
 
 // --- física del coche básico ---
@@ -1703,12 +1912,31 @@ function actualizarMalla() {
   const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
   cocheMesh.position.set(coche.x, salto + tiemble, coche.z);
   cocheMesh.rotation.y = coche.h;
+  cocheMesh.visible = modoCamara !== 2;   // dentro del coche no se ve la carrocería
+}
+// --- cámaras: detrás, cerca y dentro del coche (la tecla C o el botón Cámara pasan de una a otra) ---
+const NOMBRES_CAMARA = ['detrás del coche', 'cerca del coche', 'dentro del coche'];
+function cambiarCamara() {
+  modoCamara = (modoCamara + 1) % 3;
+  document.body.classList.toggle('dentro', modoCamara === 2);
+  mostrarAviso('Cámara ' + NOMBRES_CAMARA[modoCamara], 1.2);
 }
 function actualizarCamara(dt) {
-  const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
-  const objetivo = new THREE.Vector3(coche.x - fx * 13, 5.5 + Math.min(Math.abs(coche.v) / 15, 2), coche.z - fz * 13);
-  camara.position.lerp(objetivo, 1 - Math.exp(-6 * dt));
-  camara.lookAt(coche.x + fx * 6, 1.2, coche.z + fz * 6);
+  const fx = Math.sin(coche.h), fz = Math.cos(coche.h), izq = [fz, -fx];   // en España el conductor va a la izquierda
+  const fov = [60, 68, 74][modoCamara];
+  if (camara.fov !== fov) { camara.fov = fov; camara.updateProjectionMatrix(); }
+  const salto = coche.golpe > 0 ? Math.sin(coche.golpe / 0.5 * Math.PI) * 0.22 : 0;      // bote al subir al bordillo
+  const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
+  if (modoCamara === 2) {   // dentro: los ojos del conductor, a la izquierda del eje y un poco delante
+    camara.position.set(coche.x + fx * 0.3 + izq[0] * 0.36, 1.25 + salto + tiemble, coche.z + fz * 0.3 + izq[1] * 0.36);
+    camara.lookAt(coche.x + fx * 40, 1.05, coche.z + fz * 40);
+    return;
+  }
+  const cerca = modoCamara === 1;
+  const atras = cerca ? 7 : 13, alto = cerca ? 2.6 : 5.5;
+  const objetivo = new THREE.Vector3(coche.x - fx * atras, alto + Math.min(Math.abs(coche.v) / 15, 2) + salto, coche.z - fz * atras);
+  camara.position.lerp(objetivo, 1 - Math.exp(-(cerca ? 10 : 6) * dt));
+  camara.lookAt(coche.x + fx * (cerca ? 4 : 6), cerca ? 1.1 : 1.2, coche.z + fz * (cerca ? 4 : 6));
 }
 
 // --- HUD ---
@@ -1769,9 +1997,15 @@ function bucle() {
   }
   if (estado === 'corriendo') { fisica(dt); actualizarCarrera(ahora); }
   if (coche) {
+    actualizarTrafico(dt);
+    actualizarPeatones(dt);
     actualizarMalla();
     actualizarCamara(dt);
     actualizarHUD(ahora);
+  }
+  if (matFlechas) {   // las flechas laten un poco para llamar la atención
+    const pulso = 0.5 + 0.5 * Math.sin(ahora * 3.2);
+    matFlechas.color.setRGB(1, 0.8 + 0.1 * pulso, 0.22 + 0.16 * pulso);
   }
   renderer.render(scene, camara);
 }
