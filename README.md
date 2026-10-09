@@ -26,6 +26,8 @@ En la pantalla de inicio se elige el coche: el básico (una caja roja), CarConce
 - CarConcept, © Eric Chadwick (Darmstadt Graphics Group), licencia CC BY 4.0.
 - ToyCar, © Guido Odendahl y Eric Chadwick, licencia CC0.
 
+En el tráfico de la carrera circulan versiones ligeras de estos dos coches (`modelos/trafico-*.glb`, con un 10 % de los triángulos), hechas con Blender a partir de los originales.
+
 `vendor/GLTFLoader.js` es el cargador de GLTF de three.js r128 (licencia MIT).
 
 ## Datos
