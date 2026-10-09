@@ -1757,7 +1757,7 @@ async function cargarZona(archivo) {
   const edif = parsearCasas(casas);
   $('estado').textContent = 'Construyendo la zona…';
   await new Promise(r => setTimeout(r, 0));
-  zona = { tramos, G, edif, rejilla: construirRejilla(edif) };
+  zona = { tramos, G, edif, rejilla: construirRejilla(edif), enCalzadaAjena: construirRejillaCalzadas(tramos) };
   prepararCasas(edif, zona.rejilla, tramos);
   $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas)…';
   await new Promise(r => setTimeout(r, 0));
@@ -1969,7 +1969,7 @@ function actualizarPeatones(dt) {
   peatones.forEach((p, i) => {
     avanzaPeaton(zona.G, p, dt);
     let pos = posicionPeaton(zona.G, p);
-    if (Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = posicionPeaton(zona.G, p); }
+    if (zona.enCalzadaAjena(pos.x, pos.z, p.seg) || Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = posicionPeaton(zona.G, p); }   // si su acera se corta en un cruce, busca otra
     const bote = Math.abs(Math.sin(ahora * 6 + p.color * 6.28)) * 0.05;   // el paso se nota en el vaivén
     m.compose(new THREE.Vector3(pos.x, bote, pos.z), q.setFromAxisAngle(eje, pos.h), uno);
     mallaPeatones.cuerpo.setMatrixAt(i, m); mallaPeatones.cabeza.setMatrixAt(i, m);
