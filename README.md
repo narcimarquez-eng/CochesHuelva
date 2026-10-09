@@ -11,7 +11,7 @@ Carrera de coches por Huelva
 
 En la carrera hay tráfico: coches que circulan por la derecha de las calles y que frenan al jugador como un muro, y peatones por las aceras. La ruta se marca con flechas amarillas pintadas en la calzada, solo el tramo hasta el siguiente checkpoint.
 
-El suelo es la ortofoto aérea de la zona (la del paseo), con sus calles, campos y ríos. Encima se dibujan las calles con asfalto, aceras de losetas, bordillos, marcas viales, pasos de cebra, farolas y árboles en las avenidas, árboles en parques y praderas, agua (ríos, lagos, humedales y piscinas), quitamiedos en las curvas de las vías rápidas y rotondas con isleta. Si el coche sube a la acera da un bote, va más despacio y el volante responde menos.
+El suelo es la ortofoto aérea de la zona (la del paseo), con sus calles, campos y ríos. Encima se dibujan las calles con asfalto, aceras de losetas, bordillos, marcas viales, pasos de cebra, farolas y árboles en las avenidas, árboles en parques y praderas, agua (ríos, lagos, humedales y piscinas), quitamiedos en las curvas de las vías rápidas y rotondas con isleta. Si el coche sube a la acera da un bote, va más despacio y el volante responde menos. Las aceras y los bordillos se cortan donde entran en la calzada de otra calle (cruces, calzadas dobles), y la calzada y las aceras usan texturas de asfalto y adoquín (`texturas/`) generadas con Blender para este proyecto.
 
 Controles: flechas o WASD. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro. En el móvil, la ruleta de la pantalla gira el coche y los botones ▲ (acelerar) y ■ (frenar) están abajo. `M` abre el menú. Los límites de velocidad son solo informativos.
 
