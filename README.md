@@ -33,6 +33,15 @@ Cada golpe suma daño según la velocidad y lo que golpeas (una casa o un árbol
 - **Ciclistas** por el borde derecho de la calzada: frenan detrás de los coches, te tocan el timbre si les cortas el paso, y si les das se caen (y se levantan al rato).
 - El **claxon** (botón 📢 o tecla `H`) hace que los peatones de delante se vuelvan y den un respingo, que los perros ladren y que los ciclistas contesten con el timbre. Después de un golpe fuerte, la gente de alrededor se para a mirar.
 
+## Mobiliario urbano y fuentes
+
+- **Farolas** de dos estilos: báculos con brazo en las calles principales y las avenidas (en estas, entre los árboles y a los dos lados) y faroles fernandinos de hierro negro en las calles residenciales y alrededor de las rotondas. De noche se enciende el farol y alumbra el suelo.
+- **Quioscos** de prensa (verde y octogonal, con las revistas a la vista), de helados (toldo de rayas y un cucurucho gigante), de flores (con cubos de ramos delante) y de lotería, en las aceras anchas junto a los cruces. De noche se iluminan. Si chocas con uno, salen volando papeles de colores.
+- **Termómetros de calle** en las aceras de las calles principales, con un panel de luces que alterna la hora (la de tu dispositivo), la temperatura (según la hora del día) y la fecha. Algunos llevan encima la cruz verde de farmacia, que parpadea.
+- **Fuentes decoradas** en las rotondas que lo parecen: el juego mira la foto aérea de cada isleta y, si es agua azulada o un disco claro de espuma, o si el mapa marca agua dentro, pone una fuente con su vaso de piedra, una fuente de dos tazas en el centro, surtidores en arco (en las grandes), cortinas de agua y un anillo de flores. Suena el agua al acercarte, y de noche se iluminan con luces de colores que van cambiando. En la zona incluida salen 8 fuentes.
+
+Todo esto choca con el coche como las farolas y los árboles.
+
 ## Hora del día
 
 **Día**, **atardecer** (sol bajo y naranja, sombras largas) o **noche** (cielo con estrellas y luna). Al atardecer y de noche se encienden las ventanas de las casas, las farolas (con su charco de luz en el suelo) y los faros de todos los coches, que alumbran el asfalto por delante. La elección se recuerda.
