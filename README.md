@@ -90,7 +90,15 @@ El análisis de la foto (en el Paseo) agrupa los píxeles por **tono**, la propo
 - Lo gris pesa menos que lo que tiene color, porque gris son también la calle, los cristales y el cielo con calima. También cuentan menos lo muy oscuro, la parte de abajo de la foto (calle y coches) y los lados (la casa de la parcela suele estar en el centro).
 - Las hojas al sol, de verde amarillento, no cuentan como pared.
 
-**Textura de la pared**: además de los colores, de cada foto se saca un **parche** de 64 × 64 de la pared real. Es el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible: sin ventanas, esquinas ni hojas. Si aun así varía demasiado, no se usa y la casa se queda con su color. El parche se guarda con la media de cada color en gris medio, así que solo lleva la textura (ladrillo, azulejo, enfoscado, piedra), y el color sigue siendo el de la pared. En el juego se repite por **todas las paredes de la casa**, cada 1,6 m y en espejo para que no se vean costuras, debajo de las ventanas y puertas dibujadas, y se difumina de lejos. En las 157 fotos de Huelva, 94 dan parche. Pesa poco más de 1 KB y va en `zona.json` con los colores; el juego los junta en una sola textura de 2048 × 2048 (hasta 1.024 casas).
+**La casa en tres bandas**: en la foto se busca la casa. Arriba, la primera fila de pared bajo el cielo (el tejado o la cornisa); abajo, donde acaba la pared. Si entre las dos no hay suficiente pared, no se toma como casa: será cielo, árboles o un coche, y la casa se queda con su color. Entre esos dos bordes hay tres bandas:
+
+- **alta**: el último quinto (cornisa, pretil, ático);
+- **media**: la pared;
+- **baja**: el zócalo, si lo hay.
+
+De cada banda sale su parche de textura, y en el juego se pone cada uno a su altura: el zócalo abajo, la pared en medio y la banda alta en el último quinto de la casa, con el pretil. El parche alto guarda además si esa banda es de otro color que la pared. En las casas bajas, el **alto del zócalo** sale también de la foto. En las 157 fotos de Huelva: 144 casas reconocidas, 82 parches de pared, 93 de banda alta y 14 de zócalo.
+
+**Textura de la pared**: además de los colores, de cada foto se saca un **parche** de 64 × 64 de la pared real. Es el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible: sin ventanas, esquinas ni hojas. Si aun así varía demasiado, no se usa y la casa se queda con su color. El parche se guarda con la media de cada color en gris medio, así que solo lleva la textura (ladrillo, azulejo, enfoscado, piedra), y el color sigue siendo el de la pared. En el juego se repite por **todas las paredes de la casa**, cada 1,6 m y en espejo para que no se vean costuras, debajo de las ventanas y puertas dibujadas, y se difumina de lejos. En las 157 fotos de Huelva, 94 dan parche. Pesa poco más de 1 KB y va en `zona.json` con los colores; el juego los junta en una sola textura de 2048 × 2048, en casillas de 48 px (hasta 1.764 parches).
 
 Antes solo se miraban los píxeles claros, así que el ladrillo y las paredes rojas en sombra quedaban fuera y salía blanco o gris. En las 157 fotos de la zona incluida se ha comprobado a ojo, y sus colores ya están rehechos. En el Paseo, los colores guardados con el análisis anterior se rehacen solos desde la foto guardada, sin descargar nada.
 
@@ -98,27 +106,31 @@ Antes solo se miraban los píxeles claros, así que el ladrillo y las paredes ro
 
 Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 100 de 32 382.
 
-## Chalets y sus vallas
+## Vallas de las casas
 
-Los datos no dicen qué casa es un chalet ni dónde acaba su parcela, así que se deduce. Un chalet es una casa (o un grupo de piezas que se tocan: casa, porche, cochera):
+**Con las parcelas del Catastro** (`parcelas.geojson`: la zona incluida las trae, 10.444; en otras, del Paseo o con «Descargar lo que falta»), se pone valla en **toda parcela con casa y algo de jardín o patio**:
 
-- suelta, sin otra casa a menos de 3 m;
-- baja, de dos plantas como mucho;
-- de tamaño de vivienda (45–480 m² de planta);
-- con sitio alrededor, sin manzana de casas a 7 m;
-- a menos de 35 m de una calle.
+- una casa de hasta tres plantas;
+- al menos 25 m² sin construir;
+- menos del 75 % de la parcela construido.
 
-En OpenStreetMap, además, tiene que ser una casa (`house`, `detached`, `villa`…). En la zona incluida salen unos 280.
+La valla va por la **linde** (15 cm por dentro), salvo donde la propia casa o la del vecino hacen de valla, y no se repite donde ya la puso el vecino. En Huelva son unas 1.360 casas. La cancela de hierro va en el lado más cercano a la calle.
 
-Alrededor de cada chalet se pone la **valla** de su parcela:
+**Sin parcelas**, se deduce qué casas son chalets o casas con jardín. Tiene que ser una casa (o un grupo de hasta seis piezas que se tocan):
 
-- Se toma el rectángulo que lo envuelve y se abre de 2,5 a 5,5 m por cada lado. El lado que da a una calle (a menos de 12 m) llega **hasta la acera**, como casi todos los chalets.
-  Con las parcelas del Catastro (`parcelas.geojson`, del Paseo o descargadas en el juego), la valla va por la **linde de la parcela** del chalet, 15 cm por dentro, y la cancela en el lado más cercano a la calle.
-- Cada lado se acerca a la casa hasta que no pisa la calzada ni la acera, una piscina o el agua, ni la casa de al lado.
-- Donde ya hay la valla de un vecino no se pone otra: la suya hace de medianera.
-- En el lado más cercano a la calle va una **cancela** de hierro de 3 m entre dos pilares.
+- suelta, sin otra a menos de 2 m;
+- de hasta tres plantas y 40–900 m² de planta;
+- con sitio alrededor y a menos de 35 m de una calle.
 
-Hay tres tipos: murete con **reja** de barrotes, murete con **seto** recortado y **muro** alto. Los muretes son blancos, crema, albero o ladrillo, con albardilla y pilares. Las vallas chocan como un muro bajo (el coche se abolla) y ningún árbol queda en mitad de una.
+En OpenStreetMap, además, tiene que ser una casa (`house`, `detached`, `villa`…). Su parcela se calcula: el rectángulo que la envuelve se abre de 2,5 a 5,5 m por cada lado, el lado de la calle llega **hasta la acera**, y cada lado se acerca a la casa hasta que no pisa la calzada, la acera, una piscina o la casa de al lado.
+
+Las vallas miden **2 m**, como las de verdad. Hay tres tipos:
+
+- **muro** de 2 m;
+- **murete** de 1 m con 1 m de **reja** de barrotes encima;
+- **murete** de 0,9 m con **seto** recortado hasta los 2 m.
+
+Los muretes son blancos, crema, albero o ladrillo, con albardilla y pilares, y la cancela mide 2 m. Las vallas chocan como un muro (el coche se abolla) y ningún árbol queda en mitad de una.
 
 ## Daño del coche
 
@@ -217,7 +229,23 @@ En el tráfico de la carrera circulan los coches de la galería y versiones lige
 
 `vendor/GLTFLoader.js` es el cargador de GLTF de three.js r128 (licencia MIT).
 
-## Árboles y peatones
+## Árboles, mar, piscinas y parques infantiles
+
+**De la foto aérea** (la ortofoto que trae la zona) se sacan:
+
+- **Árboles**, uno donde se ve cada copa: verde y oscura, con más verde alrededor, así que no cuenta una mata de hierba. Hay al menos 4,5 m entre árbol y árbol, y ninguno encima de casas, calzadas o agua. Las copas muy oscuras dentro de una masa de árboles (un pinar) son **pinos piñoneros**: tronco alto y algo torcido y copa ancha y plana. En Huelva salen unos 22.000.
+- **El mar**: zona azulada a menos de 1,5 m de cota (la cota sale de `alturas.asc`), unida al borde de la foto y de más de 5 ha. Se dibuja con el agua del juego y choca. En Huelva sale un trozo de la ría del Odiel que el mapa no tenía.
+- **Piscinas**: manchas turquesa de 6 a 150 m² que no estén ya en OpenStreetMap, con un borde de piedra clara.
+
+**Sin foto**, los árboles salen del mapa: parques, praderas y ahora también **bosques** (con pinos piñoneros), bosques de frondosas y **matorral**. Antes el juego no miraba los bosques, por eso en zonas como Mazagón faltaban los pinos. El arenal y otras capas tienen ya su color de suelo.
+
+**Parques infantiles**: los de OpenStreetMap (el Paseo los pide ahora: `leisure=playground`) y, en cada parque de 2.000 m² o más que no tenga, uno puesto por el juego. Llevan:
+
+- suelo de caucho y una valla baja verde con entrada;
+- columpios, tobogán con torre, balancín y dos muelles;
+- dos bancos fuera.
+
+Todo choca. En Huelva salen 60.
 
 Los árboles son modelos de Kenney Nature Kit (roble, álamo, pino y arbusto), con licencia CC0: están en `modelos/arboles/`. Los peatones son ocho figuras de Kenney Blocky Characters (CC0), en `modelos/peatones/`, de 1,75 m. Las licencias de cada paquete van junto a los modelos. Se dibujan solo los árboles cercanos al coche, para que el móvil no sufra.
 

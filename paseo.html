@@ -1314,7 +1314,8 @@ way["natural"~"^(water|wetland|beach|sand|shingle|wood|scrub|heath|grassland|bar
 relation["natural"~"^(water|wetland|beach|sand|wood|scrub|heath|grassland)$"](${bb});
 way["landuse"~"^(forest|orchard|vineyard|meadow|grass|village_green|farmland|farmyard|reservoir|basin|greenhouse_horticulture|plant_nursery|residential|industrial|commercial|retail)$"](${bb});
 relation["landuse"~"^(forest|orchard|reservoir|basin|residential|farmland|meadow|greenhouse_horticulture)$"](${bb});
-way["leisure"~"^(park|garden|golf_course|swimming_pool)$"](${bb});
+way["leisure"~"^(park|garden|golf_course|swimming_pool|playground)$"](${bb});
+node["leisure"="playground"](${bb});
 way["waterway"](${bb});
 way["water"](${bb});
 ${big?'':`way["building"](${bb});`}
@@ -2814,7 +2815,7 @@ function roadMaterial(){
 const fotoSt0=()=>({red:0,db:0,ok:0,sin:0,err:0,errs:new Map(),col:0,desc:0,whys:new Map(),rest:0,last:''});
 const FOTO={ok:null,cache:new Map(),active:0,count:0,max:500,d0:1e12,d1:-1,st:fotoSt0(),off:new Set(),msg:''};
 const fotoURL=ref=>`${CATASTRO_URL}?foto=${encodeURIComponent(ref)}`;
-const COLV=4;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra; 4: y un parche de su textura)
+const COLV=5;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra; 4: y un parche de su textura; 5: la casa en tres bandas, alta, media y zócalo, con un parche cada una)
 function imgDe(url){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error('la foto está dañada'));im.src=url;});}
 function colorsDe(im){let c;try{c=photoColors(im);}catch(err){c={why:'no se ha podido analizar la foto'};}c.v=COLV;return c;}
 function contarCol(col){const f=FOTO.st;if(col&&col.wall)f.col++;else{f.desc++;cuenta(f.whys,(col&&col.why)||'no se ha podido analizar la foto');}}
@@ -2939,29 +2940,50 @@ function photoColors(im){
   const ybMed=ybs.length?ybs.slice().sort((p,q)=>p-q)[Math.floor(ybs.length/2)]:y1;
   const fac=cand.filter(i=>Math.floor(i/W0)<ybMed-1&&!esPared(i)&&dist(i,wc)>70&&L[i]>=22&&L[i]<=125&&SA[i]>0.28&&SA[i]<0.72&&!(green(i)&&L[i]>=95));
   if(fac.length>=cand.length*0.01){const cc=km(fac,3).find(o=>o.n>=cand.length*0.008&&o.n<=cand.length*0.12);if(cc)out.carp=cc.c;}
-  // parche de la pared: el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible (sin ventanas
-  // ni esquinas), recortado de la foto original a 64 × 64 y con la media de cada color llevada a gris medio: así solo guarda la textura
-  // (ladrillo, azulejo, enfoscado) y el color sigue siendo el de la pared
-  {const lado=Math.max(5,Math.round(W0*0.09)),A=(W0+1)*(H0+1),S=new Float32Array(A),C=new Float32Array(A),L1=new Float32Array(A),L2=new Float32Array(A);
-    for(let y=0;y<H0;y++)for(let x=0;x<W0;x++){const i=y*W0+x,k=(y+1)*(W0+1)+x+1,a=k-1,b=k-W0-1,c=k-W0-2;
-      S[k]=S[a]+S[b]-S[c]+(esPared(i)?1:0);C[k]=C[a]+C[b]-C[c]+sky[i];L1[k]=L1[a]+L1[b]-L1[c]+L[i];L2[k]=L2[a]+L2[b]-L2[c]+L[i]*L[i];}
-    const suma=(T,x,y)=>T[(y+lado)*(W0+1)+x+lado]-T[y*(W0+1)+x+lado]-T[(y+lado)*(W0+1)+x]+T[y*(W0+1)+x],n=lado*lado;
+  // --- la casa en la foto y sus tres bandas: alta (cornisa, ático), media (la pared) y baja (el zócalo) ---
+  // Arriba de la casa, en las columnas del centro: la primera fila de pared bajo el cielo; abajo, donde acaba la pared (ybMed)
+  const tops=[];
+  for(let x=cx0;x<cx1;x++){for(let y=0;y<ybMed;y++){const i=y*W0+x;if(sky[i])continue;if(esPared(i)){tops.push(y);break;}}}
+  const topMed=tops.length>=(cx1-cx0)*0.3?tops.slice().sort((p,q)=>p-q)[Math.floor(tops.length/2)]:-1,hF=ybMed-topMed;
+  // ¿es una casa? Una pared que ocupa una buena parte de la foto entre su tejado y su base
+  let enCasa=0,totCasa=0;if(topMed>=0)for(let y=topMed;y<ybMed;y++)for(let x=cx0;x<cx1;x++){totCasa++;if(esPared(y*W0+x))enCasa++;}
+  out.casa=topMed>=0&&hF>=H0*0.22&&enCasa>=totCasa*0.35;
+  if(!out.casa){out.parcheWhy='no se ve bien la casa (de su tejado a su base)';return out;}
+  out.bandas={alto:topMed/H0,base:ybMed/H0};
+  // Integrales para buscar rápido el cuadrado más uniforme de cada banda
+  const A=(W0+1)*(H0+1),IP=new Float32Array(A),IC=new Float32Array(A),IV=new Float32Array(A),IL=new Float32Array(A),IL2=new Float32Array(A);
+  for(let y=0;y<H0;y++)for(let x=0;x<W0;x++){const i=y*W0+x,k=(y+1)*(W0+1)+x+1,a=k-1,b=k-W0-1,c=k-W0-2;
+    IP[k]=IP[a]+IP[b]-IP[c]+(esPared(i)?1:0);IC[k]=IC[a]+IC[b]-IC[c]+sky[i];IV[k]=IV[a]+IV[b]-IV[c]+(green(i)?1:0);IL[k]=IL[a]+IL[b]-IL[c]+L[i];IL2[k]=IL2[a]+IL2[b]-IL2[c]+L[i]*L[i];}
+  // parche de 64 × 64 del cuadrado (de lado «lado» celdas) más uniforme entre las filas ya y yb, recortado de la foto original.
+  // relativo: la media de cada color se lleva a gris medio (solo textura) o, con «ref», se compara con el color de la pared (guarda si la banda es de otro color)
+  const parcheEntre=(ya,yb,lado,minPared,ref,maxVar)=>{
+    lado=Math.max(4,Math.min(lado,yb-ya));if(yb-ya<4)return null;
+    const s=(T,x,y)=>T[(y+lado)*(W0+1)+x+lado]-T[y*(W0+1)+x+lado]-T[(y+lado)*(W0+1)+x]+T[y*(W0+1)+x],n=lado*lado;
     let best=-1e9,bx=-1,by=-1;
-    for(let y=y0;y+lado<=y1;y++)for(let x=x0;x+lado<=x1;x++){
-      if(suma(C,x,y)>0)continue;const fr=suma(S,x,y)/n;if(fr<0.93)continue;
-      const m=suma(L1,x,y)/n,sd=Math.sqrt(Math.max(0,suma(L2,x,y)/n-m*m));
-      const sc=-sd/Math.max(30,m)-0.25*Math.abs((x+lado/2)/W0-0.5)-0.15*Math.abs((y+lado/2)/H0-0.45);   // uniforme, y cerca del centro
+    for(let y=Math.max(0,ya);y+lado<=Math.min(H0,yb);y++)for(let x=x0;x+lado<=x1;x++){
+      if(s(IC,x,y)>0||s(IV,x,y)>n*0.05)continue;if(s(IP,x,y)/n<minPared)continue;   // nada de cielo ni de hojas
+      const m=s(IL,x,y)/n,sd=Math.sqrt(Math.max(0,s(IL2,x,y)/n-m*m)),sc=-sd/Math.max(30,m)-0.25*Math.abs((x+lado/2)/W0-0.5);
       if(sc>best){best=sc;bx=x;by=y;}}
-    if(bx>=0&&best>-0.6){
-      const P=64,cv=document.createElement('canvas');cv.width=cv.height=P;const g2=cv.getContext('2d',{willReadFrequently:true});
-      g2.drawImage(im,bx/W0*iw,by/H0*ih,lado/W0*iw,lado/H0*ih,0,0,P,P);
-      const id=g2.getImageData(0,0,P,P),q=id.data,m=[0,0,0];
-      for(let k=0;k<q.length;k+=4){m[0]+=q[k];m[1]+=q[k+1];m[2]+=q[k+2];}
-      for(let c=0;c<3;c++)m[c]=Math.max(8,m[c]/(P*P));
-      let s1=0,s2=0;
-      for(let k=0;k<q.length;k+=4){for(let c=0;c<3;c++)q[k+c]=clamp(Math.round(q[k+c]*128/m[c]),0,255);const l=(q[k]+q[k+1]+q[k+2])/3;s1+=l;s2+=l*l;}
-      const cvar=Math.sqrt(Math.max(0,s2/(P*P)-(s1/(P*P))**2))/128;   // cuánto varía: con ventanas, esquinas u hojas varía mucho y no vale
-      if(cvar<0.1){g2.putImageData(id,0,0);out.parche=cv.toDataURL('image/jpeg',0.85);}}}
+    if(bx<0)return null;
+    const P=64,cv=document.createElement('canvas');cv.width=cv.height=P;const g2=cv.getContext('2d',{willReadFrequently:true});
+    g2.drawImage(im,bx/W0*iw,by/H0*ih,lado/W0*iw,lado/H0*ih,0,0,P,P);
+    const id=g2.getImageData(0,0,P,P),q=id.data,m=[0,0,0];
+    for(let k=0;k<q.length;k+=4){m[0]+=q[k];m[1]+=q[k+1];m[2]+=q[k+2];}
+    for(let c=0;c<3;c++)m[c]=Math.max(8,m[c]/(P*P));
+    const base=ref?ref.map(v=>Math.max(8,v)):m;   // con «ref», relativo a la pared
+    let s1=0,s2=0;
+    for(let k=0;k<q.length;k+=4){for(let c=0;c<3;c++)q[k+c]=clamp(Math.round(q[k+c]*128/base[c]),0,255);const l=(q[k]+q[k+1]+q[k+2])/3;s1+=l;s2+=l*l;}
+    const mm=s1/(P*P),cvar=Math.sqrt(Math.max(0,s2/(P*P)-mm*mm))/Math.max(40,mm);   // con ventanas, esquinas u hojas varía mucho y no vale
+    if(cvar>maxVar)return null;
+    g2.putImageData(id,0,0);return cv.toDataURL('image/jpeg',0.85);};
+  const lado=Math.max(5,Math.round(W0*0.09)),medioA=Math.round(topMed+hF*0.2),medioB=Math.round(ybMed-hF*0.08);
+  // pared de referencia (cruda, tal como sale en la foto) para comparar la banda alta
+  let wr=[0,0,0],wn=0;for(const i of wp){wr[0]+=R[i];wr[1]+=G[i];wr[2]+=B[i];wn++;}wr=wr.map(v=>v/Math.max(1,wn));
+  out.parche=parcheEntre(medioA,medioB,lado,0.93,null,0.1);
+  out.parcheAlto=parcheEntre(topMed,medioA,lado,0.5,wr,0.16);
+  // la banda baja: la franja del zócalo, si la hay; si no, el pie de la pared
+  if(out.zoc&&runs.length){const ys=runs.map(r=>[Math.floor(r[0]/W0),Math.floor(r[r.length-1]/W0)]),za=Math.round(ys.reduce((a,p)=>a+p[0],0)/ys.length),zb=Math.round(ys.reduce((a,p)=>a+p[1],0)/ys.length)+1;
+    out.parcheZocalo=parcheEntre(za,zb,lado,0,null,0.14);out.bandas.zocalo=[za/H0,zb/H0];}
   return out;
 }
 const fromSRGB=a=>new THREE.Color().setRGB(a[0]/255,a[1]/255,a[2]/255,THREE.SRGBColorSpace);

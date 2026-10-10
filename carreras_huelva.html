@@ -76,6 +76,7 @@
   #ruleta{width:176px;height:176px;pointer-events:auto;touch-action:none;cursor:grab}
   #ruleta svg{width:100%;height:100%;display:block;filter:drop-shadow(0 5px 12px rgba(0,0,0,.6))}
   #estado{min-height:20px;color:#ffd166}
+  #pantalla > *{flex-shrink:0}   /* con mucho texto, el menú se desplaza en vez de montar unas líneas sobre otras */
   #faltan{max-width:640px;font-size:13px;line-height:1.4;color:#cfe3ff;background:rgba(30,60,110,.45);border:1px solid rgba(140,180,255,.35);border-radius:10px;padding:6px 10px}
   #faltan button{margin-left:6px;padding:4px 10px;font-size:13px}
   #coches{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:620px}
@@ -588,7 +589,7 @@ function coloresCasa(e, idx) {
   e.zh = 0.65 + 0.55 * s3;
   if (e.pared) {
     e.colPared = e.pared;
-    if (e.zoc) e.colZoc = e.zoc;
+    if (e.zoc) { e.colZoc = e.zoc; if (e.zocaloFr && e.h <= 8) e.zh = Math.min(1.6, Math.max(0.4, e.zocaloFr * e.h)); }   // en casas bajas, el alto del zócalo de su foto
     else { e.colZoc = aHex(hexA01(e.pared).map((v, k) => v * 0.8 * 0.75 + [0.42, 0.42, 0.4][k] * 0.25)); e.zh = 0.35; }
     e.colCarp = e.carp || elegirPonderado(PAL_FACHADA.carpinteria, s4);
   } else {
@@ -735,7 +736,7 @@ function distanciaACalle(rejSeg, tramos, x, z) {
 function buscarChalets(edif, rejilla, rejSeg, tramos) {
   const out = [];
   for (const g of gruposDeCasas(edif, rejilla)) {
-    if (g.length > 4) continue;
+    if (g.length > 6) continue;
     let area = 0, alto = 0, osmNo = false;
     for (const i of g) {
       const e = edif[i];
@@ -743,10 +744,10 @@ function buscarChalets(edif, rejilla, rejSeg, tramos) {
       if (e.tipo && !TIPOS_CHALET_OSM.has(e.tipo)) osmNo = true;
       if (e.simulada && !e.parcela) osmNo = true;   // las adosadas simuladas no
     }
-    if (osmNo || area < 45 || area > 480 || alto > 7.6) continue;
+    if (osmNo || area < 40 || area > 900 || alto > 10.5) continue;   // hasta tres plantas y casas grandes
     const pts = g.flatMap(i => edif[i].pts), rect = edif[g[0]].parcela || rectanguloMinimo(pts);
-    if (!rect || rect.a > 22 || rect.b > 22) continue;
-    // suelto: ninguna otra casa a menos de 3 m de sus paredes (si no, es una manzana de casas con algún hueco)
+    if (!rect || rect.a > 30 || rect.b > 30) continue;
+    // suelto: ninguna otra casa a menos de 2 m de sus paredes (si no, es una manzana de casas con algún hueco)
     const grupo = new Set(g);
     if (edif[g[0]].parcela) { out.push({ casas: g, rect, alto }); continue; }   // chalet simulado: ya trae su parcela
     let suelto = true;
@@ -754,7 +755,7 @@ function buscarChalets(edif, rejilla, rejSeg, tramos) {
       const r = edif[i].pts;
       for (let k = 0; k < r.length && suelto; k++) {
         const p = r[k], q = r[(k + 1) % r.length];
-        for (const f of [0, 0.5]) if (casaCerca(edif, rejilla, p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, 3, grupo)) { suelto = false; break; }
+        for (const f of [0, 0.5]) if (casaCerca(edif, rejilla, p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, 2, grupo)) { suelto = false; break; }
       }
       if (!suelto) break;
     }
@@ -765,7 +766,7 @@ function buscarChalets(edif, rejilla, rejSeg, tramos) {
       const u = fu * (rect.a + 7), v = fv * (rect.b + 7);
       if (cualCasa(edif, rejilla, rect.cx + rect.ux * u - rect.uz * v, rect.cz + rect.uz * u + rect.ux * v, grupo) >= 0) llenos++;
     }
-    if (llenos > 2) continue;
+    if (llenos > 3) continue;
     out.push({ casas: g, rect, alto });
   }
   return out;
@@ -801,6 +802,25 @@ function anilloAdentro(r, d) {
 function generarVallas(edif, rejilla, tramos, aguas, rejAguas, rng, solares = []) {
   const rejSeg = construirRejillaSegmentos(tramos), chalets = buscarChalets(edif, rejilla, rejSeg, tramos);
   const rejSolares = construirRejilla(solares), nadie = new Set();
+  // con parcelas del Catastro: valla en toda parcela con casa y algo de jardín o patio delante (no solo en los chalets sueltos)
+  const centro = p => [p.reduce((a, q) => a + q[0], 0) / p.length, p.reduce((a, q) => a + q[1], 0) / p.length];
+  const cubiertas = new Set(), deSolares = [];
+  for (const so of solares) {
+    const A = Math.abs(areaAnillo(so.pts));
+    if (A < 60 || A > 6000) continue;
+    const [x0, z0, x1, z1] = so.bbox, casas = new Set();
+    for (let cx = Math.floor(x0 / TAM_CELDA); cx <= Math.floor(x1 / TAM_CELDA); cx++)
+      for (let cz = Math.floor(z0 / TAM_CELDA); cz <= Math.floor(z1 / TAM_CELDA); cz++)
+        for (const j of rejilla.get(cx + ',' + cz) || []) if (!casas.has(j) && enPoligono(so.pts, ...centro(edif[j].pts))) casas.add(j);
+    if (!casas.size || [...casas].some(j => edif[j].simulada)) continue;   // las casas simuladas no van con las parcelas de verdad
+    let construida = 0, alto = 0;
+    for (const j of casas) { construida += Math.abs(areaAnillo(edif[j].pts)); alto = Math.max(alto, edif[j].h); }
+    if (construida / A > 0.75 || A - construida < 25 || alto > 10.5) continue;   // todo construido (no hay dónde poner valla) o bloque de pisos
+    const lista = [...casas];
+    deSolares.push({ casas: lista, rect: rectanguloMinimo(lista.flatMap(j => edif[j].pts)), alto, solar: so });
+    for (const j of lista) cubiertas.add(j);
+  }
+  const candidatos = deSolares.concat(chalets.filter(ch => !ch.casas.some(j => cubiertas.has(j))));
   const segs = [], puestas = new Map(), CV = 4;   // rejilla fina de las vallas ya puestas
   const cercaDeValla = (x, z) => {
     for (let i = Math.floor((x - 0.6) / CV); i <= Math.floor((x + 0.6) / CV); i++)
@@ -836,17 +856,17 @@ function generarVallas(edif, rejilla, tramos, aguas, rejAguas, rng, solares = []
     return false;
   };
   let n = 0;
-  for (const ch of chalets) {
+  for (const ch of candidatos) {
     const { cx, cz, ux, uz, a, b } = ch.rect, vx = -uz, vz = ux, grupo = new Set(ch.casas);
     // la parcela del Catastro donde está el chalet, si la hay y tiene un tamaño razonable: la valla va por su linde
-    let solar = null;
-    if (solares.length) {
+    let solar = ch.solar || null;
+    if (!solar && solares.length) {
       const i = cualCasa(solares, rejSolares, cx, cz, nadie), s = i >= 0 ? solares[i] : null, A = s ? Math.abs(areaAnillo(s.pts)) : 0;
       if (s && A > 4 * a * b * 1.1 && A < 4000 && ch.casas.every(j => { const p = edif[j].pts; return enPoligono(s.pts, p.reduce((a, q) => a + q[0], 0) / p.length, p.reduce((a, q) => a + q[1], 0) / p.length); })) solar = s;
     }
     // con parcela, la linde de la calle es la fachada: solo se aparta de la calzada (la acera de OpenStreetMap es aproximada)
-    const malo = (x, z) => (solar ? enCalzada(x, z) : enCalleOAcera(rejSeg, tramos, x, z, 0.25)) || casaCerca(edif, rejilla, x, z, 0.7, grupo) ||
-      agua(x, z) || cercaDeValla(x, z) || enParcela(x, z);
+    const malo = (x, z) => (solar ? enCalzada(x, z) || casaCerca(edif, rejilla, x, z, 0.4, nadie) : enCalleOAcera(rejSeg, tramos, x, z, 0.25)) ||
+      casaCerca(edif, rejilla, x, z, 0.7, grupo) || agua(x, z) || cercaDeValla(x, z) || enParcela(x, z);   // por la linde: no donde la propia casa hace de valla
     // lados: +u, +v, -u, -v; cada uno con su margen (de la casa a la valla)
     const ladoSeg = (k, m) => {
       const su = [a + m[0], -(a + m[2])], sv = [b + m[1], -(b + m[3])];
@@ -1069,6 +1089,8 @@ function distanciaTramo2(tramo, x, z) {
 const COLOR_SUELO = {   // color del suelo según la capa de mapa.geojson
   'parque o jardín': '#4f8a3c', 'pradera': '#86b35a', 'cultivo': '#c4b47a', 'zona urbana': '#b5ae9c',
   'agua': '#3c7fbd', 'cauce': '#3c7fbd', 'humedal': '#5d8f7a',
+  'bosque': '#5f6f3e', 'bosque de frondosas': '#4d6e38', 'matorral': '#8d9160', 'arena': '#e2d3a6', 'huerta o frutales': '#7f9a52',
+  'invernaderos': '#d8dcdc', 'roca': '#a39d92',
 };
 const SUELO_BASE = '#8ca36c';   // terreno sin capa: campo abierto
 const TIPOS_CON_QUITAMIEDOS = new Set(['primary', 'primary_link', 'secondary', 'secondary_link', 'trunk', 'trunk_link',
@@ -1145,15 +1167,17 @@ function agruparRotondas(arcos) {
   return grupos;
 }
 function extraerOSM(osm) {
-  const piscinas = [], arcos = [];
+  const piscinas = [], arcos = [], juegos = [];
   for (const e of (osm.elements || [])) {
-    if (e.type !== 'way' || !e.geometry) continue;
     const t = e.tags || {};
+    if (e.type === 'node' && t.leisure === 'playground' && isFinite(e.lat)) { juegos.push({ punto: proyectar(e.lon, e.lat) }); continue; }   // parque infantil marcado con un punto
+    if (e.type !== 'way' || !e.geometry) continue;
+    if (t.leisure === 'playground') { const pts = quitarCierre(e.geometry.map(c => proyectar(c.lon, c.lat))); if (pts.length >= 3) juegos.push({ pts }); continue; }
     const pts = quitarCierre(e.geometry.map(c => proyectar(c.lon, c.lat)));
     if (t.leisure === 'swimming_pool' && pts.length >= 3) piscinas.push(pts);
     if (t.junction === 'roundabout' && pts.length >= 3) arcos.push(pts);
   }
-  return { piscinas, rotondas: agruparRotondas(arcos) };
+  return { piscinas, rotondas: agruparRotondas(arcos), juegos };
 }
 function parsearMapa(geo) {
   const capas = [];
@@ -1295,14 +1319,16 @@ function generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng) {
     }
     return true;
   };
+  // metros cuadrados por árbol en cada capa; los bosques (pinares en la costa de Huelva) llevan pinos piñoneros
+  const DENSIDAD = { 'parque o jardín': 150, 'pradera': 900, 'bosque': 70, 'bosque de frondosas': 90, 'matorral': 400 };
   for (const c of capas) {
-    if (!c.anillo || (c.capa !== 'parque o jardín' && c.capa !== 'pradera')) continue;
-    const r = c.anillo;
+    if (!c.anillo || !DENSIDAD[c.capa]) continue;
+    const r = c.anillo, tipo = c.capa === 'bosque' ? 'pino' : undefined;
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
-    const objetivo = Math.min(3000, Math.round(Math.abs(areaAnillo(r)) / (c.capa === 'parque o jardín' ? 150 : 900)));
+    const objetivo = Math.min(c.capa === 'bosque' ? 8000 : 3000, Math.round(Math.abs(areaAnillo(r)) / DENSIDAD[c.capa]));
     let n = 0;
-    for (let k = 0; k < objetivo * 15 && n < objetivo; k++) {
+    for (let k = 0; k < objetivo * 15 && n < objetivo && arboles.length < 30000; k++) {
       const x = x0 + rng() * (x1 - x0), z = z0 + rng() * (z1 - z0);
       if (!enPoligono(r, x, z)) continue;
       if (cercaDeCalle(calles, x, z, 6)) continue;
@@ -1312,7 +1338,7 @@ function generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng) {
       const clave = Math.floor(x / 4) + ',' + Math.floor(z / 4);
       if (!celdas.has(clave)) celdas.set(clave, []);
       celdas.get(clave).push([x, z]);
-      arboles.push([x, z]); n++;
+      arboles.push(tipo ? [x, z, tipo] : [x, z]); n++;
     }
   }
   return arboles;
@@ -1564,22 +1590,203 @@ function generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, r
   return arboles;
 }
 
+// --- lo que se ve en la foto aérea: copas de árboles (pinos), el mar y las piscinas ---
+// raster: la foto reducida ({ w, h, d: RGBA, paso: metros por píxel, aLocal(c, f) → [x, z] }); altura(x, z): cota del terreno o null.
+// Árbol: verde y oscuro, con más verde alrededor (una copa, no una mata de hierba). Mar: azulado, a menos de 1,5 m de cota, unido al
+// borde de la foto y grande (más de 5 ha). Piscina: turquesa claro, de 6 a 150 m². Nada encima de casas, calzadas o el agua que ya está.
+function detectarEnFoto(raster, capas, aguas, rejAguas, edif, rejilla, tramos, altura, rng) {
+  const { w, h, d, paso } = raster, N = w * h, rejSeg = construirRejillaSegmentos(tramos), nada = new Set();
+  const anillos = nombres => capas.filter(c => c.anillo && c.anillo.length >= 3 && nombres.includes(c.capa)).map(c => c.anillo);
+  const capa = mascaraCapas([[aguas.map(a => a.pts), 1], [anillos(['humedal']), 2]], calcularCaja(tramos, edif));
+  const clase = new Uint8Array(N);   // 1 árbol, 2 agua, 3 piscina
+  for (let i = 0; i < N; i++) {
+    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2], L = (r + g + b) / 3, mx = Math.max(r, g, b), sat = mx ? (mx - Math.min(r, g, b)) / mx : 0;
+    if (b > r + 35 && g > r + 25 && L > 110 && sat > 0.3) clase[i] = 3;
+    else if (b > r + 10 && b >= g - 15 && L > 30 && L < 180 && sat > 0.08) clase[i] = 2;
+    else if (2 * g - r - b > 10 && g >= r - 2 && L < 115) clase[i] = 1;
+  }
+  const libreDeCosas = (x, z) => !casaCerca(edif, rejilla, x, z, 0.3, nada) && !enCalzadaCualquiera(x, z) && !(capa(x, z) & 3);
+  const enCalzadaCualquiera = (x, z) => {
+    for (let cx = Math.floor((x - 16) / TAM_CELDA); cx <= Math.floor((x + 16) / TAM_CELDA); cx++)
+      for (let cz = Math.floor((z - 16) / TAM_CELDA); cz <= Math.floor((z + 16) / TAM_CELDA); cz++) {
+        const arr = rejSeg.get(cx + ',' + cz);
+        if (arr) for (let j = 0; j < arr.length; j += 2) {
+          const t = tramos[arr[j]], p = t.pts, k = arr[j + 1], m = t.ancho / 2 + 0.5;
+          if (distSeg2(x, z, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1]) < m * m) return true;
+        }
+      }
+    return false;
+  };
+  // componentes conexas de una clase (4 vecinos): [{ px: [índices], borde }]
+  const componentes = (cl, maxPx) => {
+    const vista = new Uint8Array(N), out = [];
+    for (let i = 0; i < N; i++) {
+      if (clase[i] !== cl || vista[i]) continue;
+      const px = [], pila = [i];
+      let borde = false;
+      vista[i] = 1;
+      while (pila.length) {
+        const k = pila.pop(), c = k % w, f = (k - c) / w;
+        if (px.length < maxPx) px.push(k);
+        if (c === 0 || f === 0 || c === w - 1 || f === h - 1) borde = true;
+        for (const n of [c > 0 ? k - 1 : -1, c < w - 1 ? k + 1 : -1, f > 0 ? k - w : -1, f < h - 1 ? k + w : -1])
+          if (n >= 0 && !vista[n] && clase[n] === cl) { vista[n] = 1; pila.push(n); }
+      }
+      out.push({ px, borde, n: px.length });
+    }
+    return out;
+  };
+  const a2 = paso * paso, nuevas = [];
+  // el mar: rectángulos de píxeles (filas seguidas con el mismo tramo se juntan)
+  let mar = 0;
+  for (const comp of componentes(2, 4e6)) {
+    if (!comp.borde || comp.n * a2 < 50000) continue;
+    const es = new Uint8Array(N);
+    let bajos = 0;
+    for (const k of comp.px) { const [x, z] = raster.aLocal(k % w, Math.floor(k / w)), hh = altura ? altura(x, z) : null; if (hh === null || hh <= 1.5) { es[k] = 1; bajos++; } }
+    if (bajos < comp.n * 0.6) continue;   // en alto no es el mar (una nave azul, una pista)
+    const abiertos = new Map();
+    const cerrar = (c0, c1, f0, f1) => {
+      const P = (c, f) => raster.aLocal(c - 0.5, f - 0.5);
+      nuevas.push({ pts: [P(c0, f0), P(c1 + 1, f0), P(c1 + 1, f1 + 1), P(c0, f1 + 1)], capa: 'mar' });
+    };
+    for (let f = 0; f < h; f++) {
+      const filas = new Map();
+      for (let c = 0; c < w; c++) {
+        if (!es[f * w + c]) continue;
+        let c1 = c;
+        while (c1 + 1 < w && es[f * w + c1 + 1]) c1++;
+        const clave = c + ',' + c1, ant = abiertos.get(clave);
+        filas.set(clave, ant ? { c0: c, c1, f0: ant.f0 } : { c0: c, c1, f0: f });
+        mar += (c1 - c + 1) * a2;
+        c = c1;
+      }
+      for (const [clave, r] of abiertos) if (!filas.has(clave)) cerrar(r.c0, r.c1, r.f0, f - 1);
+      abiertos.clear();
+      for (const [k, v] of filas) abiertos.set(k, v);
+    }
+    for (const r of abiertos.values()) cerrar(r.c0, r.c1, r.f0, h - 1);
+  }
+  // piscinas: el rectángulo que envuelve cada mancha turquesa
+  let piscinas = 0;
+  for (const comp of componentes(3, 2000)) {
+    const A = comp.n * a2;
+    if (A < 6 || A > 150) continue;
+    const pts = comp.px.map(k => raster.aLocal(k % w, Math.floor(k / w)));
+    const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length, cz = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+    if (casaCerca(edif, rejilla, cx, cz, 0.5, nada) || choca(aguas, rejAguas, cx, cz, 1)) continue;   // sobre una casa, o ya está en OpenStreetMap
+    const r = pts.length >= 3 ? rectanguloMinimo(pts) : null;
+    const a = (r ? r.a : 0) + paso / 2, b = (r ? r.b : 0) + paso / 2, ux = r ? r.ux : 1, uz = r ? r.uz : 0, rx = r ? r.cx : cx, rz = r ? r.cz : cz;
+    nuevas.push({ pts: [[-a, -b], [a, -b], [a, b], [-a, b]].map(([u, v]) => [rx + ux * u - uz * v, rz + uz * u + ux * v]), capa: 'piscina' });
+    piscinas++;
+  }
+  // árboles: de los píxeles de copa más oscuros a los más claros, con sitio alrededor
+  const cand = [];
+  for (let f = 1; f < h - 1; f++) for (let c = 1; c < w - 1; c++) {
+    const i = f * w + c;
+    if (clase[i] !== 1) continue;
+    let vec = 0;
+    for (const n of [i - 1, i + 1, i - w, i + w, i - w - 1, i - w + 1, i + w - 1, i + w + 1]) if (clase[n] === 1) vec++;
+    if (vec >= 4) cand.push(i);
+  }
+  cand.sort((p, q) => (d[p * 4] + d[p * 4 + 1] + d[p * 4 + 2]) - (d[q * 4] + d[q * 4 + 1] + d[q * 4 + 2]));
+  const arboles = [], celdas = new Map(), sep = Math.max(4.5, paso * 2.2), C = sep;
+  const cerca = (x, z) => {
+    const cx = Math.floor(x / C), cz = Math.floor(z / C);
+    for (let i = -1; i <= 1; i++) for (let k = -1; k <= 1; k++) for (const [px, pz] of celdas.get((cx + i) + ',' + (cz + k)) || []) if ((px - x) ** 2 + (pz - z) ** 2 < sep * sep) return true;
+    return false;
+  };
+  for (const i of cand) {
+    if (arboles.length >= 25000) break;
+    const c = i % w, f = (i - c) / w, [x, z] = raster.aLocal(c + rng() - 0.5, f + rng() - 0.5);
+    if (cerca(x, z) || !libreDeCosas(x, z)) continue;
+    // pino piñonero: copa muy oscura dentro de una masa de árboles (un pinar), no en una fila de árboles de una calle
+    const L = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3, rr = Math.max(2, Math.round(7 / paso));
+    let masa = 0, tot = 0;
+    if (L < 90) for (let df = -rr; df <= rr; df++) for (let dc = -rr; dc <= rr; dc++) { const cc = c + dc, ff = f + df; if (cc < 0 || ff < 0 || cc >= w || ff >= h) continue; tot++; if (clase[ff * w + cc] === 1) masa++; }
+    const tipo = L < 90 && masa > tot * 0.55 ? 'pino' : undefined;
+    arboles.push(tipo ? [x, z, tipo] : [x, z]);
+    const k = Math.floor(x / C) + ',' + Math.floor(z / C);
+    if (!celdas.has(k)) celdas.set(k, []);
+    celdas.get(k).push([x, z]);
+  }
+  return { arboles, aguas: nuevas, mar: Math.round(mar), piscinas };
+}
+// --- parques infantiles: los de OpenStreetMap y, en cada parque de 2.000 m² o más que no tenga, uno a unos metros de su borde ---
+// Cada uno es un rectángulo (de 10 × 8 a 20 × 14 m) con suelo de caucho, valla baja, columpios, tobogán, balancín, muelles y bancos.
+// piezas: { tipo, u, v } en metros dentro del rectángulo (u a lo largo, v a lo ancho), para dibujarlas y para chocar con ellas
+const PIEZAS_JUEGO = [['columpio', -0.28, -0.22, 2.0], ['tobogan', 0.25, -0.22, 1.8], ['balancin', -0.28, 0.25, 1.4], ['muelle', 0.12, 0.27, 0.45], ['muelle', 0.32, 0.27, 0.45]];
+function generarJuegos(capas, juegosOSM, tramos, edif, rejilla, aguas, rejAguas, rng) {
+  const calles = construirRejillaCalles(tramos), nada = new Set(), out = [];
+  const cabe = (cx, cz, ux, uz, a, b) => {   // el rectángulo, sin casas, calles ni agua
+    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+      const u = a * i / 2, v = b * j / 2, x = cx + ux * u - uz * v, z = cz + uz * u + ux * v;
+      if (casaCerca(edif, rejilla, x, z, 1, nada) || cercaDeCalle(calles, x, z, 6) || choca(aguas, rejAguas, x, z, 1)) return false;
+    }
+    return true;
+  };
+  const poner = (cx, cz, ux, uz, a, b, osm) => {
+    const piezas = PIEZAS_JUEGO.map(([tipo, fu, fv, r]) => ({ tipo, x: cx + ux * fu * 2 * a - uz * fv * 2 * b, z: cz + uz * fu * 2 * a + ux * fv * 2 * b, r }));
+    out.push({ cx, cz, ux, uz, a, b, osm, piezas, pts: [[-a, -b], [a, -b], [a, b], [-a, b]].map(([u, v]) => [cx + ux * u - uz * v, cz + uz * u + ux * v]) });
+  };
+  for (const j of juegosOSM) {
+    let cx, cz, ux = 1, uz = 0, a = 7, b = 5;
+    if (j.pts) { const r = rectanguloMinimo(j.pts); if (!r) continue; ({ cx, cz, ux, uz } = r); a = Math.min(10, Math.max(5, r.a)); b = Math.min(7, Math.max(4, r.b)); }
+    else [cx, cz] = j.punto;
+    poner(cx, cz, ux, uz, a, b, true);
+  }
+  for (const c of capas) {
+    if (c.capa !== 'parque o jardín' || !c.anillo || c.anillo.length < 3) continue;
+    const r = c.anillo, A = Math.abs(areaAnillo(r));
+    if (A < 2000 || out.some(j => enPoligono(r, j.cx, j.cz))) continue;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const k0 = Math.floor(rng() * r.length), p = r[k0], q = r[(k0 + 1) % r.length], l = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1, ux = (q[0] - p[0]) / l, uz = (q[1] - p[1]) / l;
+    for (let k = 0; k < 40; k++) {
+      const cx = x0 + rng() * (x1 - x0), cz = z0 + rng() * (z1 - z0);
+      if (!enPoligono(r, cx, cz) || !cabe(cx, cz, ux, uz, 7.5, 5.5)) continue;
+      if ([[7.5, 5.5], [-7.5, 5.5], [7.5, -5.5], [-7.5, -5.5]].some(([u, v]) => !enPoligono(r, cx + ux * u - uz * v, cz + uz * u + ux * v))) continue;
+      poner(cx, cz, ux, uz, 7, 5, false);
+      break;
+    }
+  }
+  return out;
+}
 // Todo lo que se dibuja y choca fuera de las calles y de las casas
-function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng, solares = []) {
+function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng, solares = [], raster = null, altura = null) {
   const capas = parsearMapa(mapaGeo);
-  const { piscinas, rotondas } = extraerOSM(osm);
+  const { piscinas, rotondas, juegos } = extraerOSM(osm);
   const aguas = construirAguas(capas, piscinas);
+  // con foto aérea: el mar, las piscinas y los árboles que se ven en ella
+  const deFoto = raster ? detectarEnFoto(raster, capas, aguas, construirRejilla(aguas), edif, rejilla, tramos, altura, mulberry32(31)) : null;
+  if (deFoto) aguas.push(...deFoto.aguas);
   const rejAguas = construirRejilla(aguas);
   const rejCalles = construirRejillaCalles(tramos);
   const cruces = puntosDeCruce(tramos);
   const rieles = generarQuitamiedos(tramos, rotondas, cruces);
   const islas = prepararIslas(rotondas).filter(isla => !cercaDeCalle(rejCalles, isla.cx, isla.cz, isla.ri));   // sin isleta si una calle pasa por ella
-  const arboles = generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng);
+  // árboles: con foto, los que se ven en ella (y algunos de los parques, que en la foto pueden no distinguirse); sin foto, por las capas del mapa
+  let arboles;
+  if (deFoto) {
+    const ocupadas = new Set(deFoto.arboles.map(([x, z]) => Math.floor(x / 4) + ',' + Math.floor(z / 4)));
+    arboles = deFoto.arboles.concat(generarArboles(capas.filter(c => c.capa === 'parque o jardín'), tramos, edif, rejilla, aguas, rejAguas, rng)
+      .filter(([x, z]) => !ocupadas.has(Math.floor(x / 4) + ',' + Math.floor(z / 4))).slice(0, 4000));
+  } else arboles = generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng);
   // vallas de los chalets (con su propio azar: así el resto de la zona sale igual que antes)
   const { segs: vallas, chalets, parcelas: jardines } = generarVallas(edif, rejilla, tramos, aguas, rejAguas, mulberry32(777), solares);
   const rejVallas = construirRejillaCalles(vallas.map(v => ({ pts: [[v.ax, v.az], [v.bx, v.bz]] })));
   arboles.push(...generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, rejAguas));
   for (let k = arboles.length - 1; k >= 0; k--) if (cercaDeCalle(rejVallas, arboles[k][0], arboles[k][1], 0.9)) arboles.splice(k, 1);   // ningún tronco en mitad de una valla
+  const juegosParque = generarJuegos(capas, juegos, tramos, edif, rejilla, aguas, rejAguas, mulberry32(55));
+  for (let k = arboles.length - 1; k >= 0; k--) if (juegosParque.some(j => enPoligono(j.pts, arboles[k][0], arboles[k][1]))) arboles.splice(k, 1);   // ni árboles en los columpios
+  // la valla baja de los parques infantiles también choca (con su entrada de 1,5 m en un lado largo)
+  for (const j of juegosParque) j.valla = j.pts.flatMap((p, i) => {
+    const q = j.pts[(i + 1) % 4];
+    if (i !== 0) return [[p, q]];
+    const m0 = [p[0] + (q[0] - p[0]) * 0.42, p[1] + (q[1] - p[1]) * 0.42], m1 = [p[0] + (q[0] - p[0]) * 0.58, p[1] + (q[1] - p[1]) * 0.58];
+    return [[p, m0], [m1, q]];
+  });
+  const rejVallasTodas = construirRejillaCalles(vallas.map(v => ({ pts: [[v.ax, v.az], [v.bx, v.bz]] })).concat(juegosParque.flatMap(j => j.valla.map(s => ({ pts: s })))));
   for (const isla of islas) for (let k = 0; k < 3; k++) {   // tres árboles en cada isleta, si caben
     const a = k * 2 * Math.PI / 3 + 0.4, x = isla.cx + Math.cos(a) * isla.ri * 0.5, z = isla.cz + Math.sin(a) * isla.ri * 0.5;
     if (!cercaDeCalle(rejCalles, x, z, 3) && !dentroDeOtraCasa(edif, rejilla, x, z, -1) && !choca(aguas, rejAguas, x, z, 1)) arboles.push([x, z]);
@@ -1600,10 +1807,10 @@ function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng, solares = []) {
   };
   const quioscos = generarQuioscos(tramos, rotondas, cruces, libre, rng);
   const termometros = generarTermometros(tramos, rotondas, (x, z, r, i) => libre(x, z, r, i) && !quioscos.some(q => Math.hypot(q.x - x, q.z - z) < 4), rng);
-  const mobiliario = quioscos.map(q => [q.x, q.z, 1.35]).concat(termometros.map(q => [q.x, q.z, 0.15]));
+  const mobiliario = quioscos.map(q => [q.x, q.z, 1.35]).concat(termometros.map(q => [q.x, q.z, 0.15]), juegosParque.flatMap(j => j.piezas.map(p => [p.x, p.z, p.r])));
   return {
     pasos, quioscos, termometros, rejMobiliario: construirRejillaPuntos(mobiliario),
-    capas, aguas, rejAguas, rejCalles, rieles, rejRieles: construirRejillaCalles(rieles), islas, vallas, rejVallas, chalets, jardines,
+    capas, aguas, rejAguas, rejCalles, rieles, rejRieles: construirRejillaCalles(rieles), islas, vallas, rejVallas: rejVallasTodas, chalets, jardines, deFoto, juegos: juegosParque,
     arboles, rejArboles: construirRejillaPuntos(arboles),
     farolas, rejFarolas: construirRejillaPuntos(farolas.map(f => [f.x, f.z])), marcas,
   };
@@ -3096,10 +3303,38 @@ function mallaPoligono(pts, y) {
   return g;
 }
 function mallaAguas(aguas) {
-  const grupo = new THREE.Group();
+  const grupo = new THREE.Group(), mar = [], borde = [];
   for (const a of aguas) {
-    const geo = mallaPoligono(a.pts, 0.03);
+    if (a.capa === 'mar') { mar.push(a.pts); continue; }   // el mar, hecho de muchos rectángulos: en una sola malla
+    const geo = mallaPoligono(a.pts, a.capa === 'piscina' ? 0.06 : 0.03);
     if (geo) grupo.add(new THREE.Mesh(geo, materialAgua));
+    if (a.capa === 'piscina' && a.pts.length >= 3) borde.push(a.pts);
+  }
+  if (mar.length) {
+    const pos = [];
+    for (const p of mar) for (const k of [0, 1, 2, 0, 2, 3]) pos.push(p[k][0], 0.02, p[k][1]);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    grupo.add(new THREE.Mesh(g, materialAgua));
+  }
+  // piscinas: un borde de piedra clara de 40 cm alrededor del agua
+  if (borde.length) {
+    const pos = [];
+    for (const p of borde) {
+      let cx = 0, cz = 0;
+      for (const q of p) { cx += q[0]; cz += q[1]; }
+      cx /= p.length; cz /= p.length;
+      const fuera = p.map(([x, z]) => { const dx = x - cx, dz = z - cz, l = Math.hypot(dx, dz) || 1; return [x + dx / l * 0.55, z + dz / l * 0.55]; });
+      for (let i = 0; i < p.length; i++) {
+        const j = (i + 1) % p.length;
+        for (const q of [p[i], fuera[i], fuera[j], p[i], fuera[j], p[j]]) pos.push(q[0], 0.07, q[1]);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+    grupo.add(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0xe8e2d4, side: THREE.DoubleSide })));
   }
   return grupo;
 }
@@ -3146,14 +3381,47 @@ async function mallaArbolesModelos(arboles) {
     grupo.add(im);
     mallas.push({ malla: im, cx: (bx + 0.5) * BLOQUE_ARBOLES, cz: (bz + 0.5) * BLOQUE_ARBOLES });
   }
-  bloquesArboles = mallas;
+  bloquesArboles.push(...mallas);   // junto a los de los pinos
   return grupo;
 }
-function mallaArboles(arboles) {
+// Pinos piñoneros (los pinares de la costa): tronco alto y algo torcido, copa ancha y plana en dos o tres masas
+function mallaPinos(pinos) {
   const grupo = new THREE.Group();
-  if (!arboles.length) return grupo;
-  if (!ARCHIVOS_ARBOLES.length) return mallaArbolesProcedural(arboles);
+  if (!pinos.length) return grupo;
+  const tronco = new THREE.CylinderGeometry(0.16, 0.3, 7, 6, 1, true).translate(0, 3.5, 0);
+  const copa = new THREE.IcosahedronGeometry(1, 1).scale(3.6, 1.15, 3.6).translate(0, 7.6, 0);
+  const copa2 = new THREE.IcosahedronGeometry(1, 1).scale(2.4, 0.9, 2.4).translate(1.6, 7.0, -0.9);
+  const matTronco = new THREE.MeshLambertMaterial({ color: 0x6e4a33 }), matCopa = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const rng = mulberry32(7), m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color(), bloques = new Map();
+  for (const [x, z] of pinos) {
+    const k = Math.floor(x / BLOQUE_ARBOLES) + ',' + Math.floor(z / BLOQUE_ARBOLES);
+    if (!bloques.has(k)) bloques.set(k, []);
+    bloques.get(k).push([x, z, rng(), rng(), rng()]);
+  }
+  for (const [k, lista] of bloques) {
+    const [bx, bz] = k.split(',').map(Number), mallas = [new THREE.InstancedMesh(tronco, matTronco, lista.length), new THREE.InstancedMesh(copa, matCopa, lista.length), new THREE.InstancedMesh(copa2, matCopa, lista.length)];
+    lista.forEach(([x, z, a, b, t], i) => {
+      const esc = 0.8 + 0.45 * t;
+      m.compose(new THREE.Vector3(x, 0, z), q.setFromEuler(e.set((a - 0.5) * 0.12, a * Math.PI * 2, (b - 0.5) * 0.12)), new THREE.Vector3(esc, esc * (0.9 + 0.2 * b), esc));
+      for (const im of mallas) im.setMatrixAt(i, m);
+      mallas[1].setColorAt(i, c.setRGB(0.24 + 0.06 * a, 0.34 + 0.06 * b, 0.17 + 0.04 * t));
+      mallas[2].setColorAt(i, c.setRGB(0.21 + 0.06 * b, 0.31 + 0.06 * a, 0.15 + 0.04 * t));
+    });
+    for (const im of mallas) { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; im.frustumCulled = false; im.castShadow = sombras; }
+    const g = new THREE.Group();
+    g.add(...mallas);
+    grupo.add(g);
+    bloquesArboles.push({ malla: g, cx: (bx + 0.5) * BLOQUE_ARBOLES, cz: (bz + 0.5) * BLOQUE_ARBOLES });
+  }
+  return grupo;
+}
+function mallaArboles(todos) {
+  const grupo = new THREE.Group();
   bloquesArboles = [];
+  const pinos = todos.filter(a => a[2] === 'pino'), arboles = todos.filter(a => a[2] !== 'pino');
+  if (pinos.length) grupo.add(mallaPinos(pinos));
+  if (!arboles.length) return grupo;
+  if (!ARCHIVOS_ARBOLES.length) return grupo.add(mallaArbolesProcedural(arboles)), grupo;
   mallaArbolesModelos(arboles).then(g => grupo.add(g), () => grupo.add(mallaArbolesProcedural(arboles)));   // si no cargan, árboles sencillos
   return grupo;
 }
@@ -3235,7 +3503,7 @@ function mallaQuitamiedos(rieles) {
 
 // --- vallas de los chalets: murete con reja, murete con seto o muro alto; pilares en las esquinas y cada pocos metros; cancela de hierro ---
 // Una malla por bloque de 200 m (como las farolas): solo se dibujan las cercanas
-const ESTILO_VALLA = { reja: { muro: 0.8, alto: 1.7 }, seto: { muro: 0.45, alto: 1.55 }, muro: { muro: 1.8, alto: 1.8 } };
+const ESTILO_VALLA = { reja: { muro: 1.0, alto: 2.0 }, seto: { muro: 0.9, alto: 2.0 }, muro: { muro: 2.0, alto: 2.0 } };   // como las de verdad: 2 m de muro, o 1 m de murete y otro de reja o seto
 const TONOS_MURETE = ['#f4f1e8', '#f0e9d8', '#ebdcb4', '#e2cda2', '#f7f6f2', '#d7c7b0', '#c9926d'];
 let texturaRejaCache = null, texturaSetoCache = null;
 function texturaReja() {   // barrotes cada 12 cm con pasamanos arriba y abajo y una punta de lanza (transparente entre medias)
@@ -3322,8 +3590,8 @@ function mallaVallas(segs) {
       const c = tono[Math.floor(s.tono * tono.length) % tono.length], ux = (B[0] - A[0]) / L, uz = (B[1] - A[1]) / L;
       const pilar = (f, h) => { const x = A[0] + (B[0] - A[0]) * f, z = A[1] + (B[1] - A[1]) * f; caja(muro, [x - ux * 0.19, z - uz * 0.19], [x + ux * 0.19, z + uz * 0.19], 0, h, 0.19, c); };
       if (s.puerta) {   // cancela: hierro de suelo a 1,8 m, entre dos pilares
-        plano(reja, A, B, 0.04, 1.8);
-        pilar(0, 2.0); pilar(1, 2.0);
+        plano(reja, A, B, 0.04, 2.0);
+        pilar(0, 2.2); pilar(1, 2.2);
         continue;
       }
       caja(muro, A, B, 0, E.muro, 0.11, c);
@@ -3340,6 +3608,77 @@ function mallaVallas(segs) {
     grupo.add(bloque);
     bloquesFarolas.push({ g: bloque, cx, cz });
   }
+  return grupo;
+}
+// --- parques infantiles: suelo de caucho, valla baja verde, columpios, tobogán, balancín, muelles y dos bancos; todo en una malla ---
+function mallaJuegos(juegos) {
+  const grupo = new THREE.Group();
+  if (!juegos.length) return grupo;
+  const pos = [], nor = [], col = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), n = new THREE.Vector3(), nm = new THREE.Matrix3();
+  const meter = (geo, color, x, y, z, ang, rx = 0, rz = 0) => {   // pieza ya colocada, con su color
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    m.compose(new THREE.Vector3(x, y, z), q.setFromEuler(new THREE.Euler(rx, ang, rz, 'YXZ')), new THREE.Vector3(1, 1, 1));
+    nm.getNormalMatrix(m);
+    const P = g.attributes.position, N = g.attributes.normal, c = new THREE.Color(color);
+    for (let i = 0; i < P.count; i++) {
+      v.fromBufferAttribute(P, i).applyMatrix4(m); pos.push(v.x, v.y, v.z);
+      n.fromBufferAttribute(N, i).applyMatrix3(nm).normalize(); nor.push(n.x, n.y, n.z);
+      col.push(c.r, c.g, c.b);
+    }
+  };
+  const caja = (w, h, d) => new THREE.BoxGeometry(w, h, d), tubo = (r, h) => new THREE.CylinderGeometry(r, r, h, 6);
+  const suelo = new THREE.MeshLambertMaterial({ color: 0xc0573e, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  for (const j of juegos) {
+    const ang = Math.atan2(-j.uz, j.ux), P = (u, w) => [j.cx + j.ux * u - j.uz * w, j.cz + j.uz * u + j.ux * w];
+    const s = mallaPoligono(j.pts, 0.05);   // suelo de caucho
+    if (s) grupo.add(new THREE.Mesh(s, suelo));
+    // valla: postes y dos barras, verde
+    for (const [A, B] of j.valla) {
+      const L = Math.hypot(B[0] - A[0], B[1] - A[1]), a2 = Math.atan2(-(B[1] - A[1]), B[0] - A[0]), mx = (A[0] + B[0]) / 2, mz = (A[1] + B[1]) / 2;
+      for (const y of [0.45, 0.85]) meter(caja(L, 0.05, 0.05), 0x2f7d4a, mx, y, mz, a2);
+      for (let t = 0; t <= 1.001; t += 1 / Math.max(1, Math.round(L / 1.5))) meter(tubo(0.04, 0.9), 0x2f7d4a, A[0] + (B[0] - A[0]) * t, 0.45, A[1] + (B[1] - A[1]) * t, 0);
+    }
+    for (const p of j.piezas) {
+      const [x, z] = [p.x, p.z];
+      if (p.tipo === 'columpio') {   // pórtico en A con dos asientos
+        for (const s2 of [-1, 1]) for (const k of [-1, 1]) meter(tubo(0.05, 2.5), 0xd8a21f, x + Math.cos(ang) * s2 * 1.6 + Math.sin(ang) * k * 0.55, 1.2, z - Math.sin(ang) * s2 * 1.6 + Math.cos(ang) * k * 0.55, ang, k * 0.22, 0);
+        meter(tubo(0.06, 3.3), 0xd8a21f, x, 2.35, z, ang, 0, Math.PI / 2);
+        for (const s2 of [-0.7, 0.7]) {
+          const sx = x + Math.cos(ang) * s2, sz = z - Math.sin(ang) * s2;
+          for (const k of [-0.2, 0.2]) meter(tubo(0.012, 1.9), 0x555555, sx + Math.cos(ang) * k, 1.4, sz - Math.sin(ang) * k, ang);
+          meter(caja(0.5, 0.05, 0.22), 0x2b2b2b, sx, 0.45, sz, ang);
+        }
+      } else if (p.tipo === 'tobogan') {   // torre con tejadillo, escalera y rampa
+        meter(caja(1.2, 0.1, 1.2), 0x3b7dc4, x, 1.4, z, ang);
+        for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) meter(tubo(0.05, 2.6), 0xe24b3b, x + Math.cos(ang) * a * 0.55 + Math.sin(ang) * b * 0.55, 1.3, z - Math.sin(ang) * a * 0.55 + Math.cos(ang) * b * 0.55, ang);
+        meter(new THREE.ConeGeometry(0.95, 0.6, 4), 0xe24b3b, x, 2.9, z, ang + Math.PI / 4);
+        const [rx, rz] = [x + Math.cos(ang) * 1.6, z - Math.sin(ang) * 1.6];
+        meter(caja(2.3, 0.06, 0.6), 0xf2c230, rx, 0.75, rz, ang, 0, -0.55);
+        const [ex, ez] = [x - Math.cos(ang) * 1.15, z + Math.sin(ang) * 1.15];
+        meter(caja(0.06, 1.8, 0.5), 0x3b7dc4, ex, 0.75, ez, ang, 0, 0.5);
+      } else if (p.tipo === 'balancin') {
+        meter(caja(0.3, 0.45, 0.3), 0x3b7dc4, x, 0.22, z, ang);
+        meter(caja(3.0, 0.08, 0.28), 0xe24b3b, x, 0.5, z, ang, 0, 0.12);
+        for (const s2 of [-1.3, 1.3]) meter(tubo(0.03, 0.3), 0xf2c230, x + Math.cos(ang) * s2, 0.7 + s2 * 0.12, z - Math.sin(ang) * s2, ang, Math.PI / 2, 0);
+      } else if (p.tipo === 'muelle') {   // animalito sobre un muelle
+        meter(tubo(0.08, 0.5), 0x777777, x, 0.25, z, ang);
+        meter(caja(0.7, 0.35, 0.3), [0x5fb84a, 0xf2c230, 0xe24b3b][Math.floor(Math.abs(x * 7 + z) % 3)], x, 0.68, z, ang);
+        meter(caja(0.25, 0.3, 0.25), 0xffffff, x + Math.cos(ang) * 0.3, 0.95, z - Math.sin(ang) * 0.3, ang);
+      }
+    }
+    // dos bancos fuera, en el lado de la entrada
+    for (const s2 of [-0.55, 0.55]) {
+      const [bx, bz] = P(s2 * j.a, -j.b - 1.2);
+      meter(caja(1.6, 0.06, 0.42), 0x8a5a33, bx, 0.45, bz, ang);
+      meter(caja(1.6, 0.4, 0.05), 0x8a5a33, bx - Math.sin(ang) * 0.22 * -1, 0.75, bz - Math.cos(ang) * 0.22, ang);
+      for (const k of [-0.7, 0.7]) meter(caja(0.06, 0.45, 0.42), 0x3c3c3c, bx + Math.cos(ang) * k, 0.22, bz - Math.sin(ang) * k, ang);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  grupo.add(conSombra(new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }))));
   return grupo;
 }
 // Césped dentro de las parcelas de los chalets: solo sin foto aérea (con foto ya se ven los jardines de verdad)
@@ -3665,14 +4004,17 @@ const FRAGMENTO_FACHADA = `#include <color_fragment>
     vec3 base=diffuseColor.rgb;
     float n1=hh(floor(vec2(u,v)*1.5)),n2=hh(floor(vec2(u,v)*0.2+7.0));
     vec3 col=base*mix(1.0,0.95+0.08*n1,aa)*(0.97+0.05*n2);
-    if(vT>-0.5){   // textura real de la pared (ladrillo, azulejo, enfoscado), sacada de su foto de fachada: cada 1,6 m, en espejo para que no se vean costuras
-      vec2 t=abs(fract(vec2(u,v)/3.2)*2.0-1.0),o=vec2(mod(vT,32.0),floor(vT/32.0));
-      vec3 d=texture2D(uParches,(o*64.0+2.0+t*60.0)/2048.0).rgb*2.0;
-      col*=mix(vec3(1.0),d,0.85*aa);
-    }
     float zh=vZc.a*4.0;
     col*=1.0-0.07*(1.0-smoothstep(zh,zh+1.3,v));
     col=mix(col,vZc.rgb*(0.93+0.1*n1),1.0-step(zh,v));
+    {   // textura real sacada de su foto de fachada, por bandas: el zócalo, la pared y la banda alta (el último quinto, con el pretil)
+      float sl=v<zh?vT.x:(v>H*0.8?vT.z:vT.y);
+      if(sl>-0.5){   // cada 1,6 m, en espejo para que no se vean costuras; casillas de 48 px en un atlas de 2048 (42 por fila)
+        vec2 t=abs(fract(vec2(u,v)/3.2)*2.0-1.0),o=vec2(mod(sl,42.0),floor(sl/42.0));
+        vec3 d=texture2D(uParches,(o*48.0+1.5+t*45.0)/2048.0).rgb*2.0;
+        col*=mix(vec3(1.0),d,0.85*aa);
+      }
+    }
     col*=1.0-0.3*(1.0-smoothstep(0.0,0.035,abs(v-zh)))*aa*step(0.2,zh);
     float cor=step(H-0.34,v)*step(v,H-0.1);
     col=mix(col,base*1.03,cor);
@@ -3754,13 +4096,13 @@ function materialFachadas() {
     sh.uniforms.uNoche = uNoche; sh.uniforms.uFoto = uFotoTejados; sh.uniforms.uConFoto = uConFoto; sh.uniforms.uParches = uParches;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF; attribute vec2 aR; attribute float aT;
-varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR; varying float vT;`)
+attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF; attribute vec2 aR; attribute vec3 aT;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR; varying vec3 vT;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
 vWw = aW; vZc = aZ; vCp = aC; vFa = aF; vR = aR; vT = aT;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR; varying float vT; uniform float uNoche, uConFoto; uniform sampler2D uFoto, uParches;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR; varying vec3 vT; uniform float uNoche, uConFoto; uniform sampler2D uFoto, uParches;
 float hh(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}`)
       .replace('#include <color_fragment>', FRAGMENTO_FACHADA);
   };
@@ -3808,6 +4150,9 @@ function pixelesFoto(foto) {
   g.drawImage(foto.textura.image, 0, 0, w, h);
   const d = g.getImageData(0, 0, w, h).data;
   foto.px = {
+    w, h, d,
+    // centro del píxel (c, f) de la foto reducida, en metros locales
+    aLocal: (c, f) => { const cc = (c + 0.5) / k - 0.5, ff = (f + 0.5) / k - 0.5; return localDeMercator(foto.g.C + foto.g.A * cc + foto.g.B * ff, foto.g.F + foto.g.D * cc + foto.g.E * ff); },
     paso: (foto.g.A / k) * Math.cos(ORIGEN.lat * Math.PI / 180),   // metros por píxel (más o menos)
     at: (x, z) => {
       const [X, Y] = mercatorDeLocal(x, z), [u, t] = uvOrtofoto(X, Y, foto.g, foto.W, foto.H);
@@ -3849,12 +4194,12 @@ function tejadosDeFoto(edif, foto) {
 function nuevoBufer(n) {
   const B = { n: 0, I: [] };
   B.reservar = m => {
-    const o = B, P = new Float32Array(m * 3), N = new Float32Array(m * 3), C = new Uint8Array(m * 3), W = new Float32Array(m * 3), Z = new Uint8Array(m * 4), K = new Uint8Array(m * 4), F = new Float32Array(m * 4), R = new Float32Array(m * 2), T = new Float32Array(m);
+    const o = B, P = new Float32Array(m * 3), N = new Float32Array(m * 3), C = new Uint8Array(m * 3), W = new Float32Array(m * 3), Z = new Uint8Array(m * 4), K = new Uint8Array(m * 4), F = new Float32Array(m * 4), R = new Float32Array(m * 2), T = new Float32Array(m * 3);
     if (o.P) { P.set(o.P); N.set(o.N); C.set(o.C); W.set(o.W); Z.set(o.Z); K.set(o.K); F.set(o.F); R.set(o.R); T.set(o.T); }
     Object.assign(o, { P, N, C, W, Z, K, F, R, T, cap: m });
   };
   B.reservar(n);
-  B.casilla = -1;   // casilla del parche de textura de la casa que se está haciendo (solo sus paredes)
+  B.casillas = [-1, -1, -1];   // casillas de los parches de la casa que se está haciendo (zócalo, pared, banda alta; solo sus paredes)
   // vértice: posición, normal, color (bytes), aW (u, v, alto o marca), zócalo y carpintería (bytes), datos de fachada, uv de la foto
   B.v = (x, y, z, nr, col, w0, w1, w2, zb, kb, f, ru, rv) => {
     if (B.n >= B.cap) B.reservar(B.cap * 2);
@@ -3863,7 +4208,7 @@ function nuevoBufer(n) {
     B.C[i3] = col[0]; B.C[i3 + 1] = col[1]; B.C[i3 + 2] = col[2]; B.W[i3] = w0; B.W[i3 + 1] = w1; B.W[i3 + 2] = w2;
     B.Z.set(zb, i4); B.K.set(kb, i4); B.F[i4] = f[0]; B.F[i4 + 1] = f[1]; B.F[i4 + 2] = f[2]; B.F[i4 + 3] = f[3];
     B.R[i * 2] = ru; B.R[i * 2 + 1] = rv;
-    B.T[i] = B.casilla;
+    B.T[i * 3] = B.casillas[0]; B.T[i * 3 + 1] = B.casillas[1]; B.T[i * 3 + 2] = B.casillas[2];
     return i;
   };
   // triángulo con la cara de delante hacia la normal
@@ -3910,8 +4255,8 @@ function mallaEdificios(edif, foto) {
     const pared = (P, Q, nr, ya, yb, yc, yd, ua, ub, F, col, marca) =>
       quad([[P[0], ya, P[1]], [Q[0], yb, Q[1]], [Q[0], yc, Q[1]], [P[0], yd, P[1]]], nr, col, [[ua, ya, marca], [ub, yb, marca], [ub, yc, marca], [ua, yd, marca]], F, false);
     e.vw0 = G.n;   // desde aquí, sus paredes: se repintan si llega el color de su foto de fachada
-    e.casilla = Parches.casilla(e.ref, e.parche);
-    G.casilla = e.casilla;
+    e.casillas = Parches.casillasDe(e);
+    G.casillas = e.casillas;
     // paredes de fuera (con su tipo de fachada) y de los patios
     const paredesAnillo = (rr_, hueco, hi) => {
       let u = 1000 + hi * 300;
@@ -3962,7 +4307,7 @@ function mallaEdificios(edif, foto) {
       quad([[P2[0], y0 - drop - 0.1, P2[1]], [Q2[0], y0 - drop - 0.1, Q2[1]], [Q2[0], y0 - drop + 0.03, Q2[1]], [P2[0], y0 - drop + 0.03, P2[1]]], [o[0], 0, o[1]], wc, [plano, plano, plano, plano], SIN_FACHADA, false);
     }
     e.vw1 = G.n;
-    G.casilla = -1;
+    G.casillas = [-1, -1, -1];
     // tejados: marca -1 con tejas, -2 plano
     const tejado = (poli, huecos, yf, nr, marca, uvf) => {
       if (poli.length < 3) return;
@@ -4028,7 +4373,7 @@ function mallaEdificios(edif, foto) {
   geo.setAttribute('aC', new THREE.BufferAttribute(G.K.slice(0, nV * 4), 4, true));
   geo.setAttribute('aF', new THREE.BufferAttribute(G.F.slice(0, nV * 4), 4));
   geo.setAttribute('aR', new THREE.BufferAttribute(G.R.slice(0, nV * 2), 2));
-  geo.setAttribute('aT', new THREE.BufferAttribute(G.T.slice(0, nV), 1));
+  geo.setAttribute('aT', new THREE.BufferAttribute(G.T.slice(0, nV * 3), 3));
   geo.setIndex(new THREE.BufferAttribute(nV > 65535 ? new Uint32Array(G.I) : new Uint16Array(G.I), 1));
   geo.computeBoundingSphere();
   if (!matFachadas) matFachadas = materialFachadas();   // un solo material para todos los bloques
@@ -4040,8 +4385,8 @@ function repintarCasa(e) {
   const g = e.geoMalla;
   if (!g || e.vw0 == null) return;
   const C = g.attributes.color.array, W = g.attributes.aW.array, Z = g.attributes.aZ.array, K = g.attributes.aC.array, T = g.attributes.aT.array;
-  e.casilla = Parches.casilla(e.ref, e.parche);
-  T.fill(e.casilla, e.vw0, e.vw1);
+  e.casillas = Parches.casillasDe(e);
+  for (let i = e.vw0; i < e.vw1; i++) T.set(e.casillas, i * 3);
   const wc = a255(hexA01(e.colPared)), zb = a255([...hexA01(e.colZoc), e.zh / 4]), kb = a255([...hexA01(e.colCarp), e.rec]);
   for (let i = e.vw0; i < e.vw1; i++) {
     const f = W[i * 3 + 2] > 0.5 ? 1 : 0.86;   // el pretil y el alero, un poco más oscuros
@@ -4190,7 +4535,7 @@ function construirMallaZona() {
   const m = zona.mundo;
   mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif));
   mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaLucesFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas),
-    mallaQuioscos(m.quioscos), mallaTermometros(m.termometros), mallaVallas(m.vallas));
+    mallaQuioscos(m.quioscos), mallaTermometros(m.termometros), mallaVallas(m.vallas), mallaJuegos(m.juegos || []));
   if (!zona.foto && m.jardines.length) mallaZona.add(mallaJardines(m.jardines));
   scene.add(mallaZona);
   aplicarHora(horaElegida);   // ventanas, farolas y quioscos encendidos según la hora
@@ -4242,6 +4587,26 @@ function verdeDeFoto(foto) {
   };
 }
 
+// Cotas del terreno (alturas.asc, en Web Mercator): una función (x, z) → metros, o null fuera; null si el zip no las trae
+async function leerAlturas(zip) {
+  const f = zip.file('alturas.asc');
+  if (!f) return null;
+  const txt = await f.async('string'), lineas = txt.split('\n'), cab = {};
+  let i = 0;
+  for (; i < lineas.length; i++) { const m = /^\s*([a-zA-Z_]+)\s+(-?[\d.eE+-]+)\s*$/.exec(lineas[i]); if (!m) break; cab[m[1].toLowerCase()] = +m[2]; }
+  const W = cab.ncols, H = cab.nrows, dx = cab.dx || cab.cellsize, dy = cab.dy || cab.cellsize, x0 = cab.xllcorner, y0 = cab.yllcorner, nd = cab.nodata_value;
+  if (!(W > 0 && H > 0 && dx > 0)) return null;
+  const v = new Float32Array(W * H);
+  let k = 0;
+  for (; i < lineas.length && k < v.length; i++) for (const t of lineas[i].trim().split(/\s+/)) if (t !== '') v[k++] = +t;
+  return (x, z) => {
+    const [X, Y] = mercatorDeLocal(x, z), c = Math.floor((X - x0) / dx), f = H - 1 - Math.floor((Y - y0) / dy);
+    if (c < 0 || f < 0 || c >= W || f >= H) return null;
+    const a = v[f * W + c];
+    return a === nd ? null : a;
+  };
+}
+
 // --- carga del zip de la zona ---
 async function cargarZona(archivo) {
   $('estado').textContent = 'Leyendo el zip…';
@@ -4279,7 +4644,9 @@ async function cargarZona(archivo) {
     if (!e.ref) continue;
     const c = guardados.get(e.ref), z = deZona.get(e.ref);
     if (c && !c.sin && !e.pared) { e.pared = c.pared; e.zoc = c.zocalo; e.carp = c.carpinteria; }
-    e.parche = (c && c.parche) || (z && z.parche) || null;
+    const de = c && c.v >= (z && z.v || 0) ? c : z;   // la más nueva de las dos
+    e.parche = (de && de.parche) || null; e.parcheAlto = (de && de.parcheAlto) || null; e.parcheZocalo = (de && de.parcheZocalo) || null;
+    e.zocaloFr = de ? (de.zocaloFr || Catastro.zocaloFraccion(de)) : null;
     e.foto4 = !!((c && c.v >= Catastro.VERSION_COLOR) || (z && z.v >= Catastro.VERSION_COLOR));
   }
   Parches.empezar();
@@ -4326,7 +4693,8 @@ async function cargarZona(archivo) {
   await new Promise(r => setTimeout(r, 0));
   const osm = await opcional('datos/osm.json', { elements: [] });
   zona.parcelas = parcelasGeo ? parsearParcelas(parcelasGeo) : [];
-  zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas);
+  const altura = await leerAlturas(zip);
+  zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas, pixelesFoto(foto), altura);
   zona.caja = calcularCaja(tramos, edif);
   zona.foto = foto;
   zona.nFuentes = detectarFuentes(zona.mundo, zona.foto);
@@ -4338,7 +4706,9 @@ async function cargarZona(archivo) {
   document.title = `Carreras por ${zona.nombre} · prototipo`;
   const grande = edif.length > 45000 || tramos.length > 4500;
   const sim = zona.simuladas;
-  mostrarMenu(`${zona.nombre} lista: ${tramos.length} calles, ${edif.length} casas${zona.mundo.chalets ? ` (${zona.mundo.chalets} chalets con valla)` : ''}, ${zona.nFuentes} fuentes.` +
+  const df = zona.mundo.deFoto;
+  mostrarMenu(`${zona.nombre} lista: ${tramos.length} calles, ${edif.length} casas${zona.mundo.chalets ? ` (${zona.mundo.chalets} con valla)` : ''}, ${zona.nFuentes} fuentes.` +
+    (df ? ` De la foto aérea: ${df.arboles.length.toLocaleString('es')} árboles${df.piscinas ? `, ${df.piscinas} piscinas` : ''}${df.mar ? `, el mar (${(df.mar / 1e6).toFixed(1).replace('.', ',')} km²)` : ''}.` : '') +
     (sim ? ` ⚠ El Catastro no ha dado casas: ${sim === edif.length ? 'todas' : sim} son simuladas junto a las calles${zona.foto ? ', sobre la foto aérea' : ' (tampoco hay foto aérea: el suelo sale del mapa)'}.` : '') +
     (grande ? ' Es una zona grande: en el móvil puede ir lenta.' : '') +
     (q.quitar.size ? ` ⚠ Se han quitado ${q.quitar.size} casas que cortaban calles (${q.calles.slice(0, 3).join(', ')}${q.calles.length > 3 ? '…' : ''}).` : ''));
@@ -6473,31 +6843,54 @@ const Catastro = (() => {
     const ybMed=ybs.length?ybs.slice().sort((p,q)=>p-q)[Math.floor(ybs.length/2)]:y1;
     const fac=cand.filter(i=>Math.floor(i/W0)<ybMed-1&&!esPared(i)&&dist(i,wc)>70&&L[i]>=22&&L[i]<=125&&SA[i]>0.28&&SA[i]<0.72&&!(green(i)&&L[i]>=95));
     if(fac.length>=cand.length*0.01){const cc=km(fac,3).find(o=>o.n>=cand.length*0.008&&o.n<=cand.length*0.12);if(cc)out.carp=cc.c;}
-    // parche de la pared: el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible (sin ventanas
-    // ni esquinas), recortado de la foto original a 64 × 64 y con la media de cada color llevada a gris medio: así solo guarda la textura
-    // (ladrillo, azulejo, enfoscado) y el color sigue siendo el de la pared
-    {const lado=Math.max(5,Math.round(W0*0.09)),A=(W0+1)*(H0+1),S=new Float32Array(A),C=new Float32Array(A),L1=new Float32Array(A),L2=new Float32Array(A);
-      for(let y=0;y<H0;y++)for(let x=0;x<W0;x++){const i=y*W0+x,k=(y+1)*(W0+1)+x+1,a=k-1,b=k-W0-1,c=k-W0-2;
-        S[k]=S[a]+S[b]-S[c]+(esPared(i)?1:0);C[k]=C[a]+C[b]-C[c]+sky[i];L1[k]=L1[a]+L1[b]-L1[c]+L[i];L2[k]=L2[a]+L2[b]-L2[c]+L[i]*L[i];}
-      const suma=(T,x,y)=>T[(y+lado)*(W0+1)+x+lado]-T[y*(W0+1)+x+lado]-T[(y+lado)*(W0+1)+x]+T[y*(W0+1)+x],n=lado*lado;
+    // --- la casa en la foto y sus tres bandas: alta (cornisa, ático), media (la pared) y baja (el zócalo) ---
+    // Arriba de la casa, en las columnas del centro: la primera fila de pared bajo el cielo; abajo, donde acaba la pared (ybMed)
+    const tops=[];
+    for(let x=cx0;x<cx1;x++){for(let y=0;y<ybMed;y++){const i=y*W0+x;if(sky[i])continue;if(esPared(i)){tops.push(y);break;}}}
+    const topMed=tops.length>=(cx1-cx0)*0.3?tops.slice().sort((p,q)=>p-q)[Math.floor(tops.length/2)]:-1,hF=ybMed-topMed;
+    // ¿es una casa? Una pared que ocupa una buena parte de la foto entre su tejado y su base
+    let enCasa=0,totCasa=0;if(topMed>=0)for(let y=topMed;y<ybMed;y++)for(let x=cx0;x<cx1;x++){totCasa++;if(esPared(y*W0+x))enCasa++;}
+    out.casa=topMed>=0&&hF>=H0*0.22&&enCasa>=totCasa*0.35;
+    if(!out.casa){out.parcheWhy='no se ve bien la casa (de su tejado a su base)';return out;}
+    out.bandas={alto:topMed/H0,base:ybMed/H0};
+    // Integrales para buscar rápido el cuadrado más uniforme de cada banda
+    const A=(W0+1)*(H0+1),IP=new Float32Array(A),IC=new Float32Array(A),IV=new Float32Array(A),IL=new Float32Array(A),IL2=new Float32Array(A);
+    for(let y=0;y<H0;y++)for(let x=0;x<W0;x++){const i=y*W0+x,k=(y+1)*(W0+1)+x+1,a=k-1,b=k-W0-1,c=k-W0-2;
+      IP[k]=IP[a]+IP[b]-IP[c]+(esPared(i)?1:0);IC[k]=IC[a]+IC[b]-IC[c]+sky[i];IV[k]=IV[a]+IV[b]-IV[c]+(green(i)?1:0);IL[k]=IL[a]+IL[b]-IL[c]+L[i];IL2[k]=IL2[a]+IL2[b]-IL2[c]+L[i]*L[i];}
+    // parche de 64 × 64 del cuadrado (de lado «lado» celdas) más uniforme entre las filas ya y yb, recortado de la foto original.
+    // relativo: la media de cada color se lleva a gris medio (solo textura) o, con «ref», se compara con el color de la pared (guarda si la banda es de otro color)
+    const parcheEntre=(ya,yb,lado,minPared,ref,maxVar)=>{
+      lado=Math.max(4,Math.min(lado,yb-ya));if(yb-ya<4)return null;
+      const s=(T,x,y)=>T[(y+lado)*(W0+1)+x+lado]-T[y*(W0+1)+x+lado]-T[(y+lado)*(W0+1)+x]+T[y*(W0+1)+x],n=lado*lado;
       let best=-1e9,bx=-1,by=-1;
-      for(let y=y0;y+lado<=y1;y++)for(let x=x0;x+lado<=x1;x++){
-        if(suma(C,x,y)>0)continue;const fr=suma(S,x,y)/n;if(fr<0.93)continue;
-        const m=suma(L1,x,y)/n,sd=Math.sqrt(Math.max(0,suma(L2,x,y)/n-m*m));
-        const sc=-sd/Math.max(30,m)-0.25*Math.abs((x+lado/2)/W0-0.5)-0.15*Math.abs((y+lado/2)/H0-0.45);   // uniforme, y cerca del centro
+      for(let y=Math.max(0,ya);y+lado<=Math.min(H0,yb);y++)for(let x=x0;x+lado<=x1;x++){
+        if(s(IC,x,y)>0||s(IV,x,y)>n*0.05)continue;if(s(IP,x,y)/n<minPared)continue;   // nada de cielo ni de hojas
+        const m=s(IL,x,y)/n,sd=Math.sqrt(Math.max(0,s(IL2,x,y)/n-m*m)),sc=-sd/Math.max(30,m)-0.25*Math.abs((x+lado/2)/W0-0.5);
         if(sc>best){best=sc;bx=x;by=y;}}
-      if(bx>=0&&best>-0.6){
-        const P=64,cv=document.createElement('canvas');cv.width=cv.height=P;const g2=cv.getContext('2d',{willReadFrequently:true});
-        g2.drawImage(im,bx/W0*iw,by/H0*ih,lado/W0*iw,lado/H0*ih,0,0,P,P);
-        const id=g2.getImageData(0,0,P,P),q=id.data,m=[0,0,0];
-        for(let k=0;k<q.length;k+=4){m[0]+=q[k];m[1]+=q[k+1];m[2]+=q[k+2];}
-        for(let c=0;c<3;c++)m[c]=Math.max(8,m[c]/(P*P));
-        let s1=0,s2=0;
-        for(let k=0;k<q.length;k+=4){for(let c=0;c<3;c++)q[k+c]=clamp(Math.round(q[k+c]*128/m[c]),0,255);const l=(q[k]+q[k+1]+q[k+2])/3;s1+=l;s2+=l*l;}
-        const cvar=Math.sqrt(Math.max(0,s2/(P*P)-(s1/(P*P))**2))/128;   // cuánto varía: con ventanas, esquinas u hojas varía mucho y no vale
-        if(cvar<0.1){g2.putImageData(id,0,0);out.parche=cv.toDataURL('image/jpeg',0.85);}}}
+      if(bx<0)return null;
+      const P=64,cv=document.createElement('canvas');cv.width=cv.height=P;const g2=cv.getContext('2d',{willReadFrequently:true});
+      g2.drawImage(im,bx/W0*iw,by/H0*ih,lado/W0*iw,lado/H0*ih,0,0,P,P);
+      const id=g2.getImageData(0,0,P,P),q=id.data,m=[0,0,0];
+      for(let k=0;k<q.length;k+=4){m[0]+=q[k];m[1]+=q[k+1];m[2]+=q[k+2];}
+      for(let c=0;c<3;c++)m[c]=Math.max(8,m[c]/(P*P));
+      const base=ref?ref.map(v=>Math.max(8,v)):m;   // con «ref», relativo a la pared
+      let s1=0,s2=0;
+      for(let k=0;k<q.length;k+=4){for(let c=0;c<3;c++)q[k+c]=clamp(Math.round(q[k+c]*128/base[c]),0,255);const l=(q[k]+q[k+1]+q[k+2])/3;s1+=l;s2+=l*l;}
+      const mm=s1/(P*P),cvar=Math.sqrt(Math.max(0,s2/(P*P)-mm*mm))/Math.max(40,mm);   // con ventanas, esquinas u hojas varía mucho y no vale
+      if(cvar>maxVar)return null;
+      g2.putImageData(id,0,0);return cv.toDataURL('image/jpeg',0.85);};
+    const lado=Math.max(5,Math.round(W0*0.09)),medioA=Math.round(topMed+hF*0.2),medioB=Math.round(ybMed-hF*0.08);
+    // pared de referencia (cruda, tal como sale en la foto) para comparar la banda alta
+    let wr=[0,0,0],wn=0;for(const i of wp){wr[0]+=R[i];wr[1]+=G[i];wr[2]+=B[i];wn++;}wr=wr.map(v=>v/Math.max(1,wn));
+    out.parche=parcheEntre(medioA,medioB,lado,0.93,null,0.1);
+    out.parcheAlto=parcheEntre(topMed,medioA,lado,0.5,wr,0.16);
+    // la banda baja: la franja del zócalo, si la hay; si no, el pie de la pared
+    if(out.zoc&&runs.length){const ys=runs.map(r=>[Math.floor(r[0]/W0),Math.floor(r[r.length-1]/W0)]),za=Math.round(ys.reduce((a,p)=>a+p[0],0)/ys.length),zb=Math.round(ys.reduce((a,p)=>a+p[1],0)/ys.length)+1;
+      out.parcheZocalo=parcheEntre(za,zb,lado,0,null,0.14);out.bandas.zocalo=[za/H0,zb/H0];}
     return out;
   }
+  // alto del zócalo en la foto, como parte de la altura de la casa (de su tejado a su base)
+  const zocaloFraccion = c => { const b = c && c.bandas; return b && b.zocalo && b.base > b.alto ? +((b.zocalo[1] - b.zocalo[0]) / (b.base - b.alto)).toFixed(3) : null; };
   const pedirTexto = async url => {
     const r = await fetch(url);
     const t = await r.text();
@@ -6523,7 +6916,7 @@ const Catastro = (() => {
   }
 
   // --- colores de las fachadas: guardados en este navegador por referencia catastral (valen para cualquier zona) ---
-  const VERSION_COLOR = 4;   // 4: con parche de textura de la pared
+  const VERSION_COLOR = 5;   // 5: con parches de textura de las tres bandas de la casa (alta, media y zócalo)
   const abrirDB = () => new Promise((res, rej) => {
     const rq = indexedDB.open('carreras-fachadas', 1);
     rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains('colores')) rq.result.createObjectStore('colores'); };
@@ -6555,10 +6948,11 @@ const Catastro = (() => {
       im.src = url;
       await im.decode();
       const c = photoColors(im);
-      return c.wall ? { pared: hex(c.wall), zocalo: hex(c.zoc), carpinteria: hex(c.carp), parche: c.parche || null, v: VERSION_COLOR, t: Date.now() } : { sin: true, porque: c.why, v: VERSION_COLOR, t: Date.now() };
+      return c.wall ? { pared: hex(c.wall), zocalo: hex(c.zoc), carpinteria: hex(c.carp), parche: c.parche || null, parcheAlto: c.parcheAlto || null, parcheZocalo: c.parcheZocalo || null, zocaloFr: zocaloFraccion(c), v: VERSION_COLOR, t: Date.now() }
+        : { sin: true, porque: c.why, v: VERSION_COLOR, t: Date.now() };
     } finally { URL.revokeObjectURL(url); }
   }
-  return { URL_PHP, trozos, casasDeTrozo, parcelasDeTrozo, enParalelo, coloresGuardados, guardarColor, colorDeFachada, deUTM, VERSION_COLOR };
+  return { URL_PHP, trozos, casasDeTrozo, parcelasDeTrozo, enParalelo, coloresGuardados, guardarColor, colorDeFachada, deUTM, VERSION_COLOR, zocaloFraccion };
 })();
 
 // Qué le falta a la zona abierta: trozos de casas del Catastro que no llegaron, las parcelas y los colores de fachada
@@ -6663,10 +7057,10 @@ async function descargarLoQueFalta() {
   } finally { boton.disabled = false; }
 }
 
-// --- parches de textura de las fachadas: un atlas de 2048 × 2048 con casillas de 64 × 64 (1024 casas como mucho) ---
+// --- parches de textura de las fachadas: un atlas de 2048 × 2048 con casillas de 48 × 48 (1764: hasta tres por casa) ---
 // Cada casa con parche (sacado de su foto de fachada) tiene su casilla; el sombreador lo repite por todas sus paredes
 const Parches = (() => {
-  const TAM = 2048, CAS = 64, POR_FILA = TAM / CAS, MAX = POR_FILA * POR_FILA;
+  const TAM = 2048, CAS = 48, POR_FILA = Math.floor(TAM / CAS), MAX = POR_FILA * POR_FILA;   // el sombreador da por hechos estos números
   let cv = null, g = null, textura = null, porRef = new Map(), libre = 0, subiendo = false;
   function crear() {
     cv = document.createElement('canvas');
@@ -6701,6 +7095,8 @@ const Parches = (() => {
       return k;
     },
     usadas: () => libre,
+    // las tres casillas de una casa: zócalo, pared, banda alta (-1 donde no hay parche)
+    casillasDe(e) { return [this.casilla(e.ref && e.ref + ':z', e.parcheZocalo), this.casilla(e.ref && e.ref + ':m', e.parche), this.casilla(e.ref && e.ref + ':a', e.parcheAlto)]; },
   };
 })();
 
@@ -6737,7 +7133,7 @@ function ponerColoresFachada(ref, c) {
   if (!lista) return;
   for (const e of lista) {
     e.pared = c.pared; e.zoc = c.zocalo; e.carp = c.carpinteria;
-    if (c.parche) e.parche = c.parche;
+    e.parche = c.parche || null; e.parcheAlto = c.parcheAlto || null; e.parcheZocalo = c.parcheZocalo || null; e.zocaloFr = c.zocaloFr || null;
     coloresCasa(e, zona.edif.indexOf(e));
     repintarCasa(e);
   }
