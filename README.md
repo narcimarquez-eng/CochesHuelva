@@ -13,9 +13,11 @@ Carrera de coches por Huelva
 
 El juego trae Huelva, pero se puede correr en cualquier sitio de España con el **Paseo por el relieve** (`paseo.html`, la misma página de meteohuelva.es, copiada aquí):
 
-1. En el menú del juego, en **Lugar**, pulsa **➕ Otro lugar**: se abre el Paseo.
-2. Busca el pueblo o mueve el mapa, elige la zona y ábrela en 3D (el Paseo descarga alturas, foto aérea, OpenStreetMap y casas del Catastro).
-3. Pulsa **🏁 Jugar aquí** (arriba): el Paseo prepara la zona como si fuera a descargar el .zip, la guarda en este navegador y abre el juego con ella.
+1. En el menú del juego, en **Lugar**, pulsa **➕ Otro lugar**: se abre directamente el mapa del Paseo para elegir la zona, centrado en el lugar en el que estás.
+2. Busca el pueblo o mueve el mapa y pulsa **🏁 Jugar aquí** (también vale una zona de **Zonas guardadas** o **Abrir archivo del visor**).
+3. El Paseo descarga alturas, foto aérea, OpenStreetMap y casas del Catastro, monta la zona (en 3D, porque ahí mide el ancho de calles y aceras), la prepara como si fuera a descargar el .zip, la guarda en este navegador y vuelve solo al juego con ella. **Volver** regresa al juego sin elegir nada.
+
+Abierto por su cuenta (sin venir del juego), el Paseo funciona como siempre; con una zona abierta en 3D, el botón **🏁 Jugar aquí** de arriba también la lleva al juego.
 
 Las zonas traídas así (o abiertas con **📂 Abrir zip**) quedan en la fila **Lugar** del menú, con su nombre, y se pueden borrar con ✕. El juego recuerda el último lugar elegido. Al cambiar de lugar, el centro del mapa, el título y las pancartas de la carrera pasan a ser los de ese sitio.
 

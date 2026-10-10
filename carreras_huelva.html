@@ -5479,8 +5479,9 @@ async function pintarLugares() {
     cont.appendChild(caja);
   }
   const otro = document.createElement('a');
-  otro.className = 'btnOtro'; otro.href = 'paseo.html'; otro.textContent = '➕ Otro lugar';
-  otro.title = 'Abre el Paseo por el relieve: elige la zona en el mapa, ábrela en 3D y pulsa «Jugar aquí»';
+  otro.className = 'btnOtro'; otro.textContent = '➕ Otro lugar';
+  otro.href = `paseo.html?jugar=1&lat=${ORIGEN.lat.toFixed(5)}&lon=${ORIGEN.lon.toFixed(5)}`;   // el mapa del Paseo, centrado en el lugar actual
+  otro.title = 'Abre el mapa del Paseo por el relieve: elige la zona y pulsa «Jugar aquí»; se prepara y vuelves al juego';
   cont.appendChild(otro);
   const zip = document.createElement('button');
   zip.textContent = '📂 Abrir zip'; zip.title = 'Abrir un .zip de una zona descargado del Paseo';

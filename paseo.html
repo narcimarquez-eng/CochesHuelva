@@ -3865,7 +3865,7 @@ function zonaOpen(){
 }
 function hideZona(){$('#zona').hidden=true;$('#zRes').hidden=true;}
 function initZmap(){
-  const g=W&&W.geo,c=g?[(g.n+g.s)/2,(g.e+g.w)/2]:[37.2765,-6.8385];
+  const g=W&&W.geo,c=g?[(g.n+g.s)/2,(g.e+g.w)/2]:JUEGO.centro||[37.2765,-6.8385];
   zmap=L.map('zmap',{zoomControl:false,worldCopyJump:true,zoomSnap:0.1,zoomDelta:0.5,wheelPxPerZoomLevel:90}).setView(c,g?13:15);
   L.control.zoom({position:'bottomright',zoomInTitle:'Acercar',zoomOutTitle:'Alejar'}).addTo(zmap);
   zLayers.mapa=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'});
@@ -3893,7 +3893,8 @@ function updateFrame(){
   else if(mx>4500)msg='Zona grande: tardará más en descargarse y de cerca tendrá menos detalle.';
   const s=ok?savedMatch(g):null;
   if(s)msg=`Esta zona ya está guardada como «${s.name}»: se abre al momento.`;
-  $('#zMsg').textContent=msg;const b=$('#zGo');b.disabled=!ok;b.textContent=s?'Abrir la guardada':'Ver en 3D';
+  if(JUEGO.activo&&ok)msg='Elige la zona donde quieres correr (o una guardada) y pulsa «Jugar aquí»: se prepara y vuelves al juego. '+msg.replace('Lo que queda dentro del recuadro es la zona que verás en 3D.','');
+  $('#zMsg').textContent=msg;const b=$('#zGo');b.disabled=!ok;b.textContent=JUEGO.activo?'🏁 Jugar aquí':s?'Abrir la guardada':'Ver en 3D';
 }
 function drawSavedRects(){
   if(!zmap||!zSavedLayer)return;zSavedLayer.clearLayers();
@@ -3954,7 +3955,7 @@ async function zSearch(q){
 $('#zSearch').addEventListener('submit',e=>{e.preventDefault();zSearch($('#zq').value.trim());});
 $('#zGo').addEventListener('click',()=>{if(!zmap)return;const g=frameGeo(),c=[(g.n+g.s)/2,(g.e+g.w)/2];
   const nm=zPending&&Math.hypot((c[0]-zPending.ll[0])*111e3,(c[1]-zPending.ll[1])*88e3)<2500?zPending.name:null;scanZone(g,nm);});
-$('#zBack').addEventListener('click',hideZona);
+$('#zBack').addEventListener('click',()=>{if(JUEGO.activo){location.href='carreras_huelva.html';return;}hideZona();});
 $('#zFile').addEventListener('click',()=>fileIn.click());
 for(const b of document.querySelectorAll('#zLayers button'))b.addEventListener('click',()=>{if(!zmap)return;for(const k in zLayers)zmap.removeLayer(zLayers[k]);zLayers[b.dataset.l].addTo(zmap);
   for(const o of document.querySelectorAll('#zLayers button'))o.setAttribute('aria-pressed',String(o===b));});
@@ -3996,6 +3997,13 @@ $('#sCsv').addEventListener('click',()=>{
 });
 $('#sLog').addEventListener('click',openLog);
 $('#sZip').addEventListener('click',zoneExport);
+/* ---------- Modo juego (paseo.html?jugar=1&lat=…&lon=…): se abre en el mapa y, en cuanto la zona elegida está lista,
+   se lleva sola al juego. La zona se construye en 3D igualmente: ahí se miden los anchos de calles y aceras ---------- */
+const JUEGO=(()=>{const q=new URLSearchParams(location.search),la=parseFloat(q.get('lat')),lo=parseFloat(q.get('lon'));
+  return {activo:q.has('jugar'),centro:isFinite(la)&&isFinite(lo)?[la,lo]:null,hecho:new Set()};})();
+if(JUEGO.activo)setInterval(()=>{   // vale para todos los caminos: zona nueva, guardada o abierta desde un .zip
+  if(W&&W.geo&&!loading&&!JUEGO.hecho.has(W)){JUEGO.hecho.add(W);busy('Preparando la zona para el juego…',0.9);zoneExport({jugar:true});}
+},400);
 /* ---------- Carreras por Huelva: la zona abierta se guarda para el juego (mismo navegador y misma web) y se abre allí ---------- */
 function guardarParaCarreras(zip,id,nombre,geo){
   return new Promise((res,rej)=>{
@@ -4033,6 +4041,14 @@ function loop(now){
 resize();modeUI();applyTime();
 (async()=>{
   let opened=false;
+  if(JUEGO.activo){   // desde el juego: directo al mapa para elegir la zona, sin abrir la última ni el ejemplo
+    $('#intro').hidden=true;
+    try{await refreshSavedUI();}catch(e){console.error(e);}
+    zonaOpen();
+    $('#zBack').title='Volver al juego';
+    requestAnimationFrame(t=>{last=t;loop(t);});
+    return;
+  }
   try{await refreshSavedUI();
     const fallo=lsGet('paseo-abriendo');               // si la última vez se colgó al abrir, no se reintenta sola
     if(savedCache.length&&!fallo){$('#intro').hidden=true;opened=await openZone(savedCache[0],{auto:true});}
