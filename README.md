@@ -29,6 +29,16 @@ header('Access-Control-Allow-Origin: https://narcimarquez-eng.github.io');
 
 Sin ella, el Paseo en GitHub Pages saca las casas de OpenStreetMap (menos y sin colores). Las zonas de más de 25 km² también salen sin el Catastro, y las muy grandes pueden ir lentas en el móvil (el menú avisa).
 
+### Si no llegan las casas del Catastro
+
+La zona se juega igual: el `casas.geojson` ya no es obligatorio y la **foto aérea se mantiene** como suelo. Si el Catastro no ha dado casas y OpenStreetMap apenas trae (menos de 0,6 por calle de vivienda), el juego **simula casas** junto a las calles para que el pueblo no salga vacío:
+
+- **Adosadas** en fila al borde de la acera, de una o dos plantas, en el casco urbano.
+- **Chalets** con su parcela y su valla donde la foto se ve con jardines (o, sin foto, fuera del casco).
+- Nunca encima de otra calle, del agua, de un parque, de un campo verde de la foto ni de una casa que sí venga en los datos; las carreteras fuera del pueblo se quedan sin casas.
+
+El menú avisa de que son simuladas y de si hay foto aérea. Sin foto, el suelo sale del mapa y los jardines de los chalets llevan césped. Si lo que falta son las calles (OpenStreetMap no respondió), el juego lo dice y pide volver a preparar la zona en el Paseo.
+
 ## Modos de juego
 
 - **Circuito · 3 vueltas**: un circuito generado sobre las calles de la zona, con tres checkpoints y la meta, **contra cinco rivales**. Tiene decoración de carrera: un arco de salida y meta con un semáforo de cinco luces que se encienden en la cuenta atrás y se ponen verdes al «¡YA!», línea a cuadros, pancartas y público que salta cuando pasas, arcos hinchables de colores en cada checkpoint y unos **boxes** a 40 m de la salida. Al cruzar la meta en la última vuelta hay fuegos artificiales y aplausos, y el resumen dice los tiempos y cómo ha quedado el coche.
@@ -42,6 +52,27 @@ La ruta se marca con flechas y una línea **verdes** en la calzada, solo las del
 ## Casas que cortan calles
 
 Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 100 de 32 382.
+
+## Chalets y sus vallas
+
+Los datos no dicen qué casa es un chalet ni dónde acaba su parcela, así que se deduce. Un chalet es una casa (o un grupo de piezas que se tocan: casa, porche, cochera):
+
+- suelta, sin otra casa a menos de 3 m;
+- baja, de dos plantas como mucho;
+- de tamaño de vivienda (45–480 m² de planta);
+- con sitio alrededor, sin manzana de casas a 7 m;
+- a menos de 35 m de una calle.
+
+En OpenStreetMap, además, tiene que ser una casa (`house`, `detached`, `villa`…). En la zona incluida salen unos 280.
+
+Alrededor de cada chalet se pone la **valla** de su parcela:
+
+- Se toma el rectángulo que lo envuelve y se abre de 2,5 a 5,5 m por cada lado.
+- Cada lado se acerca a la casa hasta que no pisa la calzada ni la acera, una piscina o el agua, ni la casa de al lado.
+- Donde ya hay la valla de un vecino no se pone otra: la suya hace de medianera.
+- En el lado más cercano a la calle va una **cancela** de hierro de 3 m entre dos pilares.
+
+Hay tres tipos: murete con **reja** de barrotes, murete con **seto** recortado y **muro** alto. Los muretes son blancos, crema, albero o ladrillo, con albardilla y pilares. Las vallas chocan como un muro bajo (el coche se abolla) y ningún árbol queda en mitad de una.
 
 ## Daño del coche
 

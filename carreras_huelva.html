@@ -445,19 +445,22 @@ function colorValido(c) {
 }
 function parsearCasas(geo) {
   const edif = [];
-  for (const f of geo.features) {
+  for (const f of geo.features || []) {
     const g = f.geometry;
-    if (!g || g.type !== 'Polygon') continue;
-    const pts = g.coordinates[0].map(c => proyectar(c[0], c[1]));
-    if (pts.length > 1) {
-      const a = pts[0], b = pts[pts.length - 1];
-      if (a[0] === b[0] && a[1] === b[1]) pts.pop();
-    }
-    if (pts.length < 3) continue;
+    if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;   // los edificios de OpenStreetMap pueden venir en varias piezas
     const p = f.properties || {};
     let h = Number(p.altura_aprox_m);
     if (!(h > 0)) h = (Number(p.plantas) || 2) * 3;
-    edif.push({ pts, h: Math.min(h, 400), pared: colorValido(p.color_pared), zoc: colorValido(p.color_zocalo), carp: colorValido(p.color_carpinteria), tejado: p.tejado || '' });
+    for (const poli of g.type === 'Polygon' ? [g.coordinates] : g.coordinates) {
+      const pts = poli[0].map(c => proyectar(c[0], c[1]));
+      if (pts.length > 1) {
+        const a = pts[0], b = pts[pts.length - 1];
+        if (a[0] === b[0] && a[1] === b[1]) pts.pop();
+      }
+      if (pts.length < 3) continue;
+      edif.push({ pts, h: Math.min(h, 400), pared: colorValido(p.color_pared), zoc: colorValido(p.color_zocalo), carp: colorValido(p.color_carpinteria), tejado: p.tejado || '',
+        tipo: p.fuente === 'OpenStreetMap' && typeof p.tipo === 'string' ? p.tipo : '' });   // tipo de edificio de OpenStreetMap (house, detached…)
+    }
   }
   return edif;
 }
@@ -579,6 +582,351 @@ function prepararCasas(edif, rejilla, tramos) {
     e.teja = e.tejado === 'teja árabe';
     e.colTecho = e.teja ? PAL_FACHADA.teja[Math.floor(s2 * 4) % 4] : PAL_FACHADA.azotea[Math.floor(s3 * 3) % 3];
   });
+}
+
+// --- chalets y sus vallas ---
+// Un chalet es una casa (o un grupo de piezas que se tocan: casa, porche, cochera) suelta, baja y de tamaño de vivienda,
+// con la casa más cercana a unos metros. Su parcela no viene en los datos: se toma el rectángulo que la envuelve, se abre
+// unos metros por cada lado y cada lado se acerca a la casa hasta que no pisa la calle, la acera, el agua (piscinas) ni la casa de al lado.
+// Lo que toca a una valla ya puesta no se repite (la del vecino hace de medianera). La puerta va en el lado más cercano a la calle.
+const TIPOS_CHALET_OSM = new Set(['house', 'detached', 'bungalow', 'villa', 'semidetached_house', 'cabin', 'farm', 'yes', 'residential']);
+const ESTILOS_VALLA = ['reja', 'reja', 'reja', 'seto', 'seto', 'muro'];
+// Índice de la casa que contiene (x, z), sin contar `fuera` (Set de índices); -1 si ninguna
+function cualCasa(edif, rejilla, x, z, fuera) {
+  for (const j of rejilla.get('*') || []) if (!fuera.has(j) && enPoligono(edif[j].pts, x, z)) return j;
+  for (const j of rejilla.get(Math.floor(x / TAM_CELDA) + ',' + Math.floor(z / TAM_CELDA)) || []) {
+    const b = edif[j].bbox;
+    if (x >= b[0] && x <= b[2] && z >= b[1] && z <= b[3] && !fuera.has(j) && enPoligono(edif[j].pts, x, z)) return j;
+  }
+  return -1;
+}
+// ¿Hay alguna casa (fuera de `fuera`) a menos de R de (x, z)?
+function casaCerca(edif, rejilla, x, z, R, fuera) {
+  for (const j of rejilla.get('*') || []) if (!fuera.has(j) && chocaPoligono(edif[j], x, z, R)) return true;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++)
+      for (const j of rejilla.get(cx + ',' + cz) || []) if (!fuera.has(j) && chocaPoligono(edif[j], x, z, R)) return true;
+  return false;
+}
+// Máscara de capas (agua, parques, casco urbano…) en celdas de 2 m o más: cada celda guarda los bits de las capas que la cubren.
+// Mirar un punto es inmediato (la ría es un polígono enorme y mirarla punto a punto es lento). listas: [[anillos, bit], …]
+function mascaraCapas(listas, caja) {
+  const [x0, z0, x1, z1] = caja, paso = Math.max(2, Math.sqrt((x1 - x0) * (z1 - z0) / 8e6));
+  const W = Math.max(1, Math.ceil((x1 - x0) / paso)), H = Math.max(1, Math.ceil((z1 - z0) / paso)), m = new Uint8Array(W * H);
+  for (const [anillos, bit] of listas) for (const pts of anillos) {
+    let a0 = Infinity, a1 = -Infinity;
+    for (const p of pts) { a0 = Math.min(a0, p[1]); a1 = Math.max(a1, p[1]); }
+    const j0 = Math.max(0, Math.ceil((a0 - z0) / paso - 0.5)), j1 = Math.min(H - 1, Math.floor((a1 - z0) / paso - 0.5));
+    if (j1 < j0) continue;
+    const filas = Array.from({ length: j1 - j0 + 1 }, () => []);
+    for (let k = 0, l = pts.length - 1; k < pts.length; l = k++) {
+      const [xa, za] = pts[l], [xb, zb] = pts[k];
+      if (za === zb) continue;
+      const lo = Math.max(j0, Math.ceil((Math.min(za, zb) - z0) / paso - 0.5)), hi = Math.min(j1, Math.ceil((Math.max(za, zb) - z0) / paso - 0.5) - 1);
+      for (let j = lo; j <= hi; j++) { const zc = z0 + (j + 0.5) * paso; filas[j - j0].push(xa + (zc - za) * (xb - xa) / (zb - za)); }
+    }
+    filas.forEach((xs, f) => {
+      xs.sort((p, q) => p - q);
+      const fila = (j0 + f) * W;
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const i0 = Math.max(0, Math.ceil((xs[k] - x0) / paso - 0.5)), i1 = Math.min(W - 1, Math.floor((xs[k + 1] - x0) / paso - 0.5));
+        for (let i = i0; i <= i1; i++) m[fila + i] |= bit;
+      }
+    });
+  }
+  return (x, z) => {
+    const i = Math.floor((x - x0) / paso), j = Math.floor((z - z0) / paso);
+    return i < 0 || j < 0 || i >= W || j >= H ? 0 : m[j * W + i];
+  };
+}
+// Grupos de casas que se tocan (a menos de 0,7 m por fuera de alguna pared)
+function gruposDeCasas(edif, rejilla) {
+  const padre = edif.map((_, i) => i), raiz = i => { while (padre[i] !== i) i = padre[i] = padre[padre[i]]; return i; };
+  edif.forEach((e, i) => {
+    const r = e.pts, n = r.length, yo = new Set([i]);
+    for (let k = 0; k < n; k++) {
+      const p = r[k], q = r[(k + 1) % n], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
+      if (l < 0.3) continue;
+      let nx = dz / l, nz = -dx / l;
+      if (enPoligono(r, (p[0] + q[0]) / 2 + nx * 0.3, (p[1] + q[1]) / 2 + nz * 0.3)) { nx = -nx; nz = -nz; }
+      for (const f of [0.15, 0.5, 0.85]) {
+        const j = cualCasa(edif, rejilla, p[0] + dx * f + nx * 0.7, p[1] + dz * f + nz * 0.7, yo);
+        if (j >= 0) padre[raiz(j)] = raiz(i);
+      }
+    }
+  });
+  const grupos = new Map();
+  edif.forEach((_, i) => { const r = raiz(i); if (!grupos.has(r)) grupos.set(r, []); grupos.get(r).push(i); });
+  return [...grupos.values()];
+}
+// Envolvente convexa (cadena monótona) y el rectángulo de menor área que la contiene: { cx, cz, ux, uz, a, b } (a: media longitud a lo largo de u)
+function envolvente(pts) {
+  const p = pts.slice().sort((A, B) => A[0] - B[0] || A[1] - B[1]);
+  if (p.length < 3) return p;
+  const cruz = (O, A, B) => (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0]);
+  const lo = [], hi = [];
+  for (const q of p) { while (lo.length >= 2 && cruz(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (hi.length >= 2 && cruz(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+  return lo.slice(0, -1).concat(hi.slice(0, -1));
+}
+function rectanguloMinimo(pts) {
+  const h = envolvente(pts);
+  let mejor = null;
+  for (let k = 0; k < h.length; k++) {
+    const p = h[k], q = h[(k + 1) % h.length], l = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (l < 1e-6) continue;
+    const ux = (q[0] - p[0]) / l, uz = (q[1] - p[1]) / l;
+    let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    for (const [x, z] of h) { const u = x * ux + z * uz, v = -x * uz + z * ux; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+    const area = (u1 - u0) * (v1 - v0);
+    if (!mejor || area < mejor.area) {
+      const cu = (u0 + u1) / 2, cv = (v0 + v1) / 2;
+      mejor = { area, cx: cu * ux - cv * uz, cz: cu * uz + cv * ux, ux, uz, a: (u1 - u0) / 2, b: (v1 - v0) / 2 };
+    }
+  }
+  return mejor;
+}
+// ¿Pisa (x, z) una calzada o su acera (con `holgura` metros más)? Usa la rejilla de segmentos de calle
+function enCalleOAcera(rejSeg, tramos, x, z, holgura) {
+  const R = 16;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      const arr = rejSeg.get(cx + ',' + cz);
+      if (arr) for (let j = 0; j < arr.length; j += 2) {
+        const t = tramos[arr[j]], p = t.pts, k = arr[j + 1], m = t.ancho / 2 + (t.acera > 0 ? t.acera : 0.5) + holgura;
+        if (distSeg2(x, z, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1]) < m * m) return true;
+      }
+    }
+  return false;
+}
+// Distancia de (x, z) al borde de la calle más cercana (calzada más acera), hasta 40 m
+function distanciaACalle(rejSeg, tramos, x, z) {
+  const R = 40;
+  let best = R;
+  for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
+    for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
+      const arr = rejSeg.get(cx + ',' + cz);
+      if (arr) for (let j = 0; j < arr.length; j += 2) {
+        const t = tramos[arr[j]], p = t.pts, k = arr[j + 1];
+        const d = Math.sqrt(distSeg2(x, z, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1])) - t.ancho / 2 - Math.max(0, t.acera);
+        if (d < best) best = d;
+      }
+    }
+  return best;
+}
+// ¿Qué grupos son chalets? Devuelve [{ casas: [índices], rect, alto }]
+function buscarChalets(edif, rejilla, rejSeg, tramos) {
+  const out = [];
+  for (const g of gruposDeCasas(edif, rejilla)) {
+    if (g.length > 4) continue;
+    let area = 0, alto = 0, osmNo = false;
+    for (const i of g) {
+      const e = edif[i];
+      area += Math.abs(areaAnillo(e.pts)); alto = Math.max(alto, e.h);
+      if (e.tipo && !TIPOS_CHALET_OSM.has(e.tipo)) osmNo = true;
+      if (e.simulada && !e.parcela) osmNo = true;   // las adosadas simuladas no
+    }
+    if (osmNo || area < 45 || area > 480 || alto > 7.6) continue;
+    const pts = g.flatMap(i => edif[i].pts), rect = edif[g[0]].parcela || rectanguloMinimo(pts);
+    if (!rect || rect.a > 22 || rect.b > 22) continue;
+    // suelto: ninguna otra casa a menos de 3 m de sus paredes (si no, es una manzana de casas con algún hueco)
+    const grupo = new Set(g);
+    if (edif[g[0]].parcela) { out.push({ casas: g, rect, alto }); continue; }   // chalet simulado: ya trae su parcela
+    let suelto = true;
+    for (const i of g) {
+      const r = edif[i].pts;
+      for (let k = 0; k < r.length && suelto; k++) {
+        const p = r[k], q = r[(k + 1) % r.length];
+        for (const f of [0, 0.5]) if (casaCerca(edif, rejilla, p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, 3, grupo)) { suelto = false; break; }
+      }
+      if (!suelto) break;
+    }
+    if (!suelto || distanciaACalle(rejSeg, tramos, rect.cx, rect.cz) > 35) continue;
+    // y con sitio alrededor: a 7 m de su rectángulo, casi todo es jardín o calle (en el casco, ahí ya hay otras casas)
+    let llenos = 0;
+    for (const [fu, fv] of [[1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1]]) {
+      const u = fu * (rect.a + 7), v = fv * (rect.b + 7);
+      if (cualCasa(edif, rejilla, rect.cx + rect.ux * u - rect.uz * v, rect.cz + rect.uz * u + rect.ux * v, grupo) >= 0) llenos++;
+    }
+    if (llenos > 2) continue;
+    out.push({ casas: g, rect, alto });
+  }
+  return out;
+}
+// Vallas de los chalets: segmentos { ax, az, bx, bz, estilo, tono, puerta } (puerta: true en la cancela) y las parcelas cerradas (para el césped)
+function generarVallas(edif, rejilla, tramos, aguas, rejAguas, rng) {
+  const rejSeg = construirRejillaSegmentos(tramos), chalets = buscarChalets(edif, rejilla, rejSeg, tramos);
+  const segs = [], puestas = new Map(), CV = 4;   // rejilla fina de las vallas ya puestas
+  const cercaDeValla = (x, z) => {
+    for (let i = Math.floor((x - 0.6) / CV); i <= Math.floor((x + 0.6) / CV); i++)
+      for (let j = Math.floor((z - 0.6) / CV); j <= Math.floor((z + 0.6) / CV); j++)
+        for (const s of puestas.get(i + ',' + j) || []) if (distSeg2(x, z, s.ax, s.az, s.bx, s.bz) < 0.5 * 0.5) return true;
+    return false;
+  };
+  const guardar = s => {   // apunta la valla en la rejilla
+    for (let i = Math.floor((Math.min(s.ax, s.bx) - 0.6) / CV); i <= Math.floor((Math.max(s.ax, s.bx) + 0.6) / CV); i++)
+      for (let j = Math.floor((Math.min(s.az, s.bz) - 0.6) / CV); j <= Math.floor((Math.max(s.az, s.bz) + 0.6) / CV); j++) {
+        const k = i + ',' + j;
+        if (!puestas.has(k)) puestas.set(k, []);
+        puestas.get(k).push(s);
+      }
+  };
+  const agua = mascaraCapas([[aguas.map(a => a.pts), 1]], calcularCaja(tramos, edif));
+  // parcelas ya cerradas: la valla del chalet siguiente no se mete en ellas (la del vecino hace de medianera)
+  const parcelas = [], rejParcelas = new Map();
+  const cx0 = p => Math.min(...p.map(q => q[0])), cx1 = p => Math.max(...p.map(q => q[0])), cz0 = p => Math.min(...p.map(q => q[1])), cz1 = p => Math.max(...p.map(q => q[1]));
+  const enParcela = (x, z) => {
+    for (const j of rejParcelas.get(Math.floor(x / TAM_CELDA) + ',' + Math.floor(z / TAM_CELDA)) || []) if (enPoligono(parcelas[j], x, z)) return true;
+    return false;
+  };
+  let n = 0;
+  for (const ch of chalets) {
+    const { cx, cz, ux, uz, a, b } = ch.rect, vx = -uz, vz = ux, grupo = new Set(ch.casas);
+    const malo = (x, z) => enCalleOAcera(rejSeg, tramos, x, z, 0.4) || casaCerca(edif, rejilla, x, z, 0.7, grupo) ||
+      agua(x, z) || cercaDeValla(x, z) || enParcela(x, z);
+    // lados: +u, +v, -u, -v; cada uno con su margen (de la casa a la valla)
+    const ladoSeg = (k, m) => {
+      const su = [a + m[0], -(a + m[2])], sv = [b + m[1], -(b + m[3])];
+      const P = (u, v) => [cx + ux * u + vx * v, cz + uz * u + vz * v];
+      return [[P(su[0], sv[1]), P(su[0], sv[0])], [P(su[0], sv[0]), P(su[1], sv[0])], [P(su[1], sv[0]), P(su[1], sv[1])], [P(su[1], sv[1]), P(su[0], sv[1])]][k];
+    };
+    const muestras = ([A, B], paso) => {
+      const L = Math.hypot(B[0] - A[0], B[1] - A[1]), nn = Math.max(1, Math.ceil(L / paso)), out = [];
+      for (let i = 0; i <= nn; i++) out.push([A[0] + (B[0] - A[0]) * i / nn, A[1] + (B[1] - A[1]) * i / nn]);
+      return out;
+    };
+    const max = ch.rect.margen || [0, 1, 2, 3].map(() => 2.5 + rng() * 3);
+    const m = max.slice();
+    if (!ch.rect.margen) for (let pasada = 0; pasada < 2; pasada++) for (let k = 0; k < 4; k++) {
+      for (m[k] = max[k]; m[k] > 0.9; m[k] -= 0.5) {
+        const ps = muestras(ladoSeg(k, m), 1.5), malos = ps.filter(([x, z]) => malo(x, z)).length;
+        if (malos <= ps.length * 0.2) break;
+      }
+    }
+    // la puerta: en el lado cuyo centro está más cerca de una calle
+    let lp = -1, dp = 12;
+    for (let k = 0; k < 4; k++) {
+      const [A, B] = ladoSeg(k, m), d = distanciaACalle(rejSeg, tramos, (A[0] + B[0]) / 2, (A[1] + B[1]) / 2);
+      if (d < dp) { dp = d; lp = k; }
+    }
+    const estilo = ESTILOS_VALLA[Math.floor(rng() * ESTILOS_VALLA.length)], tono = rng();   // tono: color del murete
+    const ini = segs.length;
+    for (let k = 0; k < 4; k++) {
+      const [A, B] = ladoSeg(k, m), L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      const ps = muestras([A, B], 0.5), ok = ps.map(([x, z]) => !malo(x, z));
+      // tramos seguidos de puntos buenos, de 1,2 m o más
+      const nuevos = [];
+      for (let i = 0; i < ps.length;) {
+        if (!ok[i]) { i++; continue; }
+        let j = i;
+        while (j + 1 < ps.length && ok[j + 1]) j++;
+        if ((j - i) * L / (ps.length - 1) >= 1.2) nuevos.push([i / (ps.length - 1), j / (ps.length - 1)]);
+        i = j + 1;
+      }
+      const P = f => [A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f];
+      for (const [f0, f1] of nuevos) {
+        // la cancela: 3 m en el centro del lado de la calle, si cae entera en este trozo
+        const pc = 1.5 / L;
+        if (k === lp && L > 6 && f0 < 0.5 - pc && f1 > 0.5 + pc) {
+          const trozos = [[f0, 0.5 - pc, false], [0.5 - pc, 0.5 + pc, true], [0.5 + pc, f1, false]];
+          for (const [g0, g1, puerta] of trozos) if (g1 - g0 > 0.01) { const p0 = P(g0), p1 = P(g1); segs.push({ ax: p0[0], az: p0[1], bx: p1[0], bz: p1[1], estilo, tono, puerta }); }
+        } else { const p0 = P(f0), p1 = P(f1); segs.push({ ax: p0[0], az: p0[1], bx: p1[0], bz: p1[1], estilo, tono, puerta: false }); }
+      }
+    }
+    // se apuntan al acabar el chalet: así sus propios lados no se cortan entre sí en las esquinas
+    for (let i = ini; i < segs.length; i++) guardar(segs[i]);
+    if (segs.length > ini) {
+      n++;
+      const j = parcelas.push([0, 1, 2, 3].map(k => ladoSeg(k, m.map(v => v - 0.3))[0])) - 1;   // un pelín por dentro: su propia valla no cuenta
+      for (let cx = Math.floor((cx0(parcelas[j])) / TAM_CELDA); cx <= Math.floor(cx1(parcelas[j]) / TAM_CELDA); cx++)
+        for (let cz = Math.floor(cz0(parcelas[j]) / TAM_CELDA); cz <= Math.floor(cz1(parcelas[j]) / TAM_CELDA); cz++) {
+          const k = cx + ',' + cz;
+          if (!rejParcelas.has(k)) rejParcelas.set(k, []);
+          rejParcelas.get(k).push(j);
+        }
+    }
+  }
+  return { segs, chalets: n, parcelas };
+}
+
+// --- casas simuladas: si el Catastro no ha dado casas (y OpenStreetMap apenas trae), se ponen casas junto a las calles ---
+// Adosadas en fila al borde de la acera en el casco; chalets con su parcela (y su valla) donde la foto se ve con jardines o, sin foto,
+// fuera del casco. Nunca sobre otra calle, el agua, un parque, un campo verde de la foto o una casa que sí venga en los datos.
+// verde(x, z): parte de vegetación de la foto alrededor del punto (0 a 1), o null si no hay foto ahí
+const TIPOS_CON_CASAS = new Set(['residential', 'living_street', 'tertiary', 'unclassified', 'secondary', 'primary']);
+function hacenFaltaCasas(casasGeo, edif, tramos) {
+  const catastro = (casasGeo.features || []).some(f => f.properties && (f.properties.fuente === 'Catastro' || f.properties.referencia_catastral));
+  const resid = tramos.filter(t => TIPOS_CON_CASAS.has(tipoBase(t.tipo))).length;
+  return !catastro && edif.length < resid * 0.6;
+}
+function simularCasas(tramos, capas, aguas, rejAguas, edif, rejilla, verde, rng, max = 30000) {
+  const rejSeg = construirRejillaSegmentos(tramos), nada = new Set();
+  const anillos = nombres => capas.filter(c => c.anillo && c.anillo.length >= 3 && nombres.includes(c.capa)).map(c => c.anillo);
+  // bits: 1 agua, 2 parque o campo, 4 casco urbano
+  const capa = mascaraCapas([[aguas.map(a => a.pts), 1], [anillos(['parque o jardín', 'pradera', 'cultivo']), 2], [anillos(['zona urbana']), 4]], calcularCaja(tramos, edif));
+  const puestas = [], rejPuestas = new Map(), nuevas = [];
+  const enPuesta = (x, z) => {
+    for (const j of rejPuestas.get(Math.floor(x / TAM_CELDA) + ',' + Math.floor(z / TAM_CELDA)) || []) if (enPoligono(puestas[j], x, z)) return true;
+    return false;
+  };
+  const apuntar = pts => {
+    const j = puestas.push(pts) - 1;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    for (let cx = Math.floor(x0 / TAM_CELDA); cx <= Math.floor(x1 / TAM_CELDA); cx++)
+      for (let cz = Math.floor(z0 / TAM_CELDA); cz <= Math.floor(z1 / TAM_CELDA); cz++) {
+        const k = cx + ',' + cz;
+        if (!rejPuestas.has(k)) rejPuestas.set(k, []);
+        rejPuestas.get(k).push(j);
+      }
+  };
+  // rectángulo de frente (fx, fz), a lo largo (tx, tz) y hacia dentro (nx, nz): de s0 a s1 metros hacia dentro, centrado en u0 a lo largo, ancho w
+  const rect = (fx, fz, tx, tz, nx, nz, u0, w, s0, s1) => [[u0 - w / 2, s0], [u0 + w / 2, s0], [u0 + w / 2, s1], [u0 - w / 2, s1]]
+    .map(([u, s]) => [fx + tx * u + nx * s, fz + tz * u + nz * s]);
+  // ¿cabe? Por dentro (a 0,5 m de los bordes, cada 1,5 m): ni casas, ni agua, ni parques, ni otra simulada; el borde, además, lejos de las calles
+  const cabe = (fx, fz, tx, tz, nx, nz, w, s0, s1) => {
+    const nu = Math.max(1, Math.ceil((w - 1) / 1.5)), ns = Math.max(1, Math.ceil((s1 - s0 - 1) / 1.5));
+    for (let i = 0; i <= nu; i++) for (let j = 0; j <= ns; j++) {
+      const u = -w / 2 + 0.5 + (w - 1) * i / nu, s = s0 + 0.5 + (s1 - s0 - 1) * j / ns, x = fx + tx * u + nx * s, z = fz + tz * u + nz * s;
+      if ((capa(x, z) & 3) || enPuesta(x, z) || casaCerca(edif, rejilla, x, z, 0.8, nada)) return false;
+      if ((i === 0 || j === 0 || i === nu || j === ns) && enCalleOAcera(rejSeg, tramos, x, z, 0.2)) return false;
+    }
+    return true;
+  };
+  for (const t of tramos) {
+    if (!TIPOS_CON_CASAS.has(tipoBase(t.tipo)) || /tierra|grava/.test(t.dib || '')) continue;
+    const cum = acumulados(t.pts), L = cum[cum.length - 1], borde = t.ancho / 2 + (t.acera > 0 ? t.acera : 0.5);
+    if (L < 12) continue;
+    const resid = ['residential', 'living_street'].includes(tipoBase(t.tipo));
+    for (const lado of [-1, 1]) {
+      for (let d = 3; d < L - 3 && nuevas.length < max;) {
+        const e0 = enPolilinea(t.pts, cum, d), nx0 = -e0.tz * lado, nz0 = e0.tx * lado;
+        const px = e0.x + nx0 * (borde + 8), pz = e0.z + nz0 * (borde + 8);
+        const urbana = (capa(px, pz) & 4) > 0;
+        if (!resid && !urbana) { d += 6; continue; }   // carreteras fuera del pueblo: sin casas
+        const v = verde ? verde(px, pz) : null;
+        if (v !== null && v > 0.6) { d += 4; continue; }   // en la foto es campo o un parque
+        const chalet = v !== null ? v > 0.2 : (urbana ? rng() < 0.12 : rng() < 0.75);
+        const w = chalet ? 14 + rng() * 7 : 5 + rng() * 3.5, fondo = chalet ? 18 + rng() * 10 : 8 + rng() * 6;
+        if (d + w > L - 3) break;
+        const e = enPolilinea(t.pts, cum, d + w / 2), tx = e.tx * lado, tz = e.tz * lado, nx = -e.tz * lado, nz = e.tx * lado;
+        const s0 = borde + (chalet ? 0.8 : 0.1);
+        if (!cabe(e.x, e.z, tx, tz, nx, nz, w, s0, s0 + fondo)) { d += 1.5; continue; }
+        const lote = rect(e.x, e.z, tx, tz, nx, nz, 0, w, s0, s0 + fondo);
+        apuntar(lote);
+        if (chalet) {
+          const hw = Math.max(7, w - 5 - rng() * 3), hd = Math.min(fondo - 7, 8 + rng() * 4), sb = 3 + rng() * 2.5;
+          const u0 = (rng() - 0.5) * Math.max(0, w - hw - 5);
+          const pts = rect(e.x, e.z, tx, tz, nx, nz, u0, hw, s0 + sb, s0 + sb + hd);
+          const cs = s0 + fondo / 2;
+          nuevas.push({ pts, h: rng() < 0.55 ? 6.9 : 3.8, tejado: rng() < 0.6 ? 'teja árabe' : 'azotea', simulada: true,
+            parcela: { cx: e.x + nx * cs, cz: e.z + nz * cs, ux: tx, uz: tz, a: w / 2, b: fondo / 2, margen: [0, 0, 0, 0] } });
+        } else nuevas.push({ pts: lote, h: rng() < 0.55 ? 6.9 : 3.8, tejado: rng() < 0.35 ? 'teja árabe' : 'azotea', simulada: true });
+        d += w;
+      }
+    }
+  }
+  return nuevas;
 }
 
 // --- rejilla espacial para colisiones ---
@@ -1150,7 +1498,11 @@ function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng) {
   const rieles = generarQuitamiedos(tramos, rotondas, cruces);
   const islas = prepararIslas(rotondas).filter(isla => !cercaDeCalle(rejCalles, isla.cx, isla.cz, isla.ri));   // sin isleta si una calle pasa por ella
   const arboles = generarArboles(capas, tramos, edif, rejilla, aguas, rejAguas, rng);
+  // vallas de los chalets (con su propio azar: así el resto de la zona sale igual que antes)
+  const { segs: vallas, chalets, parcelas: jardines } = generarVallas(edif, rejilla, tramos, aguas, rejAguas, mulberry32(777));
+  const rejVallas = construirRejillaCalles(vallas.map(v => ({ pts: [[v.ax, v.az], [v.bx, v.bz]] })));
   arboles.push(...generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, rejAguas));
+  for (let k = arboles.length - 1; k >= 0; k--) if (cercaDeCalle(rejVallas, arboles[k][0], arboles[k][1], 0.9)) arboles.splice(k, 1);   // ningún tronco en mitad de una valla
   for (const isla of islas) for (let k = 0; k < 3; k++) {   // tres árboles en cada isleta, si caben
     const a = k * 2 * Math.PI / 3 + 0.4, x = isla.cx + Math.cos(a) * isla.ri * 0.5, z = isla.cz + Math.sin(a) * isla.ri * 0.5;
     if (!cercaDeCalle(rejCalles, x, z, 3) && !dentroDeOtraCasa(edif, rejilla, x, z, -1) && !choca(aguas, rejAguas, x, z, 1)) arboles.push([x, z]);
@@ -1174,15 +1526,15 @@ function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng) {
   const mobiliario = quioscos.map(q => [q.x, q.z, 1.35]).concat(termometros.map(q => [q.x, q.z, 0.15]));
   return {
     pasos, quioscos, termometros, rejMobiliario: construirRejillaPuntos(mobiliario),
-    capas, aguas, rejAguas, rejCalles, rieles, rejRieles: construirRejillaCalles(rieles), islas,
+    capas, aguas, rejAguas, rejCalles, rieles, rejRieles: construirRejillaCalles(rieles), islas, vallas, rejVallas, chalets, jardines,
     arboles, rejArboles: construirRejillaPuntos(arboles),
     farolas, rejFarolas: construirRejillaPuntos(farolas.map(f => [f.x, f.z])), marcas,
   };
 }
-// ¿Choca un coche de radio R con algo que no sea una casa? (agua, quitamiedos, árboles, farolas, isletas).
+// ¿Choca un coche de radio R con algo que no sea una casa? (agua, quitamiedos, vallas, árboles, farolas, isletas).
 // Sobre una calle no cuenta el agua: ahí hay puentes.
 function chocaMundo(m, x, z, R) {
-  return (!cercaDeCalle(m.rejCalles, x, z, 6) && choca(m.aguas, m.rejAguas, x, z, R)) || cercaDeCalle(m.rejRieles, x, z, R) ||
+  return (!cercaDeCalle(m.rejCalles, x, z, 6) && choca(m.aguas, m.rejAguas, x, z, R)) || cercaDeCalle(m.rejRieles, x, z, R) || (m.rejVallas && cercaDeCalle(m.rejVallas, x, z, R + 0.15)) ||
     chocaPuntos(m.rejArboles, x, z, R + 0.3) || chocaPuntos(m.rejFarolas, x, z, R + 0.15) || chocaIslas(m.islas, x, z, R) ||
     (m.rejMobiliario && chocaPuntos(m.rejMobiliario, x, z, R + 1.35));
 }
@@ -1505,11 +1857,12 @@ function contactoPuntos(celdas, x, z, R) {
       for (const [px, pz] of celdas.get(cx + ',' + cz) || []) mejor = masHondo(mejor, contactoDesde(x, z, px, pz, R, false));
   return mejor;
 }
-// El contacto más hondo con el mundo (agua, quitamiedos, árboles, farolas, isletas), con su tipo. Sobre una calle no cuenta el agua (puentes)
+// El contacto más hondo con el mundo (agua, quitamiedos, vallas, árboles, farolas, isletas), con su tipo. Sobre una calle no cuenta el agua (puentes)
 function contactoMundo(m, x, z, R) {
   let c = null;
   if (!cercaDeCalle(m.rejCalles, x, z, 6)) c = conTipo(contactoPoligonos(m.aguas, m.rejAguas, x, z, R), 'agua');
   c = masHondo(c, conTipo(contactoSegmentos(m.rejRieles, x, z, R), 'riel'));
+  if (m.rejVallas) c = masHondo(c, conTipo(contactoSegmentos(m.rejVallas, x, z, R + 0.15), 'valla'));   // vallas de los chalets (con su grosor)
   c = masHondo(c, conTipo(contactoPuntos(m.rejArboles, x, z, R + 0.3), 'arbol'));
   c = masHondo(c, conTipo(contactoPuntos(m.rejFarolas, x, z, R + 0.15), 'farola'));
   for (const i of m.islas) c = masHondo(c, conTipo(contactoDesde(x, z, i.cx, i.cz, R + i.ri, false), 'isla'));
@@ -2803,6 +3156,130 @@ function mallaQuitamiedos(rieles) {
   return conSombra(grupo);
 }
 
+// --- vallas de los chalets: murete con reja, murete con seto o muro alto; pilares en las esquinas y cada pocos metros; cancela de hierro ---
+// Una malla por bloque de 200 m (como las farolas): solo se dibujan las cercanas
+const ESTILO_VALLA = { reja: { muro: 0.8, alto: 1.7 }, seto: { muro: 0.45, alto: 1.55 }, muro: { muro: 1.8, alto: 1.8 } };
+const TONOS_MURETE = ['#f4f1e8', '#f0e9d8', '#ebdcb4', '#e2cda2', '#f7f6f2', '#d7c7b0', '#c9926d'];
+let texturaRejaCache = null, texturaSetoCache = null;
+function texturaReja() {   // barrotes cada 12 cm con pasamanos arriba y abajo y una punta de lanza (transparente entre medias)
+  if (!texturaRejaCache) {
+    const cv = document.createElement('canvas');
+    cv.width = 64; cv.height = 128;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#fff';
+    for (let i = 0; i < 4; i++) {
+      const x = i * 16 + 6;
+      g.fillRect(x, 10, 4, 112);
+      g.beginPath(); g.moveTo(x - 2, 12); g.lineTo(x + 2, 2); g.lineTo(x + 6, 12); g.fill();
+    }
+    g.fillRect(0, 16, 64, 5); g.fillRect(0, 112, 64, 6);
+    texturaRejaCache = new THREE.CanvasTexture(cv);
+    texturaRejaCache.wrapS = THREE.RepeatWrapping;
+  }
+  return texturaRejaCache;
+}
+function texturaSeto() {   // hojas: manchas de verdes
+  if (!texturaSetoCache) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const g = cv.getContext('2d'), r = mulberry32(31);
+    g.fillStyle = '#4e7a35'; g.fillRect(0, 0, 64, 64);
+    for (let i = 0; i < 420; i++) {
+      const v = r();
+      g.fillStyle = v < 0.35 ? '#3b6328' : v < 0.7 ? '#5f8f40' : v < 0.92 ? '#75a64e' : '#2c4c1e';
+      g.beginPath(); g.arc(r() * 64, r() * 64, 1 + r() * 2.2, 0, 2 * Math.PI); g.fill();
+    }
+    texturaSetoCache = new THREE.CanvasTexture(cv);
+    texturaSetoCache.wrapS = texturaSetoCache.wrapT = THREE.RepeatWrapping;
+  }
+  return texturaSetoCache;
+}
+function mallaVallas(segs) {
+  const grupo = new THREE.Group();
+  if (!segs.length) return grupo;
+  const matMuro = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const matReja = new THREE.MeshLambertMaterial({ map: texturaReja(), color: 0x34393a, alphaTest: 0.25, side: THREE.DoubleSide });   // de lejos, la reja se ve como una franja oscura en vez de desaparecer
+  const matSeto = new THREE.MeshLambertMaterial({ map: texturaSeto() });
+  const tono = TONOS_MURETE.map(h => new THREE.Color(h)), remate = new THREE.Color(0xdedad0);
+  const nueva = () => ({ pos: [], nor: [], col: [], uv: [] });
+  // cara de cuatro esquinas (en orden) con su normal, color y coordenadas de textura
+  const cara = (b, P, n, c, uv) => {
+    for (const k of [0, 1, 2, 0, 2, 3]) {
+      b.pos.push(...P[k]); b.nor.push(...n);
+      if (c) b.col.push(c.r, c.g, c.b);
+      if (uv) b.uv.push(...uv[k]);
+    }
+  };
+  // caja a lo largo de A→B, de y0 a y1, con media anchura w (sin la cara de abajo)
+  const caja = (b, A, B, y0, y1, w, c, escala) => {
+    const dx = B[0] - A[0], dz = B[1] - A[1], L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, nx = -uz * w, nz = ux * w;
+    const p = (Q, s, y) => [Q[0] + nx * s, y, Q[1] + nz * s], h = y1 - y0, e = escala || 1;
+    const uvL = [[0, y0 * e], [L * e, y0 * e], [L * e, y1 * e], [0, y1 * e]], uvC = [[0, y0 * e], [2 * w * e, y0 * e], [2 * w * e, y1 * e], [0, y1 * e]];
+    cara(b, [p(A, 1, y0), p(B, 1, y0), p(B, 1, y1), p(A, 1, y1)], [-uz, 0, ux], c, escala && uvL);
+    cara(b, [p(B, -1, y0), p(A, -1, y0), p(A, -1, y1), p(B, -1, y1)], [uz, 0, -ux], c, escala && uvL);
+    cara(b, [p(B, 1, y0), p(B, -1, y0), p(B, -1, y1), p(B, 1, y1)], [ux, 0, uz], c, escala && uvC);
+    cara(b, [p(A, -1, y0), p(A, 1, y0), p(A, 1, y1), p(A, -1, y1)], [-ux, 0, -uz], c, escala && uvC);
+    cara(b, [p(A, 1, y1), p(B, 1, y1), p(B, -1, y1), p(A, -1, y1)], [0, 1, 0], c, escala && [[0, 0], [L * e, 0], [L * e, 2 * w * e], [0, 2 * w * e]]);
+    return h;
+  };
+  // reja: un plano vertical de A a B con los barrotes repetidos cada 48 cm (4 barrotes por vuelta de textura)
+  const plano = (b, A, B, y0, y1) => {
+    const L = Math.hypot(B[0] - A[0], B[1] - A[1]), n = [-(B[1] - A[1]) / (L || 1), 0, (B[0] - A[0]) / (L || 1)], u = L / 0.48;
+    cara(b, [[A[0], y0, A[1]], [B[0], y0, B[1]], [B[0], y1, B[1]], [A[0], y1, A[1]]], n, null, [[0, 0], [u, 0], [u, 1], [0, 1]]);
+  };
+  const malla = (b, mat) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
+    if (b.col.length) g.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3));
+    if (b.uv.length) g.setAttribute('uv', new THREE.Float32BufferAttribute(b.uv, 2));
+    const m = new THREE.Mesh(g, mat);
+    m.frustumCulled = false;
+    return m;
+  };
+  for (const { cx, cz, lista } of porBloques(segs.map(s => ({ ...s, x: (s.ax + s.bx) / 2, z: (s.az + s.bz) / 2 })), BLOQUE_FAROLAS)) {
+    const muro = nueva(), reja = nueva(), seto = nueva(), bloque = new THREE.Group();
+    for (const s of lista) {
+      const E = ESTILO_VALLA[s.estilo] || ESTILO_VALLA.reja, A = [s.ax, s.az], B = [s.bx, s.bz], L = Math.hypot(B[0] - A[0], B[1] - A[1]);
+      if (L < 0.05) continue;
+      const c = tono[Math.floor(s.tono * tono.length) % tono.length], ux = (B[0] - A[0]) / L, uz = (B[1] - A[1]) / L;
+      const pilar = (f, h) => { const x = A[0] + (B[0] - A[0]) * f, z = A[1] + (B[1] - A[1]) * f; caja(muro, [x - ux * 0.19, z - uz * 0.19], [x + ux * 0.19, z + uz * 0.19], 0, h, 0.19, c); };
+      if (s.puerta) {   // cancela: hierro de suelo a 1,8 m, entre dos pilares
+        plano(reja, A, B, 0.04, 1.8);
+        pilar(0, 2.0); pilar(1, 2.0);
+        continue;
+      }
+      caja(muro, A, B, 0, E.muro, 0.11, c);
+      caja(muro, A, B, E.muro, E.muro + 0.06, 0.15, remate);   // albardilla
+      if (s.estilo === 'reja') plano(reja, A, B, E.muro + 0.06, E.alto);
+      if (s.estilo === 'seto') caja(seto, A, B, E.muro + 0.06, E.alto, 0.35, null, 1.2);
+      // pilares en los extremos y cada ~2,8 m en las rejas y los muros
+      const nP = s.estilo === 'seto' ? 1 : Math.max(1, Math.round(L / 2.8));
+      for (let i = 0; i <= nP; i++) pilar(i / nP, E.alto + 0.1);
+    }
+    if (muro.pos.length) bloque.add(conSombra(malla(muro, matMuro)));
+    if (reja.pos.length) bloque.add(malla(reja, matReja));
+    if (seto.pos.length) bloque.add(conSombra(malla(seto, matSeto)));
+    grupo.add(bloque);
+    bloquesFarolas.push({ g: bloque, cx, cz });
+  }
+  return grupo;
+}
+// Césped dentro de las parcelas de los chalets: solo sin foto aérea (con foto ya se ven los jardines de verdad)
+function mallaJardines(parcelas) {
+  const pos = [];
+  for (const p of parcelas) {
+    const ux = p[1][0] - p[0][0], uz = p[1][1] - p[0][1], vx = p[2][0] - p[0][0], vz = p[2][1] - p[0][1];
+    const orden = uz * vx - ux * vz >= 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2];   // cara de delante hacia arriba
+    for (const k of orden) pos.push(p[k][0], 0.03, p[k][1]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x5f8a42, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+  m.receiveShadow = sombras;
+  return m;
+}
 // Rotondas: césped en el centro, bordillo alrededor; las que parecen fuentes en la foto llevan una fuente decorada
 function mallaIslas(islas) {
   const grupo = new THREE.Group();
@@ -3397,7 +3874,8 @@ function construirMallaZona() {
   const m = zona.mundo;
   mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif));
   mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaLucesFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas),
-    mallaQuioscos(m.quioscos), mallaTermometros(m.termometros));
+    mallaQuioscos(m.quioscos), mallaTermometros(m.termometros), mallaVallas(m.vallas));
+  if (!zona.foto && m.jardines.length) mallaZona.add(mallaJardines(m.jardines));
   scene.add(mallaZona);
   aplicarHora(horaElegida);   // ventanas, farolas y quioscos encendidos según la hora
   if (!cocheMesh) {
@@ -3431,6 +3909,30 @@ async function cargarFoto(zip) {
   return { textura, g: leerJgw(await mundo.async('string')), W: img.naturalWidth, H: img.naturalHeight, media: '#' + hex(r) + hex(v) + hex(b) };
 }
 
+// Parte de vegetación de la foto alrededor de (x, z) (25 puntos en ±6 m), de 0 a 1; null si la foto no llega ahí.
+// Sirve para saber dónde poner chalets con jardín y dónde no poner casas (campos y parques) cuando hay que simularlas
+function verdeDeFoto(foto) {
+  if (!foto) return null;
+  const k = Math.min(1, 2048 / Math.max(foto.W, foto.H)), w = Math.max(1, Math.round(foto.W * k)), h = Math.max(1, Math.round(foto.H * k));
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  g.drawImage(foto.textura.image, 0, 0, w, h);
+  const px = g.getImageData(0, 0, w, h).data;
+  return (x, z) => {
+    let n = 0, v = 0;
+    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+      const [X, Y] = mercatorDeLocal(x + i * 3, z + j * 3), [u, t] = uvOrtofoto(X, Y, foto.g, foto.W, foto.H);
+      const c = Math.floor(u * w), f = Math.floor((1 - t) * h);
+      if (c < 0 || f < 0 || c >= w || f >= h) continue;
+      const q = (f * w + c) * 4, r = px[q], gr = px[q + 1], b = px[q + 2];
+      n++;
+      if (gr > r + 3 && gr > b + 8) v++;   // verde de árboles, césped o huerta (el campo seco del verano no cuenta)
+    }
+    return n >= 8 ? v / n : null;
+  };
+}
+
 // --- carga del zip de la zona ---
 async function cargarZona(archivo) {
   $('estado').textContent = 'Leyendo el zip…';
@@ -3451,11 +3953,29 @@ async function cargarZona(archivo) {
   $('estado').textContent = 'Procesando calles…';
   await new Promise(r => setTimeout(r, 0));
   const tramos = parsearCalles(calles);
+  if (!tramos.length) throw new Error('la zona no trae calles por las que conducir (¿no respondió OpenStreetMap?): prepárala otra vez en el Paseo');
   const G = construirGrafo(tramos);
+  // la foto aérea se carga antes que las casas: si hay que simularlas, dice dónde hay jardines y dónde campo
+  $('estado').textContent = 'Cargando la foto aérea…';
+  await new Promise(r => setTimeout(r, 0));
+  const foto = await cargarFoto(zip).catch(() => null);
   $('estado').textContent = 'Cargando casas…';
   await new Promise(r => setTimeout(r, 0));
-  const casas = await leer('casas.geojson');
+  const casas = await opcional('casas.geojson', { features: [] });   // sin casas (el Catastro no respondió) la zona se juega igual
   let edif = parsearCasas(casas), rejilla = construirRejilla(edif);
+  const mapa = await opcional('mapa.geojson', { features: [] });
+  // sin casas del Catastro (y casi ninguna de OpenStreetMap): casas simuladas junto a las calles, sobre la foto aérea
+  let simuladas = 0;
+  if (hacenFaltaCasas(casas, edif, tramos)) {
+    $('estado').textContent = 'No hay casas del Catastro: simulando casas junto a las calles…';
+    await new Promise(r => setTimeout(r, 0));
+    const capas = parsearMapa(mapa), osm0 = await opcional('datos/osm.json', { elements: [] });
+    const aguas = construirAguas(capas, extraerOSM(osm0).piscinas);
+    const nuevas = simularCasas(tramos, capas, aguas, construirRejilla(aguas), edif, rejilla, verdeDeFoto(foto), mulberry32(2024));
+    simuladas = nuevas.length;
+    edif = edif.concat(nuevas);
+    rejilla = construirRejilla(edif);
+  }
   // casas que cortan una calle (pasajes bajo edificios, datos que no casan): no se ponen, y se avisa
   $('estado').textContent = 'Comprobando que ninguna casa corte una calle…';
   await new Promise(r => setTimeout(r, 0));
@@ -3467,17 +3987,14 @@ async function cargarZona(archivo) {
   }
   $('estado').textContent = 'Construyendo la zona…';
   await new Promise(r => setTimeout(r, 0));
-  zona = { nombre: nombreLugar, tramos, G, edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan };
+  zona = { nombre: nombreLugar, tramos, G, edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan, simuladas };
   prepararCasas(edif, zona.rejilla, tramos);
-  $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas)…';
+  $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas, vallas de los chalets)…';
   await new Promise(r => setTimeout(r, 0));
-  const mapa = await opcional('mapa.geojson', { features: [] });
   const osm = await opcional('datos/osm.json', { elements: [] });
   zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242));
   zona.caja = calcularCaja(tramos, edif);
-  $('estado').textContent = 'Cargando la foto aérea…';
-  await new Promise(r => setTimeout(r, 0));
-  zona.foto = await cargarFoto(zip);
+  zona.foto = foto;
   zona.nFuentes = detectarFuentes(zona.mundo, zona.foto);
   construirMallaZona();
   $('btnNueva').disabled = false;
@@ -3486,7 +4003,9 @@ async function cargarZona(archivo) {
   $('titulo').textContent = 'Carreras por ' + zona.nombre;
   document.title = `Carreras por ${zona.nombre} · prototipo`;
   const grande = edif.length > 45000 || tramos.length > 4500;
-  mostrarMenu(`${zona.nombre} lista: ${tramos.length} calles, ${edif.length} casas, ${zona.nFuentes} fuentes.` +
+  const sim = zona.simuladas;
+  mostrarMenu(`${zona.nombre} lista: ${tramos.length} calles, ${edif.length} casas${zona.mundo.chalets ? ` (${zona.mundo.chalets} chalets con valla)` : ''}, ${zona.nFuentes} fuentes.` +
+    (sim ? ` ⚠ El Catastro no ha dado casas: ${sim === edif.length ? 'todas' : sim} son simuladas junto a las calles${zona.foto ? ', sobre la foto aérea' : ' (tampoco hay foto aérea: el suelo sale del mapa)'}.` : '') +
     (grande ? ' Es una zona grande: en el móvil puede ir lenta.' : '') +
     (q.quitar.size ? ` ⚠ Se han quitado ${q.quitar.size} casas que cortaban calles (${q.calles.slice(0, 3).join(', ')}${q.calles.length > 3 ? '…' : ''}).` : ''));
   if (q.quitar.size) $('estado').title = 'Calles afectadas: ' + q.calles.join(', ');
