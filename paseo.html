@@ -707,6 +707,13 @@ button{cursor:pointer}
 .zinfo strong{font:500 14px var(--f-data);font-variant-numeric:tabular-nums;color:var(--retama)}
 .zinfo span{font-size:13px;color:var(--muted);line-height:1.4}
 .zbtns{display:flex;gap:8px;flex-wrap:wrap}
+.forma{display:flex;padding:3px;gap:3px;border-radius:10px;background:var(--glass-hi)}
+.forma button{min-height:34px;padding:0 12px;border-radius:8px;border:0;background:transparent;font-weight:700;font-size:13px;color:var(--muted)}
+.forma button[aria-pressed="true"]{background:var(--retama);color:var(--retama-ink)}
+#zona.dibujo .zframe{border-color:transparent;box-shadow:none}
+#zona.dibujo .zframe .zdim{display:none}
+#zona.dibujo #zmap{cursor:crosshair}
+.zvert{width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--retama);border:2px solid #10201a;box-shadow:0 1px 4px rgba(0,0,0,.5)}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 #zSavedBtn{display:none}
 @media (min-width:900px){.zframe{left:calc(var(--sl) + 340px)}}
@@ -928,8 +935,9 @@ body.dragging .drop{border-color:var(--retama);background:rgba(232,197,71,.08)}
   </div>
   <aside class="zsaved glass" id="zSaved" aria-label="Zonas guardadas"><h2>Zonas guardadas</h2><ul class="zlist" id="zList"></ul></aside>
   <div class="zbot glass">
+    <div class="forma" id="zForma" role="group" aria-label="Forma de la zona"><button type="button" data-f="recuadro" aria-pressed="true">▭ Recuadro</button><button type="button" data-f="dibujar" aria-pressed="false">✏️ Dibujar</button></div>
     <div class="zinfo"><strong id="zSize">—</strong><span id="zMsg">Mueve y acerca el mapa: lo que queda dentro del recuadro es la zona.</span></div>
-    <div class="zbtns"><button class="btn ghost" id="zFile" type="button">Abrir archivo del visor</button><button class="btn primary" id="zGo" type="button">Ver en 3D</button></div>
+    <div class="zbtns"><button class="btn ghost" id="zUndo" type="button" hidden>Deshacer</button><button class="btn ghost" id="zClearP" type="button" hidden>Borrar</button><button class="btn ghost" id="zFile" type="button">Abrir archivo del visor</button><button class="btn primary" id="zGo" type="button">Ver en 3D</button></div>
   </div>
 </section>
 <div class="cota" id="cota" hidden></div>
@@ -1401,6 +1409,7 @@ function leerGMLCatastro(txt,zona){
     const c=cuerpoErr(txt)||txt.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,140);
     throw new Error(`catastro.php devolvió algo que no es la lista de casas${c?`: «${c}»`:''}`);}
   const ex=doc.getElementsByTagNameNS('*','ExceptionText')[0]||doc.getElementsByTagName('error')[0];
+  if(ex&&/no records/i.test(ex.textContent))return [];   // recuadro sin casas (el mar, el campo): no es un fallo
   if(ex)throw new Error(`el Catastro contestó con un error: «${ex.textContent.trim().slice(0,160)||'sin texto'}»`);
   let feats=[...doc.getElementsByTagNameNS('*','BuildingPart')];
   if(!feats.length)feats=[...doc.getElementsByTagNameNS('*','Building')];
@@ -1444,8 +1453,20 @@ function errCat(e){
   if(e.status&&e.propio)return `catastro.php contestó HTTP ${e.status}: «${e.body}»`;
   return errTxt(e);
 }
-async function fetchCatastro(g,have=null){
-  const {zona,srs,jobs}=catTiles(g),tiles={},failed=[],errs=new Map();
+// ¿Toca el trozo (en UTM) el polígono de la zona ([lat, lon])? Para no pedir los trozos que quedan fuera
+function trozoDentro(poligono){
+  if(!poligono||poligono.length<3)return null;
+  return j=>{const zona=+j.key.split(':')[0],P=poligono.map(([la,lo])=>aUTM(la,lo,zona)),[x0,y0,x1,y1]=j.bb;
+    const enP=(x,y)=>{let d=false;for(let i=0,k=P.length-1;i<P.length;k=i++){const [xi,yi]=P[i],[xk,yk]=P[k];if((yi>y)!==(yk>y)&&x<(xk-xi)*(y-yi)/(yk-yi)+xi)d=!d;}return d;};
+    if(P.some(([x,y])=>x>=x0&&x<=x1&&y>=y0&&y<=y1))return true;
+    if([[x0,y0],[x1,y0],[x1,y1],[x0,y1],[(x0+x1)/2,(y0+y1)/2]].some(([x,y])=>enP(x,y)))return true;
+    const cruza=(a,b,c,d)=>{const o=(p,q,r)=>Math.sign((q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0]));return o(a,b,c)!==o(a,b,d)&&o(c,d,a)!==o(c,d,b);};
+    const lados=[[[x0,y0],[x1,y0]],[[x1,y0],[x1,y1]],[[x1,y1],[x0,y1]],[[x0,y1],[x0,y0]]];
+    for(let i=0;i<P.length;i++){const a=P[i],b=P[(i+1)%P.length];if(lados.some(([c,d])=>cruza(a,b,c,d)))return true;}
+    return false;};
+}
+async function fetchCatastro(g,have=null,dentro=null){
+  const {zona,srs,jobs:todos}=catTiles(g),jobs=dentro?todos.filter(dentro):todos,tiles={},failed=[],errs=new Map();
   if(have)for(const j of jobs)if(have[j.key])tiles[j.key]=have[j.key];
   const todo=jobs.filter(j=>!tiles[j.key]),guardados=jobs.length-todo.length;
   const urlDe=(bb,t)=>`${CATASTRO_URL}?z=${srs}&bbox=${bb.map(v=>v.toFixed(1)).join(',')}${t?'&t=building':''}`;
@@ -1470,6 +1491,43 @@ async function fetchCatastro(g,have=null){
   for(const j of jobs){const a=tiles[j.key];if(!a)continue;for(const p of a){const key=p.id||p.ring[0].join(',');if(vistos.has(key))continue;vistos.add(key);partes.push(p);}}
   return {partes,tiles,failed,fails:failed.length,total:jobs.length,fetched:okN,guardados,errs:agrupa(errs),motivo};
 }
+
+/* Parcelas del Catastro (para la linde de los chalets en el juego). Se piden con el mismo catastro.php y t=parcela;
+   un catastro.php antiguo no sabe darlas y devuelve casas: entonces se deja de pedir y se avisa */
+function leerGMLParcelas(txt,zona){
+  if(!txt||!txt.trim())throw new Error('catastro.php devolvió una respuesta vacía');
+  const doc=new DOMParser().parseFromString(txt,'application/xml');
+  if(doc.getElementsByTagName('parsererror').length)throw new Error('catastro.php devolvió algo que no es la lista de parcelas');
+  const ex=doc.getElementsByTagNameNS('*','ExceptionText')[0]||doc.getElementsByTagName('error')[0];
+  if(ex&&/no records/i.test(ex.textContent))return [];
+  if(ex)throw new Error(`el Catastro contestó con un error: «${ex.textContent.trim().slice(0,160)||'sin texto'}»`);
+  const feats=[...doc.getElementsByTagNameNS('*','CadastralParcel')];
+  if(!feats.length&&(doc.getElementsByTagNameNS('*','BuildingPart').length||doc.getElementsByTagNameNS('*','Building').length)){const e=new Error('catastro.php no sabe dar parcelas (es la versión antigua)');e.viejo=true;throw e;}
+  const out=[];
+  for(const f of feats){
+    const pl=(f.getElementsByTagNameNS('*','exterior')[0]||f).getElementsByTagNameNS('*','posList')[0];if(!pl)continue;
+    const ns=pl.textContent.trim().split(/\s+/).map(Number);if(ns.length<6)continue;
+    const ring=[];for(let k=0;k+1<ns.length;k+=2)ring.push(deUTM(ns[k],ns[k+1],zona));
+    const rc=f.getElementsByTagNameNS('*','nationalCadastralReference')[0],id=f.getAttributeNS('http://www.opengis.net/gml/3.2','id')||f.getAttribute('gml:id')||'';
+    const m=/CP\.([0-9A-Z]{14})/i.exec(id);
+    out.push({ring,ref:rc?rc.textContent.trim().toUpperCase():m?m[1].toUpperCase():null});
+  }
+  return out;
+}
+async function fetchParcelas(g,have=null,dentro=null){
+  const {zona,srs,jobs:todos}=catTiles(g),jobs=dentro?todos.filter(dentro):todos,tiles={},failed=[];
+  if(have)for(const j of jobs)if(have[j.key])tiles[j.key]=have[j.key];
+  const todo=jobs.filter(j=>!tiles[j.key]);let k=0,okN=0,viejo=false;
+  async function worker(){
+    while(k<todo.length&&!viejo){const job=todo[k++];
+      try{const r=await fetch(`${CATASTRO_URL}?z=${srs}&bbox=${job.bb.map(v=>v.toFixed(1)).join(',')}&t=parcela`);if(!r.ok)throw await errHTTP(r);tiles[job.key]=leerGMLParcelas(await r.text(),zona);okN++;}
+      catch(e){if(e.viejo)viejo=true;else failed.push(job.key);}}
+  }
+  await Promise.all(Array.from({length:3},worker));
+  if(viejo)return {viejo:true,tiles:{},failed:[]};
+  return {tiles,failed,fetched:okN,total:jobs.length};
+}
+function parcelasDe(par){const out=[],vistos=new Set();for(const k in par.tiles||{})for(const p of par.tiles[k]){const key=p.ref||p.ring[0].join(',');if(vistos.has(key))continue;vistos.add(key);out.push(p);}return out;}
 
 /* ===================== Estado global ===================== */
 const Q={
@@ -3007,8 +3065,11 @@ async function buildWorld(src){
     if(!enEspana(src.geo))repSet('cat','nada','Fuera de España no hay Catastro: las casas salen de OpenStreetMap.');
     else if(!catOk)repSet('cat','nada',`La zona mide ${fmt(area,1)} km² y el Catastro solo se pide hasta ${CAT_MAX_KM2} km²: las casas salen de OpenStreetMap.`);
     const pC=catDone?Promise.resolve({partes:raw.cat.partes||catPartes(raw.cat),fails:0,cached:true})
-      :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles).catch(e=>({err:e})):null;
-    fresh={sat:false,osm:null,cat:null};
+      :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles,trozoDentro(src.poligono)).catch(e=>({err:e})):null;
+    // parcelas: solo con Catastro; las que faltan (o todas, si catastro.php no sabía darlas) se vuelven a pedir
+    const parDone=raw.par&&!raw.par.viejo&&!(raw.par.failed||[]).length;
+    const pP=catOk&&!parDone?fetchParcelas(src.geo,raw.par&&raw.par.tiles,trozoDentro(src.poligono)).catch(e=>({err:e})):null;
+    fresh={sat:false,osm:null,cat:null,par:null};
     if(raw.sat&&raw.sat.blob){busy('Abriendo la foto aérea guardada…',null);sat=await satFromBlob(raw.sat);let n0=0,n=0;
       if(!sat)repLog('sat','La foto guardada no se ha podido leer: la vuelvo a descargar.');
       else if(sat.failed.length){n0=sat.failed.length;busy(`Completando la foto aérea: ${n0} teselas que faltaban…`,null);n=await patchSat(sat,sat);if(n)fresh.sat=true;}
@@ -3035,6 +3096,10 @@ async function buildWorld(src){
           const cf=rc.partes.map(p=>({layer:'building',tags:isNaN(p.plantas)?{building:'catastro'}:{building:'catastro','building:levels':String(p.plantas)},polys:[p.ring,...p.holes].map(r=>r.map(([la,lo])=>proj(la,lo))),cat:true,ref:p.ref}));
           feats=(feats||[]).filter(f=>f.layer!=='building').concat(cf);T.catN=cf.length;
           if(rc.fails)notes.push(`El Catastro no ha dado ${rc.fails} de ${rc.total} trozos de la zona (${rc.motivo||'sin respuesta'}); ahí no salen sus casas. Lo que sí llegó queda guardado, y la próxima vez que abras la zona solo se pedirá lo que falta.`);}}}
+    if(pP){busy('Esperando las parcelas del Catastro…',null);const rp=await pP;
+      if(rp.err)repLog('cat',`Las parcelas no han llegado: ${errCat(rp.err)}.`);
+      else if(rp.viejo){fresh.par={viejo:true,tiles:{},failed:[]};repLog('cat','catastro.php no sabe dar parcelas (es la versión antigua): sin ellas, las vallas de los chalets del juego se calculan. Sube el catastro.php nuevo para tenerlas.');}
+      else{fresh.par={tiles:rp.tiles,failed:rp.failed};repLog('cat',`Parcelas: ${fmt(parcelasDe(fresh.par).length)}${rp.failed.length?`; faltan ${rp.failed.length} trozos, se volverán a pedir`:''}.`);}}
     if(sat&&sat.failed&&sat.failed.length)notes.push(`Faltan ${sat.failed.length} trozos de la foto aérea; se ven lisos. Se volverán a pedir la próxima vez que abras la zona.`);
     if(!sat&&!osm)notes.push('No he podido descargar la foto aérea ni el mapa de OpenStreetMap, así que el paisaje se ha pintado a partir del relieve.');
     else if(!sat)notes.push('No he podido descargar la foto aérea: el suelo se ha pintado a partir del mapa y del relieve.');
@@ -3584,10 +3649,10 @@ function makeThumb(cv){try{const k=Math.min(1,192/Math.max(cv.width,cv.height)),
 async function saveZone(src){
   if(!src.zoneId||!W||W.src!==src)return false;
   const T=W,prev=(await DB.get('datos',src.zoneId))||{};
-  const rec={dem:prev.dem||{W:src.W,H:src.H,h:src.h.buffer.slice(0),src:src.demSrc,incomplete:!!src.demIncomplete},sat:prev.sat||null,osm:prev.osm||null,cat:prev.cat||null};
+  const rec={dem:prev.dem||{W:src.W,H:src.H,h:src.h.buffer.slice(0),src:src.demSrc,incomplete:!!src.demIncomplete},sat:prev.sat||null,osm:prev.osm||null,cat:prev.cat||null,par:prev.par||null,poligono:prev.poligono||src.poligono||null};
   if(src.demFresh){rec.dem={W:src.W,H:src.H,h:src.h.buffer.slice(0),src:src.demSrc,incomplete:false};src.demFresh=false;}
   const f=T.fresh||{};
-  if(f.osm)rec.osm=f.osm;if(f.cat)rec.cat=f.cat;
+  if(f.osm)rec.osm=f.osm;if(f.cat)rec.cat=f.cat;if(f.par&&!(f.par.viejo&&rec.par&&!rec.par.viejo))rec.par=f.par;
   if(f.sat&&T.satCanvas){busy('Guardando la zona en este navegador…',null);const blob=await new Promise(r=>{try{T.satCanvas.toBlob(r,'image/jpeg',0.86);}catch(e){r(null);}});busy('');
     if(blob){const st=T.sat||{};rec.sat={blob,src:T.satSrc,key:st.key,z:st.z,geom:st.geom,failed:(st.failed||[]).slice()};}}
   const catN=rec.cat?(rec.cat.partes?rec.cat.partes.length:Object.values(rec.cat.tiles).reduce((a,t)=>a+t.length,0)):0;
@@ -3598,8 +3663,9 @@ async function saveZone(src){
   if(!rec.osm)missing.push('mapa de OpenStreetMap');
   if(rec.cat&&rec.cat.failed&&rec.cat.failed.length)missing.push(`${rec.cat.failed.length} trozos del Catastro`);
   else if(!rec.cat&&T.catMissing===-1&&location.protocol!=='file:')missing.push('casas del Catastro');
+  if(rec.par&&rec.par.failed&&rec.par.failed.length)missing.push(`${rec.par.failed.length} trozos de las parcelas`);
   const meta=(await DB.get('zonas',src.zoneId))||{id:src.zoneId,created:Date.now()};
-  Object.assign(meta,{name:src.name,geo:src.geo,wM:src.wM,hM:src.hM,used:Date.now(),demSrc:src.demSrc,thumb:makeThumb(T.groundCv)||meta.thumb||null,bytes,missing,parts:{sat:!!rec.sat,osm:!!rec.osm,cat:!!rec.cat}});
+  Object.assign(meta,{name:src.name,geo:src.geo,poligono:rec.poligono||null,wM:src.wM,hM:src.hM,used:Date.now(),demSrc:src.demSrc,thumb:makeThumb(T.groundCv)||meta.thumb||null,bytes,missing,parts:{sat:!!rec.sat,osm:!!rec.osm,cat:!!rec.cat}});
   if(await DB.put('datos',rec,src.zoneId)==null)return false;
   await DB.put('zonas',meta,src.zoneId);
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
@@ -3620,7 +3686,7 @@ async function openZone(meta,opts={}){
       else repSet('alt','aviso',`Uso las guardadas (${d.dem.src}), a las que les faltan trozos del IGN. He intentado completarlas y no ha sido posible${why?`: ${why}`:''}.`);}
     else repSet('alt','ok',`Guardadas en este navegador (${d.dem.src}): no se ha descargado nada.`);
     const src={kind:'zona',name:meta.name,W:d.dem.W,H:d.dem.H,h:nd?nd.h:new Float32Array(d.dem.h),wM:meta.wM,hM:meta.hM,geo:meta.geo,seaBase:0,
-      demSrc:nd?nd.src:d.dem.src,demIncomplete:nd?false:!!d.dem.incomplete,demFresh:!!nd,zoneId:meta.id,raw:{sat:d.sat,osm:d.osm,cat:d.cat}};
+      demSrc:nd?nd.src:d.dem.src,demIncomplete:nd?false:!!d.dem.incomplete,demFresh:!!nd,zoneId:meta.id,poligono:d.poligono||meta.poligono||null,raw:{sat:d.sat,osm:d.osm,cat:d.cat,par:d.par}};
     const r=await loadSrc(src);
     meta.used=Date.now();await DB.put('zonas',meta,meta.id);
     const fr=nd||(W.fresh&&(W.fresh.sat||W.fresh.osm||W.fresh.cat));
@@ -3646,7 +3712,7 @@ async function scanZone(g,name,opts={}){
     const pN=name?Promise.resolve(name):reverseName(g);
     const dem=await fetchDEM(g,(f,msg)=>busy(msg,f));
     const nm=(await pN)||coordName(g);
-    const src={kind:'zona',name:nm,W:dem.W,H:dem.H,h:dem.h,wM:dem.wM,hM:dem.hM,geo:g,seaBase:0,demSrc:dem.src,zoneId:id,demIncomplete:dem.incomplete};
+    const src={kind:'zona',name:nm,W:dem.W,H:dem.H,h:dem.h,wM:dem.wM,hM:dem.hM,geo:g,seaBase:0,demSrc:dem.src,zoneId:id,demIncomplete:dem.incomplete,poligono:opts.poligono||null};
     const r=await loadSrc(src);
     if(dem.note)r.notes.unshift(dem.note);
     loading=false;
@@ -3669,6 +3735,27 @@ async function restoreColors(){
 }
 
 /* ---------- Archivo de la zona (.zip) ---------- */
+/* Recorte de lo exportado por el polígono dibujado ([lat, lon]): dentroDe(feature) mira su centro; linea(feature) corta una calle
+   en el borde y devuelve los trozos de dentro. Sin polígono, null */
+function recortePoligono(poli){
+  if(!poli||poli.length<3)return null;
+  const dentro=(lo,la)=>{let d=false;for(let i=0,k=poli.length-1;i<poli.length;k=i++){const [ai,oi]=poli[i],[ak,ok]=poli[k];if((ai>la)!==(ak>la)&&lo<(ok-oi)*(la-ai)/(ak-ai)+oi)d=!d;}return d;};
+  const centro=g=>{if(!g)return null;if(g.type==='Point')return g.coordinates;const r=g.type==='Polygon'?g.coordinates[0]:g.type==='MultiPolygon'?g.coordinates[0][0]:g.type==='LineString'?g.coordinates:null;
+    if(!r||!r.length)return null;let x=0,y=0;for(const c of r){x+=c[0];y+=c[1];}return [x/r.length,y/r.length];};
+  const dentroDe=f=>{const c=centro(f.geometry);return !!c&&dentro(c[0],c[1]);};
+  // cortes de un segmento con los lados del polígono (fracciones de 0 a 1)
+  const cortes=(a,b)=>{const ts=[0,1];for(let i=0,k=poli.length-1;i<poli.length;k=i++){const p=[poli[k][1],poli[k][0]],q=[poli[i][1],poli[i][0]];
+      const dx=b[0]-a[0],dy=b[1]-a[1],ex=q[0]-p[0],ey=q[1]-p[1],den=dx*ey-dy*ex;if(Math.abs(den)<1e-18)continue;
+      const t=((p[0]-a[0])*ey-(p[1]-a[1])*ex)/den,u=((p[0]-a[0])*dy-(p[1]-a[1])*dx)/den;if(t>0&&t<1&&u>=0&&u<=1)ts.push(t);}
+    return ts.sort((x,y)=>x-y);};
+  const linea=f=>{const g=f.geometry;if(!g||g.type!=='LineString')return dentroDe(f)?[f]:[];
+    const trozos=[];let cur=null;const c=g.coordinates;
+    for(let i=0;i+1<c.length;i++){const a=c[i],b=c[i+1],ts=cortes(a,b);
+      for(let j=0;j+1<ts.length;j++){const t0=ts[j],t1=ts[j+1],P=t=>[r7(a[0]+(b[0]-a[0])*t),r7(a[1]+(b[1]-a[1])*t)],m=P((t0+t1)/2);
+        if(dentro(m[0],m[1])){if(!cur){cur=[P(t0)];trozos.push(cur);}cur.push(P(t1));}else cur=null;}}
+    return trozos.filter(t=>t.length>=2).map(t=>({type:'Feature',properties:f.properties,geometry:{type:'LineString',coordinates:t}}));};
+  return {dentro,dentroDe,linea};
+}
 /* Todo lo de la zona en un solo archivo: cotas, alturas para SIG, ortofoto georreferenciada, calles con su
    anchura, casas del Catastro, agua y vegetación, lugares, curvas de nivel y el informe. Se abre en QGIS,
    Google Earth (pasando por QGIS), Excel… y en esta misma página, que lo vuelve a guardar como zona. */
@@ -3776,6 +3863,7 @@ async function zoneExport(opts={}){
     const dem=rec&&rec.dem?{W:rec.dem.W,H:rec.dem.H,h:new Float32Array(rec.dem.h),src:rec.dem.src,incomplete:rec.dem.incomplete}:{W:src.W,H:src.H,h:src.h,src:src.demSrc||(src.kind==='csv'?'archivo CSV':''),incomplete:false};
     const raw=src.raw||{},fr=W.fresh||{};
     const osm=(rec&&rec.osm)||fr.osm||raw.osm||null,cat=(rec&&rec.cat)||fr.cat||raw.cat||null;
+    let par=(rec&&rec.par)||fr.par||raw.par||null;if(par&&par.viejo)par=null;
     let satBlob=rec&&rec.sat&&rec.sat.blob||null,satM=rec&&rec.sat||W.sat||null;
     if(!satBlob&&W.satCanvas)satBlob=await new Promise(r=>{try{W.satCanvas.toBlob(r,'image/jpeg',0.88);}catch(e){r(null);}});
     const nm=(src.name||'zona').trim(),slug=nm.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\w-]+/g,'-').replace(/^-+|-+$/g,'').toLowerCase()||'zona';
@@ -3814,18 +3902,24 @@ async function zoneExport(opts={}){
         casas.push({type:'Feature',properties:pr,geometry:{type:'Polygon',coordinates:[ring,...holes]}});}}
     else casas.push(...og.edif);
     const fc=f=>JSON.stringify({type:'FeatureCollection',features:f});
-    files.push({name:'calles.geojson',data:fc(calles)},{name:'casas.geojson',data:fc(casas)},{name:'mapa.geojson',data:fc(og.mapa)},{name:'lugares.geojson',data:fc(og.lugares)});
+    // zona dibujada: fuera del polígono no van calles (se cortan en su borde), casas, parcelas ni lugares
+    const poli=src.poligono||(rec&&rec.poligono)||null,recorte=recortePoligono(poli);
+    const callesZ=recorte?calles.flatMap(f=>recorte.linea(f)):calles,casasZ=recorte?casas.filter(recorte.dentroDe):casas,lugaresZ=recorte?og.lugares.filter(recorte.dentroDe):og.lugares;
+    files.push({name:'calles.geojson',data:fc(callesZ)},{name:'casas.geojson',data:fc(casasZ)},{name:'mapa.geojson',data:fc(og.mapa)},{name:'lugares.geojson',data:fc(lugaresZ)});
     // datos tal cual, para volver a abrir la zona
     if(osm)files.push({name:'datos/osm.json',data:JSON.stringify(osm)});
     if(cat)files.push({name:'datos/catastro.json',data:JSON.stringify(cat)});
-    const zona={formato:'paseo-relieve-zona',version:1,id:zid||null,nombre:nm,geo:g,ancho_m:Math.round(W.wM),alto_m:Math.round(W.hM),creado:new Date().toISOString(),
+    if(par){files.push({name:'datos/parcelas.json',data:JSON.stringify(par)});
+      const pf=parcelasDe(par).map(p=>({type:'Feature',properties:{referencia_catastral:p.ref,fuente:'Catastro'},geometry:{type:'Polygon',coordinates:[p.ring.map(([la,lo])=>[r7(lo),r7(la)])]}}));
+      files.push({name:'parcelas.geojson',data:fc(recorte?pf.filter(recorte.dentroDe):pf)});}
+    const zona={formato:'paseo-relieve-zona',version:1,id:zid||null,nombre:nm,geo:g,poligono:poli||null,ancho_m:Math.round(W.wM),alto_m:Math.round(W.hM),creado:new Date().toISOString(),
       alturas:{archivo:'alturas.asc',W:dem.W,H:dem.H,fuente:dem.src||null,incompleta:!!dem.incomplete},
       ortofoto:foto&&satM?{archivo:'ortofoto.jpg',fuente:satM.src||null,clave:satM.key||null,zoom:satM.z||null,geom:satM.geom||null,faltan:(satM.failed||[]).slice()}:null,
-      osm:osm?'datos/osm.json':null,catastro:cat?'datos/catastro.json':null,
+      osm:osm?'datos/osm.json':null,catastro:cat?'datos/catastro.json':null,parcelas:par?'datos/parcelas.json':null,
       colores:[...colBy.values()].map(c=>({ref:c.ref,col:c.col,off:!!c.off}))};
     files.push({name:'zona.json',data:JSON.stringify(zona)});
     files.push({name:'informe.txt',data:(repTexto()||'Sin informe de carga.').replace(/\n/g,'\r\n')+'\r\n'});
-    files.push({name:'LEEME.txt',data:leeme(nm,g,cv.eq,!!foto,!!cat,!!osm).replace(/\n/g,'\r\n')});
+    files.push({name:'LEEME.txt',data:leeme(nm,g,cv.eq,!!foto,!!cat,!!osm,!!par).replace(/\n/g,'\r\n')});
     busy('Comprimiendo el archivo…',0.75);await frame();
     const zip=await makeZip(files);busy('');
     if(opts.jugar){
@@ -3836,7 +3930,7 @@ async function zoneExport(opts={}){
   }catch(err){busy('');console.error(err);toast(`<p><b>No he podido preparar el archivo de la zona.</b></p><p>${esc(err.message||err)}</p>`,0);}
   loading=false;
 }
-function leeme(nm,g,eq,foto,cat,osm){return `ZONA «${nm}» — Paseo por el relieve (meteohuelva.es)
+function leeme(nm,g,eq,foto,cat,osm,par){return `ZONA «${nm}» — Paseo por el relieve (meteohuelva.es)
 Creada el ${new Date().toLocaleString('es-ES')}
 Recuadro: norte ${g.n.toFixed(6)}, sur ${g.s.toFixed(6)}, oeste ${g.w.toFixed(6)}, este ${g.e.toFixed(6)} (grados, WGS84)
 
@@ -3847,6 +3941,7 @@ QUÉ HAY EN ESTE ARCHIVO
 ${foto?'- ortofoto.jpg ......... la foto aérea de la zona, georreferenciada con ortofoto.jgw y ortofoto.prj (EPSG:3857).\n':''}- calles.geojson ....... calles, carreteras y caminos de OpenStreetMap, con su nombre, tipo, superficie y la anchura con la que se dibujan en 3D:
                           ancho_calzada_m, ancho_entre_fachadas_m y ancho_acera_m (calculadas con las fachadas del Catastro).
 - casas.geojson ........ ${cat?'casas del Catastro con su referencia catastral, plantas, altura aproximada, tejado y, si se ha mirado su foto de fachada, los colores de pared, zócalo y carpintería.':'edificios de OpenStreetMap (esta zona no tiene casas del Catastro).'}
+${par?'- parcelas.geojson ..... parcelas del Catastro con su referencia catastral (la linde de cada solar).':''}
 - mapa.geojson ......... agua, playas, vegetación, cultivos y usos del suelo de OpenStreetMap.
 - lugares.geojson ...... nombres de pueblos, parajes, playas, cimas y miradores.
 - informe.txt .......... qué se descargó de cada fuente y qué falló.
@@ -3870,11 +3965,12 @@ async function importZip(file){
   const osm=m.osm&&z[m.osm]?JSON.parse(await z[m.osm].text()):null,cat=m.catastro&&z[m.catastro]?JSON.parse(await z[m.catastro].text()):null;
   let sat=null;if(m.ortofoto&&z[m.ortofoto.archivo]){const blob=new Blob([await z[m.ortofoto.archivo].get()],{type:'image/jpeg'});sat={blob,src:m.ortofoto.fuente,key:m.ortofoto.clave,z:m.ortofoto.zoom,geom:m.ortofoto.geom,failed:m.ortofoto.faltan||[]};}
   const id=m.id||('z'+Date.now().toString(36)+Math.floor(Math.random()*1296).toString(36)),{wM,hM}=geoSize(m.geo);
-  const rec={dem:{W:dem.W,H:dem.H,h:dem.h.buffer,src:m.alturas.fuente||'archivo',incomplete:!!m.alturas.incompleta},sat,osm,cat};
+  const par=m.parcelas&&z[m.parcelas]?JSON.parse(await z[m.parcelas].text()):null;
+  const rec={dem:{W:dem.W,H:dem.H,h:dem.h.buffer,src:m.alturas.fuente||'archivo',incomplete:!!m.alturas.incompleta},sat,osm,cat,par,poligono:m.poligono||null};
   if(await DB.put('datos',rec,id)==null)throw new Error('este navegador no deja guardar datos, o no le queda espacio');
   const missing=[];if(rec.dem.incomplete)missing.push('alturas del IGN');if(!sat)missing.push('foto aérea');else if(sat.failed.length)missing.push(`${sat.failed.length} trozos de la foto aérea`);
   if(!osm)missing.push('mapa de OpenStreetMap');if(cat&&cat.failed&&cat.failed.length)missing.push(`${cat.failed.length} trozos del Catastro`);
-  const meta=Object.assign((await DB.get('zonas',id))||{id,created:Date.now()},{name:m.nombre||'Zona',geo:m.geo,wM,hM,used:Date.now(),demSrc:rec.dem.src,bytes:file.size,missing,parts:{sat:!!sat,osm:!!osm,cat:!!cat}});
+  const meta=Object.assign((await DB.get('zonas',id))||{id,created:Date.now()},{name:m.nombre||'Zona',geo:m.geo,poligono:m.poligono||null,wM,hM,used:Date.now(),demSrc:rec.dem.src,bytes:file.size,missing,parts:{sat:!!sat,osm:!!osm,cat:!!cat}});
   await DB.put('zonas',meta,id);
   for(const c of m.colores||[])if(c&&c.ref&&c.col){await DB.put('colores',{ref:c.ref,col:c.col,off:!!c.off},c.ref);if(c.off)FOTO.off.add(c.ref);}
   await refreshSavedUI();
@@ -3900,6 +3996,7 @@ function initZmap(){
   zLayers.mapa.addTo(zmap);
   zSavedLayer=L.layerGroup().addTo(zmap);
   zmap.on('move zoom resize',updateFrame);
+  zmap.on('click',e=>{if(!ZD.on)return;ZD.pts.push([e.latlng.lat,e.latlng.lng]);dibujoPintar();updateFrame();});
   setTimeout(()=>{zmap.invalidateSize();fitCurrent();updateFrame();},60);
   drawSavedRects();
 }
@@ -3907,25 +4004,57 @@ let zFitFor=null;
 function fitCurrent(){const g=W&&W.geo;if(!zmap||!g)return;const key=(W.src&&W.src.zoneId)||[g.n,g.w].join();if(zFitFor===key)return;zFitFor=key;
   const o=frameOff(1);zmap.fitBounds([[g.s,g.w],[g.n,g.e]],{paddingTopLeft:o.tl,paddingBottomRight:o.br,animate:false});}
 function frameOff(pad=8){const r=$('#zframe').getBoundingClientRect(),m=$('#zmap').getBoundingClientRect();return {tl:[r.left-m.left+pad,r.top-m.top+pad],br:[m.right-r.right+pad,m.bottom-r.bottom+pad]};}
-function frameGeo(){const r=$('#zframe').getBoundingClientRect(),m=$('#zmap').getBoundingClientRect();
+/* Forma de la zona: el recuadro de la pantalla, o un polígono que se dibuja tocando el mapa (sus esquinas se pueden arrastrar).
+   Con polígono se descarga el rectángulo que lo envuelve, pero solo se piden los trozos del Catastro que lo tocan, y al
+   preparar el archivo o el juego se quita lo que queda fuera (calles, casas, parcelas, lugares) */
+const ZD={on:false,pts:[],capa:null,marcas:[]};
+function dibujoGeo(){if(ZD.pts.length<3)return null;let n=-90,s=90,e=-180,w=180;for(const [la,lo] of ZD.pts){n=Math.max(n,la);s=Math.min(s,la);e=Math.max(e,lo);w=Math.min(w,lo);}
+  const dla=30/111e3,dlo=30/(111e3*Math.cos((n+s)/2*Math.PI/180));return {n:n+dla,s:s-dla,e:e+dlo,w:w-dlo};}   // 30 m de margen alrededor
+function areaPoligono(pts){const la0=pts[0][0]*Math.PI/180,kx=111320*Math.cos(la0),ky=110540;let a=0;
+  for(let i=0;i<pts.length;i++){const p=pts[i],q=pts[(i+1)%pts.length];a+=(p[1]*kx)*(q[0]*ky)-(q[1]*kx)*(p[0]*ky);}return Math.abs(a/2);}
+function dibujoPintar(){
+  if(!zmap)return;if(ZD.capa){zmap.removeLayer(ZD.capa);ZD.capa=null;}for(const m of ZD.marcas)zmap.removeLayer(m);ZD.marcas=[];
+  if(!ZD.on)return;
+  if(ZD.pts.length>=2)ZD.capa=(ZD.pts.length>=3?L.polygon(ZD.pts,{color:'#e8c547',weight:3,fillOpacity:0.12}):L.polyline(ZD.pts,{color:'#e8c547',weight:3,dashArray:'6 5'})).addTo(zmap);
+  ZD.pts.forEach((p,i)=>{const m=L.marker(p,{draggable:true,icon:L.divIcon({className:'',html:'<div class="zvert"></div>',iconSize:[0,0]}),keyboard:false}).addTo(zmap);
+    m.on('drag',e=>{const ll=e.target.getLatLng();ZD.pts[i]=[ll.lat,ll.lng];if(ZD.capa)ZD.capa.setLatLngs(ZD.pts);updateFrame();});
+    m.on('dragend',()=>{dibujoPintar();updateFrame();});
+    m.on('click',()=>{if(ZD.pts.length>3){ZD.pts.splice(i,1);dibujoPintar();updateFrame();}});   // tocar una esquina la quita
+    ZD.marcas.push(m);});
+  $('#zUndo').hidden=$('#zClearP').hidden=!ZD.pts.length;
+}
+function dibujoModo(on){
+  ZD.on=on;$('#zona').classList.toggle('dibujo',on);
+  for(const b of document.querySelectorAll('#zForma button'))b.setAttribute('aria-pressed',String((b.dataset.f==='dibujar')===on));
+  if(zmap&&zSavedLayer){if(on)zmap.removeLayer(zSavedLayer);else zSavedLayer.addTo(zmap);}   // al dibujar, tocar una zona guardada no la abre
+  if(!on){$('#zUndo').hidden=$('#zClearP').hidden=true;}
+  dibujoPintar();updateFrame();
+}
+function frameGeo(){if(ZD.on)return dibujoGeo()||frameGeoRecuadro();return frameGeoRecuadro();}
+function frameGeoRecuadro(){const r=$('#zframe').getBoundingClientRect(),m=$('#zmap').getBoundingClientRect();
   const a=zmap.containerPointToLatLng([r.left-m.left,r.top-m.top]),b=zmap.containerPointToLatLng([r.right-m.left,r.bottom-m.top]);
   return {n:a.lat,w:a.lng,s:b.lat,e:b.lng};}
 function updateFrame(){
-  if(!zmap)return;const g=frameGeo(),{wM,hM}=geoSize(g),mx=Math.max(wM,hM),mn=Math.min(wM,hM),A=wM*hM/1e6;
-  $('#zdim').textContent=`${fmtKm(wM)} × ${fmtKm(hM)}`;$('#zSize').textContent=`${fmt(A,A<1?2:1)} km²`;
-  let msg='Lo que queda dentro del recuadro es la zona que verás en 3D.',ok=true;
+  if(!zmap)return;
+  if(ZD.on&&ZD.pts.length<3){$('#zSize').textContent=ZD.pts.length?`${ZD.pts.length} de 3 esquinas`:'Dibuja la zona';
+    $('#zMsg').textContent='Toca el mapa para marcar las esquinas de la zona, en orden, todas las que quieras. Las esquinas se arrastran; tocando una se quita.';
+    const b=$('#zGo');b.disabled=true;b.textContent=JUEGO.activo?'🏁 Jugar aquí':'Ver en 3D';return;}
+  const g=frameGeo(),{wM,hM}=geoSize(g),mx=Math.max(wM,hM),mn=Math.min(wM,hM),A=ZD.on?areaPoligono(ZD.pts)/1e6:wM*hM/1e6;
+  $('#zdim').textContent=`${fmtKm(wM)} × ${fmtKm(hM)}`;$('#zSize').textContent=ZD.on?`${fmt(A,A<1?2:1)} km² · ${fmtKm(wM)} × ${fmtKm(hM)}`:`${fmt(A,A<1?2:1)} km²`;
+  let msg=ZD.on?'Lo que queda dentro de lo dibujado es la zona: se prepara solo eso.':'Lo que queda dentro del recuadro es la zona que verás en 3D.',ok=true;
   if(mx>8000){msg='Demasiado grande: acerca el mapa. Como mucho, 8 km de lado.';ok=false;}
   else if(mn<120){msg='Demasiado pequeña: aleja un poco el mapa.';ok=false;}
   else if(A>CAT_MAX_KM2)msg='Zona grande: tardará más y saldrá sin las casas del Catastro, que solo llegan a 25 km².';
   else if(mx>4500)msg='Zona grande: tardará más en descargarse y de cerca tendrá menos detalle.';
-  const s=ok?savedMatch(g):null;
+  const s=ok&&!ZD.on?savedMatch(g):null;
   if(s)msg=`Esta zona ya está guardada como «${s.name}»: se abre al momento.`;
   if(JUEGO.activo&&ok)msg='Elige la zona donde quieres correr (o una guardada) y pulsa «Jugar aquí»: se prepara y vuelves al juego. '+msg.replace('Lo que queda dentro del recuadro es la zona que verás en 3D.','');
+  if(!ZD.on&&ok)msg+=' ¿Otra forma? Pulsa «Dibujar».';
   $('#zMsg').textContent=msg;const b=$('#zGo');b.disabled=!ok;b.textContent=JUEGO.activo?'🏁 Jugar aquí':s?'Abrir la guardada':'Ver en 3D';
 }
 function drawSavedRects(){
   if(!zmap||!zSavedLayer)return;zSavedLayer.clearLayers();
-  for(const z of savedCache){const r=L.rectangle([[z.geo.s,z.geo.w],[z.geo.n,z.geo.e]],{color:'#e8c547',weight:2,dashArray:'6 5',fillOpacity:0.07});
+  for(const z of savedCache){const st={color:'#e8c547',weight:2,dashArray:'6 5',fillOpacity:0.07},r=z.poligono&&z.poligono.length>=3?L.polygon(z.poligono,st):L.rectangle([[z.geo.s,z.geo.w],[z.geo.n,z.geo.e]],st);
     r.bindTooltip(z.name,{direction:'top',sticky:true});r.on('click',()=>openZone(z));zSavedLayer.addLayer(r);}
 }
 function savedItem(z,compact){
@@ -3981,7 +4110,12 @@ async function zSearch(q){
 }
 $('#zSearch').addEventListener('submit',e=>{e.preventDefault();zSearch($('#zq').value.trim());});
 $('#zGo').addEventListener('click',()=>{if(!zmap)return;const g=frameGeo(),c=[(g.n+g.s)/2,(g.e+g.w)/2];
-  const nm=zPending&&Math.hypot((c[0]-zPending.ll[0])*111e3,(c[1]-zPending.ll[1])*88e3)<2500?zPending.name:null;scanZone(g,nm);});
+  const nm=zPending&&Math.hypot((c[0]-zPending.ll[0])*111e3,(c[1]-zPending.ll[1])*88e3)<2500?zPending.name:null;
+  if(ZD.on&&ZD.pts.length>=3)scanZone(g,nm,{force:true,poligono:ZD.pts.map(p=>[+p[0].toFixed(7),+p[1].toFixed(7)])});else scanZone(g,nm);});
+for(const b of document.querySelectorAll('#zForma button'))b.addEventListener('click',()=>dibujoModo(b.dataset.f==='dibujar'));
+$('#zUndo').addEventListener('click',()=>{ZD.pts.pop();dibujoPintar();updateFrame();});
+if(new URLSearchParams(location.search).has('prueba'))window.paseoPrueba={ZD,frameGeo,recortePoligono,trozoDentro,catTiles,leerGMLParcelas};   // solo para las pruebas automáticas
+$('#zClearP').addEventListener('click',()=>{ZD.pts=[];dibujoPintar();updateFrame();});
 $('#zBack').addEventListener('click',()=>{if(JUEGO.activo){location.href='carreras_huelva.html';return;}hideZona();});
 $('#zFile').addEventListener('click',()=>fileIn.click());
 for(const b of document.querySelectorAll('#zLayers button'))b.addEventListener('click',()=>{if(!zmap)return;for(const k in zLayers)zmap.removeLayer(zLayers[k]);zLayers[b.dataset.l].addTo(zmap);

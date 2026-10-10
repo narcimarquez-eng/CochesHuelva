@@ -14,20 +14,40 @@ Carrera de coches por Huelva
 El juego trae Huelva, pero se puede correr en cualquier sitio de España con el **Paseo por el relieve** (`paseo.html`, la misma página de meteohuelva.es, copiada aquí):
 
 1. En el menú del juego, en **Lugar**, pulsa **➕ Otro lugar**: se abre directamente el mapa del Paseo para elegir la zona, centrado en el lugar en el que estás.
-2. Busca el pueblo o mueve el mapa y pulsa **🏁 Jugar aquí** (también vale una zona de **Zonas guardadas** o **Abrir archivo del visor**).
+2. Busca el pueblo o mueve el mapa y pulsa **🏁 Jugar aquí** (también vale una zona de **Zonas guardadas** o **Abrir archivo del visor**). La zona puede ser el recuadro de la pantalla o la forma que quieras: con **✏️ Dibujar**, toca el mapa para marcar sus esquinas (se arrastran; tocando una se quita; **Deshacer** y **Borrar** ayudan).
 3. El Paseo descarga alturas, foto aérea, OpenStreetMap y casas del Catastro, monta la zona (en 3D, porque ahí mide el ancho de calles y aceras), la prepara como si fuera a descargar el .zip, la guarda en este navegador y vuelve solo al juego con ella. **Volver** regresa al juego sin elegir nada.
 
 Abierto por su cuenta (sin venir del juego), el Paseo funciona como siempre; con una zona abierta en 3D, el botón **🏁 Jugar aquí** de arriba también la lleva al juego.
 
 Las zonas traídas así (o abiertas con **📂 Abrir zip**) quedan en la fila **Lugar** del menú, con su nombre, y se pueden borrar con ✕. El juego recuerda el último lugar elegido. Al cambiar de lugar, el centro del mapa, el título y las pancartas de la carrera pasan a ser los de ese sitio.
 
-El Paseo y el juego tienen que estar en la misma web (por ejemplo, los dos en GitHub Pages) para compartir las zonas del navegador. Las casas del Catastro se piden a través de `catastro.php`, que está en meteohuelva.es porque GitHub Pages no ejecuta PHP: ese archivo tiene que dejar que lo llame la web del juego, con esta línea al principio:
+Con una zona dibujada se descarga el rectángulo que la envuelve, pero solo se piden los trozos del Catastro que la tocan, y al prepararla para el juego (o en el .zip) se quita lo que queda fuera: las calles se cortan en el borde, y fuera no quedan casas, parcelas ni lugares. El polígono va en `zona.json` (`poligono`) y las zonas guardadas se ven con su forma en el mapa.
 
-```php
-header('Access-Control-Allow-Origin: https://narcimarquez-eng.github.io');
-```
+El Paseo y el juego tienen que estar en la misma web (por ejemplo, los dos en GitHub Pages) para compartir las zonas del navegador. El Catastro se pide a través de `catastro.php`, que está en meteohuelva.es porque GitHub Pages no ejecuta PHP.
 
-Sin ella, el Paseo en GitHub Pages saca las casas de OpenStreetMap (menos y sin colores). Las zonas de más de 25 km² también salen sin el Catastro, y las muy grandes pueden ir lentas en el móvil (el menú avisa).
+### catastro.php nuevo
+
+En `servidor/catastro.php` está la versión nueva, para subirla a meteohuelva.es en lugar de la actual (en la misma carpeta que `paseo.html`). Hace lo mismo que la de ahora, con las mismas respuestas y errores, y además:
+
+- `t=parcela`: las **parcelas** del Catastro (INSPIRE `CP.CadastralParcel`), para que las vallas de los chalets vayan por su linde.
+- Un recuadro sin nada (el mar, el campo) devuelve una lista vacía, en vez del error «No records» del Catastro, que el Paseo contaba como trozo fallido.
+- Guarda unos días lo que llega del Catastro en una carpeta temporal del servidor: lo repetido no se vuelve a pedir.
+- Deja que la llamen `narcimarquez-eng.github.io` y meteohuelva.es (lista `$ORIGENES` al principio del archivo).
+
+Está probada contra un Catastro de mentira (mismas URL y respuestas), no contra el de verdad, que no se alcanza desde aquí. Con la versión antigua todo sigue funcionando, solo que sin parcelas: el Paseo y el juego lo detectan y lo dicen.
+
+Sin la línea de CORS (`Access-Control-Allow-Origin`), el Paseo en GitHub Pages saca las casas de OpenStreetMap (menos y sin colores). Las zonas de más de 25 km² también salen sin el Catastro, y las muy grandes pueden ir lentas en el móvil (el menú avisa).
+
+### Lo que falta, desde el juego
+
+Al abrir un lugar, el menú dice si le falta algo del Catastro y deja descargarlo sin pasar por el Paseo:
+
+- **Trozos de casas** que no llegaron cuando se preparó la zona.
+- **Parcelas** (con el `catastro.php` nuevo).
+
+**⬇️ Descargar lo que falta** los pide, los mete en la zona, la guarda en este navegador y la vuelve a abrir. Huelva también: su versión completada se guarda y se usa en lugar de la incluida.
+
+Los **colores de las fachadas** se piden solos **mientras conduces**: la casa del Catastro sin color más cercana (a menos de 90 m), de una en una o de dos en dos. Su foto de fachada se analiza igual que en el Paseo y la casa se repinta al momento. Los colores se guardan en este navegador por referencia catastral, así que la próxima vez ya están, en esa zona o en otra que tenga las mismas casas. Si `catastro.php` no contesta, deja de pedir.
 
 ### Si no llegan las casas del Catastro
 
@@ -90,7 +110,7 @@ En OpenStreetMap, además, tiene que ser una casa (`house`, `detached`, `villa`�
 Alrededor de cada chalet se pone la **valla** de su parcela:
 
 - Se toma el rectángulo que lo envuelve y se abre de 2,5 a 5,5 m por cada lado. El lado que da a una calle (a menos de 12 m) llega **hasta la acera**, como casi todos los chalets.
-  El Catastro sí tiene las parcelas, pero `catastro.php` solo pide los edificios; con las parcelas, la valla iría por su linde exacta.
+  Con las parcelas del Catastro (`parcelas.geojson`, del Paseo o descargadas en el juego), la valla va por la **linde de la parcela** del chalet, 15 cm por dentro, y la cancela en el lado más cercano a la calle.
 - Cada lado se acerca a la casa hasta que no pisa la calzada ni la acera, una piscina o el agua, ni la casa de al lado.
 - Donde ya hay la valla de un vecino no se pone otra: la suya hace de medianera.
 - En el lado más cercano a la calle va una **cancela** de hierro de 3 m entre dos pilares.
