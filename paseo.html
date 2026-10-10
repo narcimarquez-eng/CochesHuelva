@@ -2756,7 +2756,7 @@ function roadMaterial(){
 const fotoSt0=()=>({red:0,db:0,ok:0,sin:0,err:0,errs:new Map(),col:0,desc:0,whys:new Map(),rest:0,last:''});
 const FOTO={ok:null,cache:new Map(),active:0,count:0,max:500,d0:1e12,d1:-1,st:fotoSt0(),off:new Set(),msg:''};
 const fotoURL=ref=>`${CATASTRO_URL}?foto=${encodeURIComponent(ref)}`;
-const COLV=2;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada
+const COLV=3;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra)
 function imgDe(url){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error('la foto está dañada'));im.src=url;});}
 function colorsDe(im){let c;try{c=photoColors(im);}catch(err){c={why:'no se ha podido analizar la foto'};}c.v=COLV;return c;}
 function contarCol(col){const f=FOTO.st;if(col&&col.wall)f.col++;else{f.desc++;cuenta(f.whys,(col&&col.why)||'no se ha podido analizar la foto');}}
@@ -2811,38 +2811,65 @@ function photoColors(im){
   while(st.length){const i=st.pop(),x=i%W0,y=(i-x)/W0;
     for(const j of [x>0?i-1:-1,x<W0-1?i+1:-1,y>0?i-W0:-1,y<H0-1?i+W0:-1]){if(j<0||sky[j])continue;
       if(Math.abs(R[i]-R[j])+Math.abs(G[i]-G[j])+Math.abs(B[i]-B[j])<36&&skyLike(j)){sky[j]=1;st.push(j);}}}
-  const strongBlue=i=>B[i]>R[i]+35&&SA[i]>0.3,green=i=>G[i]>R[i]+10&&G[i]>B[i]+6&&SA[i]>0.12;
+  const strongBlue=i=>B[i]>R[i]+35&&SA[i]>0.3,green=i=>(G[i]>R[i]+10&&G[i]>B[i]+6&&SA[i]>0.12)||(G[i]>=R[i]-4&&G[i]>B[i]+20);   // también el verde amarillento de las hojas al sol
   const y0=Math.floor(H0*0.06),y1=Math.floor(H0*0.88),x0=Math.floor(W0*0.06),x1=Math.ceil(W0*0.94);
   const cand=[];for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const i=y*W0+x;if(!sky[i])cand.push(i);}
   const out={skyPct:0,conf:0};let sk=0;for(let i=0;i<N;i++)sk+=sky[i];out.skyPct=sk/N;
   if(cand.length<N*0.2){out.why='casi toda la foto es cielo';return out;}
-  const wl=cand.filter(i=>L[i]>=100&&!strongBlue(i)&&!green(i)&&SA[i]<0.62);
-  if(wl.length<cand.length*0.18){out.why='no se distingue una pared clara (la foto es oscura, o la tapan árboles o coches)';return out;}
-  // k-medias sobre los píxeles que pueden ser pared
+  // pared: se agrupa por tono (la proporción entre rojo, verde y azul), que casi no cambia entre la parte al sol y la parte a la sombra;
+  // el brillo cuenta poco. Así un ladrillo a la sombra sigue siendo ladrillo, y no gana el blanco de los balcones ni el gris de la calle
+  const wl=cand.filter(i=>L[i]>=30&&!strongBlue(i)&&!green(i)&&SA[i]<0.8&&!(L[i]<75&&SA[i]<0.15));
+  if(wl.length<cand.length*0.18){out.why='no se distingue la pared (la foto es oscura, o la tapan árboles o coches)';return out;}
+  const FT=new Float32Array(N*3);for(const i of wl){const s=R[i]+G[i]+B[i]+1;FT[i*3]=300*R[i]/s;FT[i*3+1]=300*G[i]/s;FT[i*3+2]=22*Math.log(L[i]);}
+  const peso=i=>{const y=Math.floor(i/W0)/H0,x=(i%W0)/W0;return (y>0.15&&y<0.75?1:0.55)*(x>0.2&&x<0.8?1:0.6);};   // la casa de la parcela suele estar en el centro; abajo, la calle y los coches
+  const lab=new Int8Array(N).fill(-1),K=4;
+  let C=[];{const s=wl.slice().sort((a,b)=>(FT[a*3]-FT[a*3+1]*0.5)-(FT[b*3]-FT[b*3+1]*0.5));for(let j=0;j<K;j++){const i=s[Math.floor((j+0.5)/K*s.length)];C.push([FT[i*3],FT[i*3+1],FT[i*3+2]]);}}
+  let Wn=[];
+  for(let it=0;it<12;it++){const A=C.map(()=>[0,0,0,0]);
+    for(const i of wl){let bj=0,bd=1e9;for(let j=0;j<K;j++){const q=C[j],dd=(FT[i*3]-q[0])**2+(FT[i*3+1]-q[1])**2+(FT[i*3+2]-q[2])**2;if(dd<bd){bd=dd;bj=j;}}
+      lab[i]=bj;const a=A[bj],w=peso(i);a[0]+=FT[i*3]*w;a[1]+=FT[i*3+1]*w;a[2]+=FT[i*3+2]*w;a[3]+=w;}
+    C=A.map((a,j)=>a[3]?[a[0]/a[3],a[1]/a[3],a[2]/a[3]]:C[j]);Wn=A.map(a=>a[3]);}
+  // grupos con el mismo tono (la pared al sol y a la sombra) suman; los grises cuentan menos, porque gris es también la calle,
+  // los cristales, el cielo con calima y los remates blancos: solo ganan si de verdad dominan la foto
+  const med3=C.map((_,j)=>{let r=0,g=0,b=0,n=0;for(const i of wl)if(lab[i]===j){r+=R[i];g+=G[i];b+=B[i];n++;}n=n||1;return [r/n,g/n,b/n];});
+  const tono=med3.map(m=>{const s=m[0]+m[1]+m[2]+1;return [m[0]/s,m[1]/s,m[2]/s];}),sat=med3.map(m=>{const a=Math.max(...m),b=Math.min(...m);return a?(a-b)/a:0;});
+  // matiz (en grados) de cada grupo: dos grupos con color y matiz parecido son la misma pared al sol y a la sombra
+  const matiz=med3.map(([r,g,b])=>{const a=Math.max(r,g,b),c=a-Math.min(r,g,b);if(!c)return 0;let h=a===r?((g-b)/c)%6:a===g?(b-r)/c+2:(r-g)/c+4;return (h*60+360)%360;});
+  // neutro: gris o blanco; también el blanco a la sombra, que sale azulado (lo alumbra el cielo, no el sol)
+  const azul=j=>matiz[j]>170&&matiz[j]<260,neutro=j=>sat[j]<0.12||(azul(j)&&sat[j]<0.3);
+  const cerca=(j,k)=>{if(neutro(j)||neutro(k))return neutro(j)&&neutro(k);
+    const d=Math.abs(matiz[j]-matiz[k]);return Math.min(d,360-d)<25;};
+  // los azules con color suelen ser cielo con calima o cristales, no pared
+  const brillo=j=>clamp(((med3[j][0]+med3[j][1]+med3[j][2])/3-40)/80,0.3,1);   // lo muy oscuro suele ser sombra, cristal o calle
+  let cw=0,best=-1;for(let j=0;j<K;j++){let g=0;for(let k=0;k<K;k++)if(cerca(j,k))g+=Wn[k]*brillo(k);const sc=g*(neutro(j)?0.5:azul(j)?0.4:1);if(sc>best){best=sc;cw=j;}}
+  const grupo=C.map((_,k)=>cerca(cw,k));
+  const wp=wl.filter(i=>grupo[lab[i]]);let wT=0,wG=0;for(const i of wl){wT+=peso(i);if(grupo[lab[i]])wG+=peso(i);}
+  out.conf=wG/wT;
+  if(out.conf<0.2){out.why='la pared ocupa poco de la foto (seguramente la tapan otras cosas)';return out;}
+  // color: el tono medio de la pared con el brillo de su parte al sol (el percentil 75), no el de la media con la sombra
+  let cr=0,cg=0,cb=0;for(const i of wp){const s=R[i]+G[i]+B[i]+1;cr+=R[i]/s;cg+=G[i]/s;cb+=B[i]/s;}cr/=wp.length;cg/=wp.length;cb/=wp.length;
+  const Ls=wp.map(i=>L[i]).sort((a,b)=>a-b),Lp=Ls[Math.floor(Ls.length*0.75)];
+  const wc=[cr*3*Lp,cg*3*Lp,cb*3*Lp],mx=Math.max(...wc),mn=Math.min(...wc),sw=mx?(mx-mn)/mx:0;
+  let w;
+  if(sw<0.13||neutro(cw)){const v=238,m=Math.max(1,Lp);w=wc.map(x=>lerp(v,x*v/m,0.3));}          // cal blanca, aunque esté a la sombra
+  else{const t=clamp(205/mx,1,1.45);w=wc.map(x=>x*t);}
+  out.wall=w.map(x=>clamp(x,0,250));
+  const esPared=i=>lab[i]>=0&&grupo[lab[i]],dist=(i,q)=>Math.abs(R[i]-q[0])+Math.abs(G[i]-q[1])+Math.abs(B[i]-q[2]);
+  // k-medias en color (para la carpintería)
   const km=(idx,k)=>{const s=idx.slice().sort((a,b)=>L[a]-L[b]);let C=[];for(let j=0;j<k;j++){const i=s[Math.floor((j+0.5)/k*s.length)];C.push([R[i],G[i],B[i]]);}let n=[];
     for(let it=0;it<10;it++){const A=C.map(()=>[0,0,0,0]);for(const i of idx){let bj=0,bd=1e9;for(let j=0;j<k;j++){const q=C[j],dd=(R[i]-q[0])**2+(G[i]-q[1])**2+(B[i]-q[2])**2;if(dd<bd){bd=dd;bj=j;}}const a=A[bj];a[0]+=R[i];a[1]+=G[i];a[2]+=B[i];a[3]++;}
       C=A.map((a,j)=>a[3]?[a[0]/a[3],a[1]/a[3],a[2]/a[3]]:C[j]);n=A.map(a=>a[3]);}
     return C.map((c,j)=>({c,n:n[j]})).sort((a,b)=>b.n-a.n);};
-  const cl=km(wl,3),wc=cl[0].c,dist=(i,q)=>Math.abs(R[i]-q[0])+Math.abs(G[i]-q[1])+Math.abs(B[i]-q[2]);
-  // si el segundo grupo es la misma pared a la sombra (mismo tono, más oscuro), se suman
-  let wallN=cl[0].n;if(cl[1]){const a=cl[0].c,b=cl[1].c,ha=a[0]-a[2],hb=b[0]-b[2];if(Math.abs(ha-hb)<28&&Math.abs((a[0]-a[1])-(b[0]-b[1]))<18)wallN+=cl[1].n;}
-  out.conf=wallN/cand.length;
-  if(out.conf<0.18){out.why='la pared ocupa poco de la foto (seguramente la tapan otras cosas)';return out;}
-  const Lw=(wc[0]+wc[1]+wc[2])/3,mx=Math.max(...wc),mn=Math.min(...wc),sw=mx?(mx-mn)/mx:0;
-  let w;
-  if(sw<0.16){const v=238,m=Math.max(1,Lw);w=wc.map(x=>lerp(v,x*v/m,0.3));}          // cal blanca, aunque esté a la sombra
-  else{const t=clamp(214/mx,1,1.7);w=wc.map(x=>x*t);}
-  out.wall=w.map(x=>clamp(x,0,250));
   // zócalo: en cada columna del centro, lo que hay justo debajo de la pared; vale si es una franja
-  // (entre un 5 % y un 25 % del alto de la foto) y debajo cambia el color; si sigue igual, es la calle
+  // (entre un 5 % y un 32 % del alto de la foto) y debajo cambia el color; si sigue igual, es la calle
   const cx0=Math.floor(W0*0.25),cx1=Math.ceil(W0*0.75),dc=(i,q)=>Math.abs(R[i]-q[0])+Math.abs(G[i]-q[1])+Math.abs(B[i]-q[2]);
   const runs=[],ybs=[];let looked=0;
-  for(let x=cx0;x<cx1;x++){let yb=-1;for(let y=Math.floor(H0*0.95);y>=Math.floor(H0*0.25);y--){const i=y*W0+x;if(!sky[i]&&dist(i,wc)<55){yb=y;break;}}
+  for(let x=cx0;x<cx1;x++){let yb=-1;for(let y=Math.floor(H0*0.95);y>=Math.floor(H0*0.25);y--){const i=y*W0+x;if(!sky[i]&&esPared(i)){yb=y;break;}}
     if(yb<0)continue;ybs.push(yb);if(yb>=H0-3)continue;looked++;
     const i0=(yb+1)*W0+x,i1=Math.min(H0-1,yb+2)*W0+x,c0=[(R[i0]+R[i1])/2,(G[i0]+G[i1])/2,(B[i0]+B[i1])/2];
     let y=yb+1;while(y<H0&&dc(y*W0+x,c0)<48)y++;
     const rl=y-yb-1,ended=y<H0-1;
-    if(rl>=H0*0.05&&rl<=H0*0.25&&ended&&dc(Math.min(H0-1,y+1)*W0+x,c0)>40){const px=[];for(let yy=yb+1;yy<y;yy++)px.push(yy*W0+x);runs.push(px);}}
+    if(rl>=H0*0.05&&rl<=H0*0.32&&ended&&dc(Math.min(H0-1,y+1)*W0+x,c0)>40){const px=[];for(let yy=yb+1;yy<y;yy++)px.push(yy*W0+x);runs.push(px);}}
   const med=a=>{const r=a.map(i=>R[i]).sort((p,q)=>p-q),gg=a.map(i=>G[i]).sort((p,q)=>p-q),b=a.map(i=>B[i]).sort((p,q)=>p-q),m=Math.floor(a.length/2);return [r[m],gg[m],b[m]];};
   if(looked<(cx1-cx0)*0.3)out.zocWhy='la parte baja de la fachada no se ve en la foto';
   else if(runs.length<looked*0.5)out.zocWhy='bajo la pared solo hay acera y calle';
@@ -2852,7 +2879,7 @@ function photoColors(im){
     else if(dw>50&&zl>25&&!(zc[2]>zc[0]+35))out.zoc=zc;else out.zocWhy='la franja de abajo es del mismo color que la pared';}
   // carpintería: puertas, ventanas y persianas con color, por encima de la base de la fachada
   const ybMed=ybs.length?ybs.slice().sort((p,q)=>p-q)[Math.floor(ybs.length/2)]:y1;
-  const fac=cand.filter(i=>Math.floor(i/W0)<ybMed-1&&dist(i,wc)>70&&L[i]>=22&&L[i]<=125&&SA[i]>0.28&&SA[i]<0.72&&!(green(i)&&L[i]>=95));
+  const fac=cand.filter(i=>Math.floor(i/W0)<ybMed-1&&!esPared(i)&&dist(i,wc)>70&&L[i]>=22&&L[i]<=125&&SA[i]>0.28&&SA[i]<0.72&&!(green(i)&&L[i]>=95));
   if(fac.length>=cand.length*0.01){const cc=km(fac,3).find(o=>o.n>=cand.length*0.008&&o.n<=cand.length*0.12);if(cc)out.carp=cc.c;}
   return out;
 }

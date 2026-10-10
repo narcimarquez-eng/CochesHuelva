@@ -49,6 +49,28 @@ El menú avisa de que son simuladas y de si hay foto aérea. Sin foto, el suelo 
 
 La ruta se marca con flechas y una línea **verdes** en la calzada, solo las del tramo actual y desde el coche en adelante. Si te sales del camino, a los pocos segundos se calcula cómo volver desde donde estás y las flechas y la línea se ponen **rojas**, con un aviso; al volver a la ruta vuelven a ser verdes.
 
+## Casas como en el Paseo
+
+Las casas se construyen igual que en el Paseo por el relieve:
+
+- **Teja árabe**: tejado a dos aguas en la crujía de la fachada principal (toda la casa si tiene menos de 11 m de fondo; si no, 6,2 m y el resto plano). Lleva alero en la fachada, y atrás si la casa es poco honda, y las hileras de tejas dibujadas.
+- **Azotea**: pretil de casi un metro con albardilla y, en algunas casas medianas, el torreón de la escalera.
+- **Patios**: los de dentro de la casa (huecos en el Catastro) tienen sus paredes con ventanas y no los tapa el tejado.
+- **Tejado de la foto**: el color de cada tejado se saca de la foto aérea, y la foto se ve encima con las tejas. Si los datos no dicen si es de teja o azotea, lo dice la foto: rojizo y de brillo medio es teja.
+
+Las fachadas tienen ventanas con persianas y rejas, balcones, puertas, zócalo y recercados de albero. Sus colores salen de la foto de fachada del Catastro, analizada en el Paseo.
+
+### Colores de la foto de fachada
+
+El análisis de la foto (en el Paseo) agrupa los píxeles por **tono**, la proporción entre rojo, verde y azul, que casi no cambia entre la parte de la pared al sol y la parte a la sombra:
+
+- El brillo cuenta poco, y el color final es el tono medio de la pared con el brillo de su parte al sol. Así un ladrillo a la sombra sigue siendo ladrillo, y no gris.
+- La pared blanca a la sombra, que sale azulada, cuenta como blanca.
+- Lo gris pesa menos que lo que tiene color, porque gris son también la calle, los cristales y el cielo con calima. También cuentan menos lo muy oscuro, la parte de abajo de la foto (calle y coches) y los lados (la casa de la parcela suele estar en el centro).
+- Las hojas al sol, de verde amarillento, no cuentan como pared.
+
+Antes solo se miraban los píxeles claros, así que el ladrillo y las paredes rojas en sombra quedaban fuera y salía blanco o gris. En las 157 fotos de la zona incluida se ha comprobado a ojo, y sus colores ya están rehechos. En el Paseo, los colores guardados con el análisis anterior se rehacen solos desde la foto guardada, sin descargar nada.
+
 ## Casas que cortan calles
 
 Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 100 de 32 382.
@@ -67,7 +89,8 @@ En OpenStreetMap, además, tiene que ser una casa (`house`, `detached`, `villa`�
 
 Alrededor de cada chalet se pone la **valla** de su parcela:
 
-- Se toma el rectángulo que lo envuelve y se abre de 2,5 a 5,5 m por cada lado.
+- Se toma el rectángulo que lo envuelve y se abre de 2,5 a 5,5 m por cada lado. El lado que da a una calle (a menos de 12 m) llega **hasta la acera**, como casi todos los chalets.
+  El Catastro sí tiene las parcelas, pero `catastro.php` solo pide los edificios; con las parcelas, la valla iría por su linde exacta.
 - Cada lado se acerca a la casa hasta que no pisa la calzada ni la acera, una piscina o el agua, ni la casa de al lado.
 - Donde ya hay la valla de un vecino no se pone otra: la suya hace de medianera.
 - En el lado más cercano a la calle va una **cancela** de hierro de 3 m entre dos pilares.

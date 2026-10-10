@@ -458,7 +458,9 @@ function parsearCasas(geo) {
         if (a[0] === b[0] && a[1] === b[1]) pts.pop();
       }
       if (pts.length < 3) continue;
-      edif.push({ pts, h: Math.min(h, 400), pared: colorValido(p.color_pared), zoc: colorValido(p.color_zocalo), carp: colorValido(p.color_carpinteria), tejado: p.tejado || '',
+      // patios: los anillos de dentro (para dibujar sus paredes y que el tejado no los tape)
+      const huecos = poli.slice(1).map(r => quitarCierre(r.map(c => proyectar(c[0], c[1])))).filter(r => r.length >= 3 && Math.abs(areaAnillo(r)) >= 4 && enPoligono(pts, r[0][0], r[0][1]));
+      edif.push({ pts, huecos, h: Math.min(h, 400), pared: colorValido(p.color_pared), zoc: colorValido(p.color_zocalo), carp: colorValido(p.color_carpinteria), tejado: p.tejado || '',
         tipo: p.fuente === 'OpenStreetMap' && typeof p.tipo === 'string' ? p.tipo : '' });   // tipo de edificio de OpenStreetMap (house, detached…)
     }
   }
@@ -528,6 +530,9 @@ function dentroDeOtraCasa(edif, rejilla, x, z, self) {
 function prepararCasas(edif, rejilla, tramos) {
   const calles = construirRejillaCalles(tramos);
   edif.forEach((e, idx) => {
+    // todas las casas con el mismo sentido de giro que en el Paseo (área positiva; los patios, al revés): así su fachada sale hacia fuera
+    if (areaAnillo(e.pts) < 0) e.pts.reverse();
+    e.huecos = (e.huecos || []).map(hr => (areaAnillo(hr) > 0 ? hr.slice().reverse() : hr));
     const r = e.pts, n = r.length;
     e.lados = [];
     let u = 0, mayor = -1, mayorL = 0;
@@ -555,6 +560,7 @@ function prepararCasas(edif, rejilla, tramos) {
       if (sc > mejorSc) { mejorSc = sc; de = i; }
     });
     if (de < 0) de = mayor;
+    e.frente = de;   // la fachada principal: de ella sale la crujía del tejado de teja
     e.puertaLado = -1; e.puertaU = -1e4;
     if (de >= 0 && e.lados[de].len >= 1.3) {
       const s = e.lados[de], sp = s.tipo === 2 ? 3.3 : 5.0;
@@ -587,7 +593,8 @@ function prepararCasas(edif, rejilla, tramos) {
 // --- chalets y sus vallas ---
 // Un chalet es una casa (o un grupo de piezas que se tocan: casa, porche, cochera) suelta, baja y de tamaño de vivienda,
 // con la casa más cercana a unos metros. Su parcela no viene en los datos: se toma el rectángulo que la envuelve, se abre
-// unos metros por cada lado y cada lado se acerca a la casa hasta que no pisa la calle, la acera, el agua (piscinas) ni la casa de al lado.
+// unos metros por cada lado (el que da a la calle, hasta la acera) y cada lado se acerca a la casa hasta que no pisa la calle, la acera,
+// el agua (piscinas) ni la casa de al lado.
 // Lo que toca a una valla ya puesta no se repite (la del vecino hace de medianera). La puerta va en el lado más cercano a la calle.
 const TIPOS_CHALET_OSM = new Set(['house', 'detached', 'bungalow', 'villa', 'semidetached_house', 'cabin', 'farm', 'yes', 'residential']);
 const ESTILOS_VALLA = ['reja', 'reja', 'reja', 'seto', 'seto', 'muro'];
@@ -782,7 +789,7 @@ function generarVallas(edif, rejilla, tramos, aguas, rejAguas, rng) {
   let n = 0;
   for (const ch of chalets) {
     const { cx, cz, ux, uz, a, b } = ch.rect, vx = -uz, vz = ux, grupo = new Set(ch.casas);
-    const malo = (x, z) => enCalleOAcera(rejSeg, tramos, x, z, 0.4) || casaCerca(edif, rejilla, x, z, 0.7, grupo) ||
+    const malo = (x, z) => enCalleOAcera(rejSeg, tramos, x, z, 0.25) || casaCerca(edif, rejilla, x, z, 0.7, grupo) ||
       agua(x, z) || cercaDeValla(x, z) || enParcela(x, z);
     // lados: +u, +v, -u, -v; cada uno con su margen (de la casa a la valla)
     const ladoSeg = (k, m) => {
@@ -796,6 +803,15 @@ function generarVallas(edif, rejilla, tramos, aguas, rejAguas, rng) {
       return out;
     };
     const max = ch.rect.margen || [0, 1, 2, 3].map(() => 2.5 + rng() * 3);
+    // el lado que da a una calle (a menos de 12 m) llega hasta la acera, como casi todos los chalets
+    if (!ch.rect.margen) for (let k = 0; k < 4; k++) {
+      const base = [0, 0, 0, 0];
+      for (let d = 0.5; d <= 12; d += 0.5) {
+        base[k] = d;
+        const ps = muestras(ladoSeg(k, base), Math.max(1, Math.hypot(...[0, 1].map(c => ladoSeg(k, base)[1][c] - ladoSeg(k, base)[0][c])) / 4));
+        if (ps.filter(([x, z]) => enCalleOAcera(rejSeg, tramos, x, z, 0.3)).length >= ps.length * 0.4) { max[k] = Math.max(0.6, d - 0.5); break; }
+      }
+    }
     const m = max.slice();
     if (!ch.rect.margen) for (let pasada = 0; pasada < 2; pasada++) for (let k = 0; k < 4; k++) {
       for (m[k] = max[k]; m[k] > 0.9; m[k] -= 0.5) {
@@ -910,7 +926,7 @@ function simularCasas(tramos, capas, aguas, rejAguas, edif, rejilla, verde, rng,
         const w = chalet ? 14 + rng() * 7 : 5 + rng() * 3.5, fondo = chalet ? 18 + rng() * 10 : 8 + rng() * 6;
         if (d + w > L - 3) break;
         const e = enPolilinea(t.pts, cum, d + w / 2), tx = e.tx * lado, tz = e.tz * lado, nx = -e.tz * lado, nz = e.tx * lado;
-        const s0 = borde + (chalet ? 0.8 : 0.1);
+        const s0 = borde + (chalet ? 0.4 : 0.1);   // el chalet llega hasta la acera
         if (!cabe(e.x, e.z, tx, tz, nx, nz, w, s0, s0 + fondo)) { d += 1.5; continue; }
         const lote = rect(e.x, e.z, tx, tz, nx, nz, 0, w, s0, s0 + fondo);
         apuntar(lote);
@@ -3653,86 +3669,293 @@ const FRAGMENTO_FACHADA = `#include <color_fragment>
         col=mix(col,dc,0.4+0.6*aa);}
     }
     diffuseColor.rgb=col;
+  }else if(vWw.z<-0.5){
+    // tejado: la foto aérea encima (si la hay) y, en los de teja, las hileras de tejas
+    if(uConFoto>0.5&&vR.x>=0.0)diffuseColor.rgb=mix(diffuseColor.rgb,texture2D(uFoto,vR).rgb*0.74,0.75);   // como el suelo de foto: más oscura, porque aquí la luz suma
+    if(vWw.z>-1.5){float u=vWw.x,v=vWw.y,kk=clamp(1.0-(fwu+fwv)*3.0,0.0,1.0)*(uConFoto>0.5&&vR.x>=0.0?0.75:1.0);
+      float ch=0.5+0.5*sin(u*6.2831/0.25),course=smoothstep(0.0,0.09,fract(v/0.4));
+      float hv=hh(vec2(floor(u/0.25),floor(v/0.4)));
+      diffuseColor.rgb*=mix(1.0,(0.74+0.26*ch)*(0.72+0.28*course)*(0.88+0.24*hv),kk);
+      diffuseColor.rgb*=1.0-0.2*(1.0-smoothstep(0.0,0.25,v))*kk;}
   }`;
 
 let matFachadas = null;
+const uFotoTejados = { value: null }, uConFoto = { value: 0 };   // la foto aérea de la zona, para pintar los tejados
 function materialFachadas() {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   m.onBeforeCompile = sh => {
-    sh.uniforms.uNoche = uNoche;
+    sh.uniforms.uNoche = uNoche; sh.uniforms.uFoto = uFotoTejados; sh.uniforms.uConFoto = uConFoto;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF;
-varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa;`)
+attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF; attribute vec2 aR;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-vWw = aW; vZc = aZ; vCp = aC; vFa = aF;`);
+vWw = aW; vZc = aZ; vCp = aC; vFa = aF; vR = aR;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; uniform float uNoche;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR; uniform float uNoche, uConFoto; uniform sampler2D uFoto;
 float hh(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}`)
       .replace('#include <color_fragment>', FRAGMENTO_FACHADA);
   };
   return m;
 }
 
-function mallaEdificios(edif) {
-  // Triángulos de cada tejado: se calculan antes para reservar la memoria de una vez
-  const tejados = edif.map(e => {
-    try { return THREE.ShapeUtils.triangulateShape(e.pts.map(p => new THREE.Vector2(p[0], p[1])), []); }
-    catch (err) { return []; }
-  });
-  let V = 0, I = 0;
-  edif.forEach((e, k) => {
-    for (const s of e.lados) if (s.len >= 0.02) { V += 4; I += 6; }
-    V += e.pts.length; I += tejados[k].length * 3;
-  });
-  const P = new Float32Array(V * 3), N = new Float32Array(V * 3), W = new Float32Array(V * 3), F = new Float32Array(V * 4);
-  const C = new Uint8Array(V * 3), Z = new Uint8Array(V * 4), K = new Uint8Array(V * 4), X = new Uint32Array(I);   // colores en bytes: menos memoria
-  let v = 0, t = 0;
-  const pon = (x, y, z, nx, ny, nz, c, w, zc, kc, fc) => {
-    const a = v * 3, b = v * 4;
-    P[a] = x; P[a + 1] = y; P[a + 2] = z;
-    N[a] = nx; N[a + 1] = ny; N[a + 2] = nz;
-    for (let k = 0; k < 3; k++) C[a + k] = Math.round(c[k] * 255);
-    W[a] = w[0]; W[a + 1] = w[1]; W[a + 2] = w[2];
-    for (let k = 0; k < 4; k++) { Z[b + k] = Math.round(zc[k] * 255); K[b + k] = Math.round(kc[k] * 255); F[b + k] = fc[k]; }
-    return v++;
+// --- casas como en el Paseo: tejado de teja a dos aguas en la crujía de la fachada (con alero), azotea con pretil y albardilla,
+// algún torreón de escalera, patios, y el color del tejado sacado de la foto aérea ---
+// Recorta un anillo por el semiplano f(p) >= 0 (o <= 0 si pos es false)
+function recortarMitad(r, f, pos) {
+  const out = [];
+  for (let i = 0; i < r.length; i++) {
+    const p = r[i], q = r[(i + 1) % r.length], fp = pos ? f(p) : -f(p), fq = pos ? f(q) : -f(q);
+    if (fp >= 0) out.push(p);
+    if ((fp > 0 && fq < 0) || (fp < 0 && fq > 0)) { const t = fp / (fp - fq); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]); }
+  }
+  const c = [];
+  for (const p of out) if (!c.length || Math.hypot(p[0] - c[c.length - 1][0], p[1] - c[c.length - 1][1]) > 0.02) c.push(p);
+  if (c.length > 1 && Math.hypot(c[0][0] - c[c.length - 1][0], c[0][1] - c[c.length - 1][1]) <= 0.02) c.pop();
+  return c;
+}
+// Anillo metido d metros hacia la izquierda de su recorrido: hacia dentro en una casa (área positiva) y hacia la casa en un patio
+function anilloDentro(r, d) {
+  const n = r.length, out = [];
+  for (let i = 0; i < n; i++) {
+    const a = r[(i - 1 + n) % n], p = r[i], b = r[(i + 1) % n];
+    const dx1 = p[0] - a[0], dz1 = p[1] - a[1], l1 = Math.hypot(dx1, dz1) || 1, dx2 = b[0] - p[0], dz2 = b[1] - p[1], l2 = Math.hypot(dx2, dz2) || 1;
+    const n1 = [-dz1 / l1, dx1 / l1], n2 = [-dz2 / l2, dx2 / l2];
+    let mx = n1[0] + n2[0], mz = n1[1] + n2[1];
+    const ml = Math.hypot(mx, mz);
+    if (ml < 1e-3) { mx = n2[0]; mz = n2[1]; } else { mx /= ml; mz /= ml; }
+    const cs = Math.max(0.35, mx * n1[0] + mz * n1[1]);
+    out.push([p[0] + mx * d / cs, p[1] + mz * d / cs]);
+  }
+  return out;
+}
+// Píxeles de la foto aérea (reducida a 2048 px como mucho) y una función para leer el color en (x, z); null fuera de la foto
+function pixelesFoto(foto) {
+  if (!foto) return null;
+  if (foto.px) return foto.px;
+  const k = Math.min(1, 2048 / Math.max(foto.W, foto.H)), w = Math.max(1, Math.round(foto.W * k)), h = Math.max(1, Math.round(foto.H * k));
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  g.drawImage(foto.textura.image, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data;
+  foto.px = {
+    paso: (foto.g.A / k) * Math.cos(ORIGEN.lat * Math.PI / 180),   // metros por píxel (más o menos)
+    at: (x, z) => {
+      const [X, Y] = mercatorDeLocal(x, z), [u, t] = uvOrtofoto(X, Y, foto.g, foto.W, foto.H);
+      const c = Math.floor(u * w), f = Math.floor((1 - t) * h);
+      if (c < 0 || f < 0 || c >= w || f >= h) return null;
+      const q = (f * w + c) * 4;
+      return [d[q], d[q + 1], d[q + 2]];
+    },
   };
-  const tri = (a, b, c) => { X[t++] = a; X[t++] = b; X[t++] = c; };
-  const SUELO = -0.3;   // las paredes bajan un poco por debajo del suelo para no dejar huecos
-  edif.forEach((e, k) => {
-    const n = e.pts.length, H = e.h, off = e.off;
-    const pared = hexA01(e.colPared), zc = [...hexA01(e.colZoc), e.zh / 4], kc = [...hexA01(e.colCarp), e.rec];
-    e.lados.forEach((s, j) => {
-      if (s.len < 0.02) return;
-      const p = e.pts[j], q = e.pts[(j + 1) % n];
-      const u0 = s.u0 + off, u1 = s.u0 + s.len + off;
-      const fc = s.tipo > 0 ? [s.tipo + 4 * e.ws[j], j === e.puertaLado ? e.puertaU + off : -1e4, u0, u1] : [0, -1e4, 0, 0];
-      const a = pon(p[0], SUELO, p[1], s.nx, 0, s.nz, pared, [u0, SUELO, H], zc, kc, fc);
-      pon(q[0], SUELO, q[1], s.nx, 0, s.nz, pared, [u1, SUELO, H], zc, kc, fc);
-      pon(q[0], H, q[1], s.nx, 0, s.nz, pared, [u1, H, H], zc, kc, fc);
-      pon(p[0], H, p[1], s.nx, 0, s.nz, pared, [u0, H, H], zc, kc, fc);
-      tri(a, a + 2, a + 1); tri(a, a + 3, a + 2);
-    });
-    // tejado plano del color de teja o de azotea
-    const techo = hexA01(e.colTecho), primero = v, cero = [0, 0, 0, 0], cero3 = [0, 0, 0];
-    for (let i = 0; i < n; i++) pon(e.pts[i][0], H, e.pts[i][1], 0, 1, 0, techo, cero3, cero, cero, cero);
-    for (const tr of tejados[k]) {
-      let [a, b, c] = [primero + tr[0], primero + tr[1], primero + tr[2]];
-      const ux = P[b * 3] - P[a * 3], uz = P[b * 3 + 2] - P[a * 3 + 2], vx = P[c * 3] - P[a * 3], vz = P[c * 3 + 2] - P[a * 3 + 2];
-      if (uz * vx - ux * vz < 0) [b, c] = [c, b];   // que mire hacia arriba
-      tri(a, b, c);
+  return foto.px;
+}
+// Color medio del tejado de cada casa en la foto aérea; si los datos no dicen si es de teja o azotea, lo dice la foto
+// (teja: rojiza y de brillo medio). Las casas simuladas no lo miran: en la foto, ahí no hay su tejado
+function tejadosDeFoto(edif, foto) {
+  const px = pixelesFoto(foto);
+  edif.forEach((e, idx) => {
+    e.rc = null;
+    if (px && !e.simulada) {
+      const [x0, z0, x1, z1] = e.bbox, A = Math.abs(areaAnillo(e.pts)), st = Math.max(px.paso, 0.7, Math.sqrt(A / 40));
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let z = z0 + st / 2; z < z1; z += st) for (let x = x0 + st / 2; x < x1; x += st) {
+        if (!enPoligono(e.pts, x, z)) continue;
+        const c = px.at(x, z);
+        if (c) { r += c[0]; g += c[1]; b += c[2]; n++; }
+      }
+      if (n) e.rc = [r / n, g / n, b / n];
     }
+    const A = Math.abs(areaAnillo(e.pts));
+    if (!e.tejado) {   // sin dato: grandes y altas, azotea; si no, lo que diga la foto (o dos de cada tres, teja)
+      if (e.h > 12 || A > 700) e.teja = false;
+      else if (e.rc) { const [r, g, b] = e.rc, Lm = (r + g + b) / 3; e.teja = r - b > 24 && r > g * 1.06 && Lm > 50 && Lm < 215; }
+      else e.teja = hash2(idx, 6, 31) < 0.66;
+    }
+    const pal = hexA01(e.teja ? PAL_FACHADA.teja[Math.floor(hash2(idx, 2, 31) * 4) % 4] : PAL_FACHADA.azotea[Math.floor(hash2(idx, 3, 31) * 3) % 3]);
+    e.colTecho = e.rc ? aHex(e.rc.map((v, k) => v / 255 + (pal[k] - v / 255) * (e.teja ? 0.4 : 0.5))) : aHex(pal);
   });
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(P, 3));
-  geo.setAttribute('normal', new THREE.BufferAttribute(N, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(C, 3, true));
-  geo.setAttribute('aW', new THREE.BufferAttribute(W, 3));
-  geo.setAttribute('aZ', new THREE.BufferAttribute(Z, 4, true));
-  geo.setAttribute('aC', new THREE.BufferAttribute(K, 4, true));
-  geo.setAttribute('aF', new THREE.BufferAttribute(F, 4));
-  geo.setIndex(new THREE.BufferAttribute(X, 1));
+}
+// Búfer que crece según hace falta, con los datos de fachada para el sombreado
+function nuevoBufer(n) {
+  const B = { n: 0, I: [] };
+  B.reservar = m => {
+    const o = B, P = new Float32Array(m * 3), N = new Float32Array(m * 3), C = new Uint8Array(m * 3), W = new Float32Array(m * 3), Z = new Uint8Array(m * 4), K = new Uint8Array(m * 4), F = new Float32Array(m * 4), R = new Float32Array(m * 2);
+    if (o.P) { P.set(o.P); N.set(o.N); C.set(o.C); W.set(o.W); Z.set(o.Z); K.set(o.K); F.set(o.F); R.set(o.R); }
+    Object.assign(o, { P, N, C, W, Z, K, F, R, cap: m });
+  };
+  B.reservar(n);
+  // vértice: posición, normal, color (bytes), aW (u, v, alto o marca), zócalo y carpintería (bytes), datos de fachada, uv de la foto
+  B.v = (x, y, z, nr, col, w0, w1, w2, zb, kb, f, ru, rv) => {
+    if (B.n >= B.cap) B.reservar(B.cap * 2);
+    const i = B.n++, i3 = i * 3, i4 = i * 4;
+    B.P[i3] = x; B.P[i3 + 1] = y; B.P[i3 + 2] = z; B.N[i3] = nr[0]; B.N[i3 + 1] = nr[1]; B.N[i3 + 2] = nr[2];
+    B.C[i3] = col[0]; B.C[i3 + 1] = col[1]; B.C[i3 + 2] = col[2]; B.W[i3] = w0; B.W[i3 + 1] = w1; B.W[i3 + 2] = w2;
+    B.Z.set(zb, i4); B.K.set(kb, i4); B.F[i4] = f[0]; B.F[i4 + 1] = f[1]; B.F[i4 + 2] = f[2]; B.F[i4 + 3] = f[3];
+    B.R[i * 2] = ru; B.R[i * 2 + 1] = rv;
+    return i;
+  };
+  // triángulo con la cara de delante hacia la normal
+  B.tri = (a, b, c, nr) => {
+    const P = B.P, ax = P[a * 3], ay = P[a * 3 + 1], az = P[a * 3 + 2], ux = P[b * 3] - ax, uy = P[b * 3 + 1] - ay, uz = P[b * 3 + 2] - az, vx = P[c * 3] - ax, vy = P[c * 3 + 1] - ay, vz = P[c * 3 + 2] - az;
+    if ((uy * vz - uz * vy) * nr[0] + (uz * vx - ux * vz) * nr[1] + (ux * vy - uy * vx) * nr[2] >= 0) B.I.push(a, b, c); else B.I.push(a, c, b);
+  };
+  return B;
+}
+const SIN_FACHADA = [0, -1e4, 0, 0], ARRIBA = [0, 1, 0], ABAJO = [0, -1, 0];
+const a255 = c => c.map(v => Math.round(Math.min(1, Math.max(0, v)) * 255));
+function mallaEdificios(edif, foto) {
+  const G = nuevoBufer(Math.max(4096, edif.length * 60));
+  const uvFoto = (x, z) => {   // dónde cae el punto en la foto aérea (para pintar los tejados con ella)
+    if (!foto) return [-1, -1];
+    const [X, Y] = mercatorDeLocal(x, z);
+    return uvOrtofoto(X, Y, foto.g, foto.W, foto.H);
+  };
+  const BASE = -0.3, EXT = 0.38;   // las paredes bajan un poco por debajo del suelo; el alero sale 38 cm
+  for (const e of edif) {
+    const r = e.pts, n = r.length, off = e.off, H = e.h, eave = H, A = Math.abs(areaAnillo(r));
+    const zb = a255([...hexA01(e.colZoc), e.zh / 4]), kb = a255([...hexA01(e.colCarp), e.rec]);
+    const pc = hexA01(e.colPared), wc = a255(pc), wc2 = a255(pc.map(v => v * 0.86)), roofC = a255(hexA01(e.colTecho)), cop = a255(hexA01('#ebe8e1'));
+    const conFoto = !!foto && !e.simulada;
+    // la crujía: el lado de la fachada principal y la hondura de la casa desde él
+    const si = e.frente >= 0 ? e.frente : 0, P0 = r[si], Q0 = r[(si + 1) % n], l0 = Math.hypot(Q0[0] - P0[0], Q0[1] - P0[1]) || 1;
+    const ux = (Q0[0] - P0[0]) / l0, uz = (Q0[1] - P0[1]) / l0, sx = uz, sz = -ux;   // s: hacia fuera de la fachada
+    let tmin = Infinity, tmax = -Infinity;
+    for (const p of r) { const t = -((p[0] - P0[0]) * sx + (p[1] - P0[1]) * sz); tmin = Math.min(tmin, t); tmax = Math.max(tmax, t); }
+    const D = tmax - tmin, tt = p => -((p[0] - P0[0]) * sx + (p[1] - P0[1]) * sz) - tmin;
+    let kind = e.teja ? 'teja' : 'azotea', flat = false, rr = 0, cd = 0, rise = 0;
+    if (kind === 'teja') {
+      if (e.huecos.length) flat = true;
+      else { if (D <= 11) { rr = D / 2; cd = D; } else { rr = 3.1; cd = 6.2; } rise = Math.min(2.6, rr * 0.42); if (rr < 1.3) kind = 'azotea'; }
+    }
+    const teja = kind === 'teja' && !flat, k = teja ? rise / rr : 0;
+    const roofY = p => { if (!teja) return eave + (flat ? 0.35 : 0); const t = tt(p); if (t >= cd) return eave; return eave + rise * Math.max(0, 1 - Math.abs(t - rr) / rr); };
+    const topY = teja ? roofY : kind === 'azotea' ? (() => eave + 0.95) : (() => eave + 0.35);
+    const bps = teja ? (cd < D - 0.05 ? [rr, cd] : [rr]) : [];
+    const quad = (pts, nr, col, ws, f, foto_) => {
+      const s = pts.map((p, q) => { const uv = foto_ ? uvFoto(p[0], p[2]) : [-1, -1]; return G.v(p[0], p[1], p[2], nr, col, ws[q][0], ws[q][1], ws[q][2], zb, kb, f, uv[0], uv[1]); });
+      G.tri(s[0], s[1], s[2], nr); G.tri(s[0], s[2], s[3], nr);
+    };
+    const pared = (P, Q, nr, ya, yb, yc, yd, ua, ub, F, col, marca) =>
+      quad([[P[0], ya, P[1]], [Q[0], yb, Q[1]], [Q[0], yc, Q[1]], [P[0], yd, P[1]]], nr, col, [[ua, ya, marca], [ub, yb, marca], [ub, yc, marca], [ua, yd, marca]], F, false);
+    // paredes de fuera (con su tipo de fachada) y de los patios
+    const paredesAnillo = (rr_, hueco, hi) => {
+      let u = 1000 + hi * 300;
+      for (let i = 0; i < rr_.length; i++) {
+        const p = rr_[i], q = rr_[(i + 1) % rr_.length], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
+        if (l < 0.02) continue;
+        const nr = [dz / l, 0, -dx / l], tipo = hueco ? 1 : e.lados[i].tipo, u0 = hueco ? u : e.lados[i].u0;
+        const ws = hueco ? (Math.floor(off * 1000) + i * 13 + 7) % 2000 : e.ws[i];
+        const F = tipo > 0 ? [tipo + 4 * ws, (!hueco && i === e.puertaLado) ? e.puertaU + off : -1e4, u0 + off, u0 + l + off] : SIN_FACHADA;
+        const cortes = [0, 1];
+        if (teja) { const tp = tt(p), tq = tt(q); for (const bp of bps) if ((tp - bp) * (tq - bp) < 0) cortes.push((bp - tp) / (tq - tp)); cortes.sort((a, b) => a - b); }
+        for (let c = 0; c < cortes.length - 1; c++) {
+          const f0 = cortes[c], f1 = cortes[c + 1];
+          if (f1 - f0 < 1e-4) continue;
+          const P = [p[0] + dx * f0, p[1] + dz * f0], Q = [p[0] + dx * f1, p[1] + dz * f1];
+          pared(P, Q, nr, BASE, BASE, topY(Q), topY(P), u0 + l * f0 + off, u0 + l * f1 + off, F, wc, H);
+        }
+        u += l;
+      }
+    };
+    paredesAnillo(r, false, 0);
+    e.huecos.forEach((hr, hi) => paredesAnillo(hr, true, hi + 1));
+    // pretil de la azotea, por dentro
+    const metidos = [];
+    if (kind === 'azotea') for (const rr_ of [r, ...e.huecos]) {
+      const ir = anilloDentro(rr_, 0.22);   // en los patios (que giran al revés) también se mete hacia la casa
+      metidos.push([rr_, ir]);
+      for (let i = 0; i < ir.length; i++) {
+        const p = ir[i], q = ir[(i + 1) % ir.length], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
+        if (l < 0.05) continue;
+        const nr = [-dz / l, 0, dx / l];
+        pared(p, q, nr, eave, eave, eave + 0.95, eave + 0.95, 0, 0, SIN_FACHADA, wc2, 0.3);
+      }
+    }
+    // alero de teja en la fachada (y atrás, si la casa es poco honda)
+    const aleros = [];
+    if (kind === 'teja') for (let i = 0; i < n; i++) {
+      const p = r[i], q = r[(i + 1) % n], tp = tt(p), tq = tt(q), front = tp < 0.3 && tq < 0.3, back = teja && cd >= D - 0.05 && Math.abs(tp - D) < 0.3 && Math.abs(tq - D) < 0.3;
+      if (e.lados[i].tipo > 0 && (front || back)) aleros.push([i, front]);
+    }
+    const plano = [0, 0, 0.3];
+    for (const [i] of aleros) {
+      const p = r[i], q = r[(i + 1) % n], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
+      if (l < 0.3) continue;
+      const o = [dz / l, -dx / l], drop = teja ? k * EXT : 0, y0 = flat ? eave + 0.35 : eave;
+      const P2 = [p[0] + o[0] * EXT, p[1] + o[1] * EXT], Q2 = [q[0] + o[0] * EXT, q[1] + o[1] * EXT];
+      quad([[p[0], y0 - 0.1, p[1]], [q[0], y0 - 0.1, q[1]], [Q2[0], y0 - drop - 0.1, Q2[1]], [P2[0], y0 - drop - 0.1, P2[1]]], ABAJO, wc2, [plano, plano, plano, plano], SIN_FACHADA, false);
+      quad([[P2[0], y0 - drop - 0.1, P2[1]], [Q2[0], y0 - drop - 0.1, Q2[1]], [Q2[0], y0 - drop + 0.03, Q2[1]], [P2[0], y0 - drop + 0.03, P2[1]]], [o[0], 0, o[1]], wc, [plano, plano, plano, plano], SIN_FACHADA, false);
+    }
+    // tejados: marca -1 con tejas, -2 plano
+    const tejado = (poli, huecos, yf, nr, marca, uvf) => {
+      if (poli.length < 3) return;
+      let tri;
+      try { tri = THREE.ShapeUtils.triangulateShape(poli.map(p => new THREE.Vector2(p[0], p[1])), huecos.map(h => h.map(p => new THREE.Vector2(p[0], p[1])))); } catch (err) { return; }
+      const s0 = G.n;
+      for (const rr_ of [poli, ...huecos]) for (const p of rr_) { const [a, b] = uvf(p), uv = conFoto ? uvFoto(p[0], p[1]) : [-1, -1]; G.v(p[0], yf(p), p[1], nr, roofC, a, b, marca, zb, kb, SIN_FACHADA, uv[0], uv[1]); }
+      for (const t of tri) G.tri(s0 + t[0], s0 + t[1], s0 + t[2], nr);
+    };
+    const uvPlano = p => [p[0], p[1]];
+    if (teja) {
+      const nl = Math.hypot(k, 1), nF = [sx * k / nl, 1 / nl, sz * k / nl], nB = [-sx * k / nl, 1 / nl, -sz * k / nl], uvf = p => [p[0] * ux + p[1] * uz + off, Math.abs(tt(p) - rr)];
+      tejado(recortarMitad(r, p => rr - tt(p), true), [], roofY, nF, -1, uvf);
+      let atras = recortarMitad(r, p => tt(p) - rr, true), llano = null;
+      if (cd < D - 0.05) { llano = recortarMitad(atras, p => tt(p) - cd, true); atras = recortarMitad(atras, p => cd - tt(p), true); }
+      tejado(atras, [], roofY, nB, -1, uvf);
+      if (llano) tejado(llano, [], () => eave, ARRIBA, -2, uvPlano);
+      for (const [i, front] of aleros) {
+        const p = r[i], q = r[(i + 1) % n], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
+        if (l < 0.3) continue;
+        const o = [dz / l, -dx / l], drop = k * EXT, uu = pp => pp[0] * ux + pp[1] * uz + off, vv = rr + 0.2;
+        quad([[p[0], eave, p[1]], [q[0], eave, q[1]], [q[0] + o[0] * EXT, eave - drop, q[1] + o[1] * EXT], [p[0] + o[0] * EXT, eave - drop, p[1] + o[1] * EXT]], front ? nF : nB, roofC,
+          [[uu(p), vv, -1], [uu(q), vv, -1], [uu(q), vv + EXT, -1], [uu(p), vv + EXT, -1]], SIN_FACHADA, conFoto);
+      }
+    } else if (flat) {
+      tejado(r, e.huecos, () => eave + 0.35, ARRIBA, -1, p => [p[0] * ux + p[1] * uz + off, tt(p)]);
+      for (const [i] of aleros) {
+        const p = r[i], q = r[(i + 1) % n], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz);
+        if (l < 0.3) continue;
+        const o = [dz / l, -dx / l], y = eave + 0.35;
+        quad([[p[0], y, p[1]], [q[0], y, q[1]], [q[0] + o[0] * EXT, y, q[1] + o[1] * EXT], [p[0] + o[0] * EXT, y, p[1] + o[1] * EXT]], ARRIBA, roofC, [[0, 1, -1], [1, 1, -1], [1, 1.4, -1], [0, 1.4, -1]], SIN_FACHADA, conFoto);
+      }
+    } else {
+      tejado(r, e.huecos, () => eave, ARRIBA, -2, uvPlano);
+      // albardilla del pretil
+      for (const [rr_, ir] of metidos) for (let i = 0; i < rr_.length; i++) {
+        const j = (i + 1) % rr_.length, y = eave + 0.95;
+        quad([[rr_[i][0], y, rr_[i][1]], [rr_[j][0], y, rr_[j][1]], [ir[j][0], y, ir[j][1]], [ir[i][0], y, ir[i][1]]], ARRIBA, cop, [plano, plano, plano, plano], SIN_FACHADA, false);
+      }
+      // torreón de la escalera en algunas azoteas medianas
+      let cx = 0, cz = 0;
+      for (const p of r) { cx += p[0]; cz += p[1]; }
+      cx /= n; cz /= n;
+      if (!e.huecos.length && A > 60 && A < 600 && hash2(Math.round(off * 10), 7, 3) < 0.35 && enPoligono(r, cx, cz) && !e.simulada) {
+        const c = [[-1.3, -1.3], [1.3, -1.3], [1.3, 1.3], [-1.3, 1.3]].map(([a, b]) => [cx + a * ux + b * sx, cz + a * uz + b * sz]), t2 = eave + 2.4;
+        for (let i = 0; i < 4; i++) {
+          const p = c[i], q = c[(i + 1) % 4], dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz), nr = [dz / l, 0, -dx / l];
+          const cxm = (p[0] + q[0]) / 2 - cx, czm = (p[1] + q[1]) / 2 - cz;
+          if (nr[0] * cxm + nr[2] * czm < 0) { nr[0] = -nr[0]; nr[2] = -nr[2]; }
+          const F = i === 0 ? [2 + 4 * (Math.floor(off * 1000) % 2000), i * 2.6 + 1.3 + off, i * 2.6 + off, i * 2.6 + 2.6 + off] : SIN_FACHADA;
+          quad([[p[0], eave, p[1]], [q[0], eave, q[1]], [q[0], t2, q[1]], [p[0], t2, p[1]]], nr, wc, [[i * 2.6, 0, 2.4], [i * 2.6 + 2.6, 0, 2.4], [i * 2.6 + 2.6, 2.4, 2.4], [i * 2.6, 2.4, 2.4]], F, false);
+        }
+        tejado(c, [], () => t2, ARRIBA, -2, uvPlano);
+      }
+    }
+  }
+  const nV = G.n, geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(G.P.slice(0, nV * 3), 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(G.N.slice(0, nV * 3), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(G.C.slice(0, nV * 3), 3, true));
+  geo.setAttribute('aW', new THREE.BufferAttribute(G.W.slice(0, nV * 3), 3));
+  geo.setAttribute('aZ', new THREE.BufferAttribute(G.Z.slice(0, nV * 4), 4, true));
+  geo.setAttribute('aC', new THREE.BufferAttribute(G.K.slice(0, nV * 4), 4, true));
+  geo.setAttribute('aF', new THREE.BufferAttribute(G.F.slice(0, nV * 4), 4));
+  geo.setAttribute('aR', new THREE.BufferAttribute(G.R.slice(0, nV * 2), 2));
+  geo.setIndex(new THREE.BufferAttribute(nV > 65535 ? new Uint32Array(G.I) : new Uint16Array(G.I), 1));
+  geo.computeBoundingSphere();
   if (!matFachadas) matFachadas = materialFachadas();   // un solo material para todos los bloques
   return conSombra(new THREE.Mesh(geo, matFachadas));
 }
@@ -3746,7 +3969,9 @@ function mallaEdificiosPorBloques(edif) {
     if (!bloques.has(clave)) bloques.set(clave, []);
     bloques.get(clave).push(e);
   }
-  for (const lista of bloques.values()) grupo.add(mallaEdificios(lista));
+  tejadosDeFoto(edif, zona && zona.foto);
+  uFotoTejados.value = zona && zona.foto ? zona.foto.textura : null; uConFoto.value = zona && zona.foto ? 1 : 0;
+  for (const lista of bloques.values()) grupo.add(mallaEdificios(lista, zona && zona.foto));
   return grupo;
 }
 function construirCoche(color) {
@@ -3912,22 +4137,15 @@ async function cargarFoto(zip) {
 // Parte de vegetación de la foto alrededor de (x, z) (25 puntos en ±6 m), de 0 a 1; null si la foto no llega ahí.
 // Sirve para saber dónde poner chalets con jardín y dónde no poner casas (campos y parques) cuando hay que simularlas
 function verdeDeFoto(foto) {
-  if (!foto) return null;
-  const k = Math.min(1, 2048 / Math.max(foto.W, foto.H)), w = Math.max(1, Math.round(foto.W * k)), h = Math.max(1, Math.round(foto.H * k));
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  const g = cv.getContext('2d', { willReadFrequently: true });
-  g.drawImage(foto.textura.image, 0, 0, w, h);
-  const px = g.getImageData(0, 0, w, h).data;
+  const px = pixelesFoto(foto);
+  if (!px) return null;
   return (x, z) => {
     let n = 0, v = 0;
     for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
-      const [X, Y] = mercatorDeLocal(x + i * 3, z + j * 3), [u, t] = uvOrtofoto(X, Y, foto.g, foto.W, foto.H);
-      const c = Math.floor(u * w), f = Math.floor((1 - t) * h);
-      if (c < 0 || f < 0 || c >= w || f >= h) continue;
-      const q = (f * w + c) * 4, r = px[q], gr = px[q + 1], b = px[q + 2];
+      const c = px.at(x + i * 3, z + j * 3);
+      if (!c) continue;
       n++;
-      if (gr > r + 3 && gr > b + 8) v++;   // verde de árboles, césped o huerta (el campo seco del verano no cuenta)
+      if (c[1] > c[0] + 3 && c[1] > c[2] + 8) v++;   // verde de árboles, césped o huerta (el campo seco del verano no cuenta)
     }
     return n >= 8 ? v / n : null;
   };
