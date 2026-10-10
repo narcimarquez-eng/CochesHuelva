@@ -2,7 +2,10 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Carreras por Huelva · prototipo</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -12,24 +15,32 @@
   :root{--panel:rgba(12,18,26,.62);--borde:rgba(255,255,255,.22);--ambar:#f5b041}
   html,body{margin:0;height:100%;overflow:hidden;background:#c4def0;font-family:system-ui,-apple-system,sans-serif;user-select:none;-webkit-user-select:none;touch-action:none}
   .panel{background:var(--panel);border:1px solid var(--borde);border-radius:14px;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);box-shadow:0 4px 16px rgba(0,0,0,.3)}
-  #hud{position:fixed;left:10px;top:10px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;line-height:1.3;padding:8px 12px;z-index:4}
-  #vel{font-size:46px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums}
-  #vel small{font-size:15px;font-weight:500;margin-left:4px;letter-spacing:0;opacity:.85}
-  #motor{display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 6px}
-  #marcha{font-size:22px;font-weight:800;min-width:30px;text-align:center;background:rgba(255,255,255,.14);border-radius:7px;padding:0 6px}
+  #hud{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));top:calc(8px + env(safe-area-inset-top,0px));color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;line-height:1.15;padding:6px 10px;z-index:4;max-width:min(330px,calc(100vw - 230px))}
+  #hud .fila{display:flex;align-items:center;gap:9px}
+  #vel{font-size:32px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums;min-width:58px}
+  #vel small{font-size:11px;font-weight:600;margin-left:2px;letter-spacing:0;opacity:.8}
+  #hud .col{display:flex;flex-direction:column;gap:3px}
+  #motor{display:flex;align-items:center;gap:6px;font-size:11px}
+  #marcha{font-size:16px;font-weight:800;min-width:20px;text-align:center;background:rgba(255,255,255,.14);border-radius:5px;padding:0 4px}
   #marcha.cambia{background:var(--ambar);color:#1b1b1b}
   #marcha.atras{background:#e74c3c;color:#fff}
-  #rpm{position:relative;width:140px;height:10px;border-radius:5px;background:rgba(255,255,255,.15);overflow:hidden}
+  #rpm{position:relative;width:64px;height:6px;border-radius:3px;background:rgba(255,255,255,.15);overflow:hidden}
   #rpm::after{content:"";position:absolute;left:88%;top:0;bottom:0;width:2px;background:#e74c3c}
   #rpmBarra{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#27ae60,#2ecc71)}
   #rpmBarra.alto{background:linear-gradient(90deg,#2ecc71,#f1c40f)}
   #rpmBarra.corte{background:linear-gradient(90deg,#f1c40f,#e74c3c)}
-  #rpmTexto{min-width:66px;opacity:.85;font-variant-numeric:tabular-nums}
-  #limite{font-size:13px;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,.12);display:inline-block;max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #limite.excede{background:#c0392b}
-  #fuera{font-size:13px;color:#ffd166;min-height:17px}
+  #rpmTexto{opacity:.75;font-variant-numeric:tabular-nums}
+  #senal{width:30px;height:30px;border-radius:50%;background:#fff;border:4px solid #d6281e;box-sizing:border-box;color:#111;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;text-shadow:none;flex:none}
+  #senal.excede{animation:parpadeo .6s steps(2) infinite}
+  @keyframes parpadeo{50%{background:#ffd5d0}}
+  #calle{font-size:11px;opacity:.85;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #limite{display:inline}
+  #fuera{display:inline;color:#ffd166;font-weight:700}
+  #fuera:not(:empty)::before{content:" · "}
+  @media (min-width:900px) and (min-height:600px){#vel{font-size:40px}#rpm{width:90px}#senal{width:36px;height:36px;font-size:14px}#calle{font-size:12px}#dano svg{width:18px;height:29px}}
   #carrera{position:fixed;right:10px;top:62px;color:#fff;text-align:right;text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;line-height:1.45;font-size:15px;padding:8px 12px;z-index:4;font-variant-numeric:tabular-nums}
   #carrera:empty{display:none}
+  @media (max-height:520px){#carrera{font-size:12px;line-height:1.35;padding:5px 9px;top:52px}#aviso{font-size:34px}#arriba button{padding:6px 10px;font-size:13px}}
   #flechaCp{display:inline-block;color:var(--ambar);font-size:18px;margin-left:6px;transition:transform .08s linear}
   #aviso{position:fixed;left:0;right:0;top:30%;text-align:center;color:#fff;font-size:48px;font-weight:800;text-shadow:0 3px 10px rgba(0,0,0,.85);pointer-events:none;z-index:6}
   #aviso.pop{animation:pop .35s ease-out}
@@ -37,12 +48,18 @@
   #destello{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,rgba(255,255,255,0) 45%,rgba(200,30,20,.55) 100%);opacity:0;z-index:3}
   #pantalla{position:fixed;inset:0;background:rgba(10,20,30,.82);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:14px;padding:20px;text-align:center;box-sizing:border-box;z-index:10;overflow:auto}
   #pantalla>:first-child{margin-top:auto}
+  body.zonaLista #archivo{display:none}
+  @media (max-height:520px){#pantalla{gap:8px;padding:10px 12px}#pantalla h1{font-size:20px}#pantalla .intro{font-size:12px;max-width:640px}#pantalla .teclas{display:none}#estado{font-size:12px;min-height:0}
+    #coches{flex:none;flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start;max-width:calc(100vw - 24px);padding-bottom:4px;-webkit-overflow-scrolling:touch}#coches button{flex:none}
+    .selector button,#coches button{padding:6px 11px;font-size:14px}}
+  @media (pointer:coarse){#pantalla .teclas{display:none}}
+  @media (max-height:430px){#pantalla .intro{display:none}}
   #pantalla>:last-child{margin-bottom:auto}
   #pantalla h1{margin:0;font-size:28px}
   #pantalla p{margin:0;max-width:460px;line-height:1.4;opacity:.9}
   button{font:inherit;font-size:17px;padding:12px 20px;border-radius:10px;border:0;background:var(--ambar);color:#1b1b1b;font-weight:600;cursor:pointer}
   button:disabled{opacity:.45}
-  #arriba{position:fixed;right:10px;top:10px;display:flex;gap:8px;z-index:5}
+  #arriba{position:fixed;right:calc(8px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));display:flex;gap:6px;z-index:5}
   #arriba button{padding:8px 13px;font-size:14px;background:rgba(12,18,26,.7);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:10px}
   #salpicadero{display:none;position:fixed;left:0;right:0;bottom:0;height:17%;pointer-events:none;border-radius:50% 50% 0 0/22% 22% 0 0;background:linear-gradient(180deg,rgba(18,20,24,0) 0%,rgba(30,33,39,.94) 30%,#15171b 100%);box-shadow:inset 0 10px 18px rgba(0,0,0,.5)}
   body.dentro #salpicadero{display:block}
@@ -67,12 +84,10 @@
   .selector button.activo{background:var(--ambar);color:#1b1b1b}
   #botonesMenu{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
   #btnSeguir{background:#2ecc71}
-  #dano{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px}
-  #dano svg{width:26px;height:42px;display:block}
-  #danoBarra{position:relative;width:96px;height:8px;border-radius:4px;background:rgba(255,255,255,.15);overflow:hidden}
-  #danoRelleno{position:absolute;left:0;top:0;bottom:0;width:0;background:#2ecc71;transition:width .3s,background .3s}
-  #danoTxt{font-variant-numeric:tabular-nums;min-width:62px}
-  #dano.grave #danoTxt{color:#ff6b5b;font-weight:700}
+  #dano{display:flex;align-items:center;gap:4px;font-size:12px;flex:none}
+  #dano svg{width:15px;height:24px;display:block}
+  #danoTxt{font-variant-numeric:tabular-nums;font-weight:700}
+  #dano.grave #danoTxt{color:#ff6b5b}
   #btnClaxon{width:58px;height:58px;padding:0;border-radius:50%;font-size:24px;background:rgba(12,18,26,.82);border:3px solid rgba(255,255,255,.92);box-shadow:0 5px 16px rgba(0,0,0,.55);touch-action:none}
   #btnClaxon.pulsado{background:var(--ambar)}
   #controles .derecha{display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:none}
@@ -87,21 +102,26 @@
 </head>
 <body>
 <div id="hud" class="panel">
-  <div id="vel">0<small>km/h</small></div>
-  <div id="motor"><span id="marcha">1</span><div id="rpm"><div id="rpmBarra"></div></div><span id="rpmTexto">800 rpm</span></div>
-  <div id="limite">Límite: —</div>
-  <div id="fuera"></div>
-  <div id="dano" title="Daño del coche: delante, detrás, izquierda y derecha">
-    <svg viewBox="0 0 26 42">
-      <rect x="4" y="3" width="18" height="36" rx="6" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.6)" stroke-width="1"/>
-      <path id="zDelante" d="M6 4 h14 a5 5 0 0 1 2 4 v4 H4 v-4 a5 5 0 0 1 2 -4z" fill="#2ecc71"/>
-      <path id="zDetras" d="M4 30 h18 v4 a5 5 0 0 1 -2 4 H6 a5 5 0 0 1 -2 -4z" fill="#2ecc71"/>
-      <rect id="zIzq" x="4" y="13" width="5" height="16" fill="#2ecc71"/>
-      <rect id="zDer" x="17" y="13" width="5" height="16" fill="#2ecc71"/>
-      <rect x="10" y="14" width="6" height="8" rx="1.5" fill="rgba(20,28,38,.9)"/>
-    </svg>
-    <div><div id="danoTxt">Daño 0 %</div><div id="danoBarra"><div id="danoRelleno"></div></div></div>
+  <div class="fila">
+    <div id="vel">0<small>km/h</small></div>
+    <div class="col">
+      <div id="motor"><span id="marcha">1</span><span id="rpmTexto">800</span></div>
+      <div id="rpm"><div id="rpmBarra"></div></div>
+    </div>
+    <div id="senal" title="Límite de velocidad (informativo)">—</div>
+    <div id="dano" title="Daño del coche: delante, detrás, izquierda y derecha">
+      <svg viewBox="0 0 26 42">
+        <rect x="4" y="3" width="18" height="36" rx="6" fill="rgba(255,255,255,.12)" stroke="rgba(255,255,255,.6)" stroke-width="1.5"/>
+        <path id="zDelante" d="M6 4 h14 a5 5 0 0 1 2 4 v4 H4 v-4 a5 5 0 0 1 2 -4z" fill="#2ecc71"/>
+        <path id="zDetras" d="M4 30 h18 v4 a5 5 0 0 1 -2 4 H6 a5 5 0 0 1 -2 -4z" fill="#2ecc71"/>
+        <rect id="zIzq" x="4" y="13" width="5" height="16" fill="#2ecc71"/>
+        <rect id="zDer" x="17" y="13" width="5" height="16" fill="#2ecc71"/>
+        <rect x="10" y="14" width="6" height="8" rx="1.5" fill="rgba(20,28,38,.9)"/>
+      </svg>
+      <span id="danoTxt">0%</span>
+    </div>
   </div>
+  <div id="calle"><span id="limite"></span><span id="fuera"></span></div>
 </div>
 <div id="fueraRuta">⚠ Fuera de ruta: sigue las flechas rojas</div>
 <div id="carrera" class="panel"></div>
@@ -109,6 +129,7 @@
 <div id="destello"></div>
 <div id="salpicadero"></div>
 <div id="arriba">
+  <button id="btnPantalla" title="Pantalla completa (F)">⛶</button>
   <button id="btnSonido" title="Activar o quitar el sonido (N)">🔊</button>
   <button id="btnCamara" title="Cambiar de cámara (C)">Cámara</button>
   <button id="btnMenu" title="Menú (M)">Menú</button>
@@ -139,7 +160,7 @@
 </div>
 <div id="pantalla">
   <h1>Carreras por Huelva</h1>
-  <p>Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
+  <p class="intro">Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
   <div id="estado"></div>
   <div class="opcion"><span>Modo</span><div class="selector" id="modos">
@@ -150,7 +171,7 @@
   </div></div>
   <div id="coches"></div>
   <div id="botonesMenu"><button id="btnSeguir" style="display:none">Continuar</button><button id="btnNueva" disabled>Nueva partida</button></div>
-  <p style="font-size:13px;opacity:.75">Teclas: flechas o WASD. Parado, mantén ↓ para ir marcha atrás y ↑ para volver adelante (o R). H toca el claxon, C cambia de cámara, N quita el sonido y M abre el menú.</p>
+  <p class="teclas" style="font-size:13px;opacity:.75">Teclas: flechas o WASD. Parado, mantén ↓ para ir marcha atrás y ↑ para volver adelante (o R). H toca el claxon, C cambia de cámara, F pone o quita la pantalla completa, N quita el sonido y M abre el menú.</p>
   <p style="font-size:12px;opacity:.6">Datos: © colaboradores de OpenStreetMap (ODbL) · Dirección General del Catastro</p>
   <p style="font-size:12px;opacity:.6">Modelos: CarConcept © Eric Chadwick (Darmstadt Graphics Group), CC BY 4.0 · ToyCar © Guido Odendahl y Eric Chadwick, CC0 · Galería © Kenney (kenney.nl), CC0</p>
 </div>
@@ -929,15 +950,18 @@ function generarFarolas(tramos, rotondas, cruces, arboles) {
   const rejCruces = construirRejillaPuntos(cruces), rejArboles = construirRejillaPuntos(arboles), calles = construirRejillaCalles(tramos), farolas = [];
   const enOtra = construirRejillaCalzadas(tramos);
   tramos.forEach((t, i) => {
-    if (!(t.acera > 0) || t.ancho < 5 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas)) return;
+    // también en calles sin acera (residenciales, de servicio): el farol va pegado al borde de la calzada
+    const sinAcera = !(t.acera > 0) && ['residential', 'living_street', 'unclassified', 'service', 'tertiary'].includes(tipoBase(t.tipo));
+    if ((!(t.acera > 0) && !sinAcera) || t.ancho < 4 || /tierra|grava/.test(t.dib) || enRotonda(t, rotondas) || AUTOVIAS.has(t.tipo)) return;
     const avenida = t.ancho >= 9 && t.acera >= 2.2, estilo = avenida || CALLES_PRINCIPALES.has(tipoBase(t.tipo)) ? 'brazo' : 'clasica';
     const cum = acumulados(t.pts), L = cum[cum.length - 1];
-    const lados = avenida ? [-1, 1] : [i % 2 ? 1 : -1], paso = avenida ? 28 : estilo === 'clasica' ? 26 : 34;
+    // a los dos lados (al tresbolillo) en las avenidas y en las calles anchas; en las demás, a un lado
+    const lados = avenida || t.ancho >= 8 ? [-1, 1] : [i % 2 ? 1 : -1], paso = avenida ? 22 : estilo === 'clasica' ? 18 : 24;
     for (const lado of lados) {
-      const off = lado * (t.ancho / 2 + (estilo === 'clasica' ? Math.min(0.6, t.acera / 2) : t.acera / 2));
-      for (let d = avenida ? 19 + (lado > 0 ? 14 : 0) : 14; d < L - 12; d += paso) {   // en las avenidas, a medio camino entre dos árboles
+      const off = lado * (t.ancho / 2 + (sinAcera ? 0.45 : estilo === 'clasica' ? Math.min(0.6, t.acera / 2) : t.acera / 2));
+      for (let d = avenida ? 19 + (lado > 0 ? 11 : 0) : lado > 0 && lados.length > 1 ? 14 + paso / 2 : 14; d < L - 10; d += paso) {   // en las avenidas, a medio camino entre dos árboles
         const e = enPolilinea(t.pts, cum, d), x = e.x - e.tz * off, z = e.z + e.tx * off;
-        if (chocaPuntos(rejCruces, x, z, 14) || cercaDeCalle(calles, x, z, 2.2) || chocaPuntos(rejArboles, x, z, 1.5) || enOtra(x, z, i)) continue;   // ni en la calzada ni sobre un árbol
+        if (chocaPuntos(rejCruces, x, z, 10) || cercaDeCalle(calles, x, z, sinAcera ? Math.min(2.2, t.ancho / 2 + 0.3) : 2.2) || chocaPuntos(rejArboles, x, z, 1.5) || enOtra(x, z, i)) continue;   // ni en la calzada ni sobre un árbol
         farolas.push({ x, z, th: Math.atan2(e.tx * lado, e.tz * lado), estilo });
       }
     }
@@ -2045,7 +2069,7 @@ function crearCielo(dirSol) {
 const HORAS = {
   dia: { arriba: 0x3f82d4, horiz: COLOR_HORIZONTE, sol: [300, 500, 200], colSol: 0xfff1dc, iSol: 0.82, cielo: 0xe4f0ff, suelo: 0x5b5847, iHemi: 0.82, niebla: [700, 3200], noche: 0 },
   tarde: { arriba: 0x2f3f78, horiz: 0xf0a06a, sol: [-520, 110, 260], colSol: 0xffa860, iSol: 0.95, cielo: 0xffc49a, suelo: 0x4a3a38, iHemi: 0.55, niebla: [450, 2600], noche: 0.45 },
-  noche: { arriba: 0x040918, horiz: 0x18233d, sol: [-250, 420, -320], colSol: 0x9fb4ff, iSol: 0.16, cielo: 0x3d4d80, suelo: 0x0e1018, iHemi: 0.3, niebla: [260, 1700], noche: 1 },
+  noche: { arriba: 0x060d22, horiz: 0x1d2a48, sol: [-250, 420, -320], colSol: 0xaabfff, iSol: 0.34, cielo: 0x52669e, suelo: 0x1a1c26, iHemi: 0.55, niebla: [380, 2200], noche: 1 },
 };
 let horaElegida = 'dia', dirSol = new THREE.Vector3(300, 500, 200).normalize();
 try { if (HORAS[localStorage.getItem('cochesHuelva.hora')]) horaElegida = localStorage.getItem('cochesHuelva.hora'); } catch (err) { /* sin almacenamiento */ }
@@ -2069,19 +2093,42 @@ function aplicarHora(h) {
 function mallaLucesFarolas(farolas) {
   const grupo = new THREE.Group();
   grupo.visible = uNoche.value > 0.2;
-  if (!farolas.length) return grupo;
-  const cabezas = farolas.map(cabezaFarola);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(cabezas.flat(), 3));
-  const halos = new THREE.Points(geo, new THREE.PointsMaterial({ map: texturaHalo(), size: 3.4, sizeAttenuation: true, color: 0xffd7a0, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-  const charcos = new THREE.InstancedMesh(new THREE.PlaneGeometry(11, 11).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ map: texturaHalo(), color: 0xc8955a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), cabezas.length);
-  const m = new THREE.Matrix4();
-  cabezas.forEach(([x, , z], i) => { m.makeTranslation(x, 0.17, z); charcos.setMatrixAt(i, m); });
-  charcos.instanceMatrix.needsUpdate = true;
-  for (const o of [halos, charcos]) { o.frustumCulled = false; grupo.add(o); }
   lucesNoche = grupo;
+  if (!farolas.length) return grupo;
+  const matHalo = new THREE.PointsMaterial({ map: texturaHalo(), size: 4.2, sizeAttenuation: true, color: 0xffdcaa, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const geoCharco = new THREE.PlaneGeometry(17, 17).rotateX(-Math.PI / 2);
+  const matCharco = new THREE.MeshBasicMaterial({ map: texturaHalo(), color: 0xffb866, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  const m = new THREE.Matrix4();
+  for (const { cx, cz, lista } of porBloques(farolas, BLOQUE_FAROLAS)) {
+    const cabezas = lista.map(cabezaFarola), b = new THREE.Group();
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(cabezas.flat(), 3));
+    const charcos = new THREE.InstancedMesh(geoCharco, matCharco, cabezas.length);
+    cabezas.forEach(([x, , z], i) => { m.makeTranslation(x, 0.17, z); charcos.setMatrixAt(i, m); });
+    charcos.instanceMatrix.needsUpdate = true;
+    const halos = new THREE.Points(geo, matHalo);
+    for (const o of [halos, charcos]) { o.frustumCulled = false; b.add(o); }
+    grupo.add(b);
+    bloquesFarolas.push({ g: b, cx, cz });
+  }
   return grupo;
+}
+// --- farolas por bloques de 200 m: solo se dibujan los bloques a menos de 550 m de la cámara (el móvil no puede con miles a la vez) ---
+const BLOQUE_FAROLAS = 200;
+const distFarolas = () => (sombras ? 650 : 420);   // en el móvil, menos lejos
+let bloquesFarolas = [];   // { g, cx, cz }
+function porBloques(lista, tam) {
+  const bloques = new Map();
+  for (const f of lista) {
+    const bx = Math.floor(f.x / tam), bz = Math.floor(f.z / tam), k = bx + ',' + bz;
+    if (!bloques.has(k)) bloques.set(k, { cx: (bx + 0.5) * tam, cz: (bz + 0.5) * tam, lista: [] });
+    bloques.get(k).lista.push(f);
+  }
+  return [...bloques.values()];
+}
+function actualizarBloquesFarolas() {
+  const x = camara.position.x, z = camara.position.z, R = distFarolas() + BLOQUE_FAROLAS * 0.71;
+  for (const b of bloquesFarolas) b.g.visible = (b.cx - x) ** 2 + (b.cz - z) ** 2 < R * R;
 }
 // Textura del haz de los faros sobre el asfalto: un abanico que se apaga a lo lejos
 let texturaHazCache = null;
@@ -2091,7 +2138,7 @@ function texturaHaz() {
     cv.width = 64; cv.height = 128;
     const g = cv.getContext('2d');
     for (let y = 0; y < 128; y++) {
-      const u = y / 127, ancho = 10 + 54 * u, a = Math.pow(1 - u, 1.6) * Math.min(1, u * 8);
+      const u = y / 127, ancho = 12 + 52 * u, a = Math.pow(1 - u, 1.1) * Math.min(1, u * 8);
       const gr = g.createLinearGradient(32 - ancho / 2, 0, 32 + ancho / 2, 0);
       gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.5, `rgba(255,255,255,${a.toFixed(3)})`); gr.addColorStop(1, 'rgba(255,255,255,0)');
       g.fillStyle = gr; g.fillRect(0, 127 - y, 64, 1);
@@ -2261,16 +2308,10 @@ const ALTO_CLASICA = 3.9;
 let matsNoche = [];   // materiales que brillan de noche: { mat, color }
 function mallaFarolas(farolas) {
   const grupo = new THREE.Group();
-  const brazo = farolas.filter(f => f.estilo !== 'clasica'), clasica = farolas.filter(f => f.estilo === 'clasica');
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
-  const instancias = (geo, mat, lista) => {
-    if (!lista.length) return;
-    const im = new THREE.InstancedMesh(geo, mat, lista.length);
-    lista.forEach((f, i) => { m.compose(v.set(f.x, 0, f.z), q.setFromAxisAngle(eje, f.th), uno); im.setMatrixAt(i, m); });
-    im.instanceMatrix.needsUpdate = true;
-    im.frustumCulled = false;
-    grupo.add(im);
-  };
+  const piezas = [];   // [geometría, material, estilo]: se instancian luego en cada bloque
+  const instancias = (geo, mat, estilo) => piezas.push([geo, mat, estilo]);
+  const brazo = 'brazo', clasica = 'clasica';
   const metal = new THREE.MeshLambertMaterial({ color: 0x5d6368 });
   const luminaria = new THREE.MeshLambertMaterial({ color: 0xe6e8e4, emissive: 0x000000 });
   instancias(new THREE.CylinderGeometry(0.07, 0.09, 6, 6, 1, true).translate(0, 3, 0), metal, brazo);
@@ -2280,15 +2321,29 @@ function mallaFarolas(farolas) {
   const hierro = new THREE.MeshLambertMaterial({ color: 0x1d2024 });
   const cristal = new THREE.MeshLambertMaterial({ color: 0xcfd6d0, emissive: 0x000000, transparent: true, opacity: 0.85 });
   const H = ALTO_CLASICA;
-  instancias(unirGeometrias([
-    new THREE.CylinderGeometry(0.17, 0.22, 0.5, 8).translate(0, 0.25, 0), new THREE.CylinderGeometry(0.11, 0.15, 0.25, 8).translate(0, 0.6, 0),
-    new THREE.CylinderGeometry(0.055, 0.075, H - 1.2, 8).translate(0, 0.72 + (H - 1.2) / 2, 0), new THREE.TorusGeometry(0.09, 0.025, 4, 10).rotateX(Math.PI / 2).translate(0, 1.6, 0),
-    new THREE.CylinderGeometry(0.12, 0.07, 0.18, 8).translate(0, H - 0.4, 0),
-    new THREE.ConeGeometry(0.3, 0.3, 4).rotateY(Math.PI / 4).translate(0, H + 0.4, 0), new THREE.SphereGeometry(0.05, 6, 4).translate(0, H + 0.6, 0),
+  instancias(unirGeometrias([   // pocas caras: hay miles
+    new THREE.CylinderGeometry(0.17, 0.22, 0.5, 6, 1, true).translate(0, 0.25, 0), new THREE.CylinderGeometry(0.11, 0.15, 0.25, 6, 1, true).translate(0, 0.6, 0),
+    new THREE.CylinderGeometry(0.055, 0.075, H - 1.2, 6, 1, true).translate(0, 0.72 + (H - 1.2) / 2, 0),
+    new THREE.CylinderGeometry(0.12, 0.07, 0.18, 6, 1, true).translate(0, H - 0.4, 0),
+    new THREE.ConeGeometry(0.3, 0.36, 4, 1, true).rotateY(Math.PI / 4).translate(0, H + 0.42, 0),
   ]), hierro, clasica);
   instancias(new THREE.CylinderGeometry(0.24, 0.15, 0.55, 4, 1).rotateY(Math.PI / 4).translate(0, H - 0.03, 0), cristal, clasica);
   matsNoche.push({ mat: luminaria, color: new THREE.Color(0xffe2b0) }, { mat: cristal, color: new THREE.Color(0xffc978) });
-  return conSombra(grupo, true, false);
+  for (const { cx, cz, lista } of porBloques(farolas, BLOQUE_FAROLAS)) {
+    const b = new THREE.Group();
+    for (const [geo, mat, estilo] of piezas) {
+      const de = lista.filter(f => (f.estilo === 'clasica') === (estilo === 'clasica'));
+      if (!de.length) continue;
+      const im = new THREE.InstancedMesh(geo, mat, de.length);
+      de.forEach((f, i) => { m.compose(v.set(f.x, 0, f.z), q.setFromAxisAngle(eje, f.th), uno); im.setMatrixAt(i, m); });
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;
+      b.add(im);
+    }
+    grupo.add(b);
+    bloquesFarolas.push({ g: b, cx, cz });
+  }
+  return grupo;   // sin sombras: son miles y la sombra de un poste apenas se ve
 }
 // Cabeza de cada farola (donde está la luz)
 function cabezaFarola(f) {
@@ -3028,12 +3083,15 @@ function crearLucesCoche() {
   for (let i = 0; i < 2; i++) {
     const f = halo(0xff2a1a); f.scale.set(1.1, 0.7, 1); frenos.push(f);
     const a = halo(0xffffff); a.scale.set(0.7, 0.5, 1); atras.push(a);
-    const d = halo(0xfff4d8); d.scale.set(1.3, 0.9, 1); faros.push(d);
+    const d = halo(0xfff4d8); d.scale.set(0.7, 0.45, 1); faros.push(d);
     grupo.add(f, a, d);
   }
   // haz de los faros sobre el asfalto (de noche)
-  const haz = new THREE.Mesh(new THREE.PlaneGeometry(9, 30).rotateX(-Math.PI / 2).rotateY(Math.PI).translate(0, 0.17, 17), materialHaz());
-  haz.frustumCulled = false;
+  const haz = new THREE.Group();
+  const largo = new THREE.Mesh(new THREE.PlaneGeometry(15, 52).rotateX(-Math.PI / 2).rotateY(Math.PI).translate(0, 0.17, 28), materialHaz(0xfff2d4, 0.9));
+  const cerca = new THREE.Mesh(new THREE.PlaneGeometry(11, 22).rotateX(-Math.PI / 2).rotateY(Math.PI).translate(0, 0.18, 13), materialHaz(0xfff6e0, 0.35));
+  haz.add(largo, cerca);
+  haz.children.forEach(o => { o.frustumCulled = false; });
   return { grupo, frenos, atras, faros, haz };
 }
 // Coloca los halos en la trasera del modelo (según su caja)
@@ -3047,6 +3105,7 @@ function colocarLucesCoche(caja) {
 // --- coches: el básico (caja roja) y modelos GLB, que se descargan al elegirlos ---
 // Galería de coches (Kenney y Quaternius, CC0): modelos/coches/catalogo.json con los mismos datos
 const GALERIA = [
+  { id: 'suv-compacto', nombre: 'SUV compacto', archivo: 'modelos/coches/suv-compacto.glb', trafico: false },   // 58 500 triángulos: solo para el jugador
   { id: 'sedan', nombre: 'Berlina', archivo: 'modelos/coches/sedan.glb' },
   { id: 'hatch', nombre: 'Hatchback', archivo: 'modelos/coches/hatch.glb' },
   { id: 'deportivo', nombre: 'Deportivo', archivo: 'modelos/coches/deportivo.glb' },
@@ -3095,6 +3154,12 @@ async function montarCoche(clave) {
   cuerpoCoche.add(conSombra(modelo, true, false), lucesCoche.grupo);
   colocarLucesCoche(caja);
   Abolladuras.preparar(modelo);
+  // si el modelo trae sus propias luces (materiales «ledRojo» y «led»), el juego las enciende al frenar y de noche
+  lucesCoche.leds = { rojo: [], faro: [] };
+  modelo.traverse(o => { if (o.isMesh) for (const m of [].concat(o.material)) {
+    if (/^ledrojo$/i.test(m.name) && !lucesCoche.leds.rojo.includes(m)) lucesCoche.leds.rojo.push(m);
+    else if (/^led$/i.test(m.name) && !lucesCoche.leds.faro.includes(m)) lucesCoche.leds.faro.push(m);
+  } });
 }
 // Sombra de contacto: una mancha oscura y difuminada bajo el coche (se ve también sin sombras de verdad)
 function crearSombraCoche(largo = 5, ancho = 2.7) {
@@ -3106,7 +3171,7 @@ function crearSombraCoche(largo = 5, ancho = 2.7) {
 
 function construirMallaZona() {
   if (mallaZona) scene.remove(mallaZona);
-  matsNoche = []; fuentes = [];
+  matsNoche = []; fuentes = []; bloquesFarolas = [];
   mallaZona = new THREE.Group();
   const m = zona.mundo;
   mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif));
@@ -3180,7 +3245,8 @@ async function cargarZona(archivo) {
   zona.nFuentes = detectarFuentes(zona.mundo, zona.foto);
   construirMallaZona();
   $('btnNueva').disabled = false;
-  mostrarMenu(`Zona cargada: ${tramos.length} tramos conducibles, ${edif.length} casas, ${zona.mundo.arboles.length} árboles, ${zona.mundo.pasos.length} pasos de cebra, ${zona.mundo.farolas.length} farolas, ${zona.mundo.quioscos.length} quioscos, ${zona.mundo.termometros.length} termómetros y ${zona.nFuentes} fuentes.`);
+  document.body.classList.add('zonaLista');   // ya no hace falta elegir el zip
+  mostrarMenu(`Huelva lista: ${tramos.length} calles, ${edif.length} casas, ${zona.nFuentes} fuentes.`);
 }
 
 $('archivo').addEventListener('change', async e => {
@@ -3210,6 +3276,7 @@ addEventListener('keydown', e => {
   Sonido.iniciar();
   if (e.code === 'KeyM') { if (estado === 'menu' && estadoPausado) $('btnSeguir').click(); else if (estado !== 'menu') pausar(performance.now() / 1000, 'Pausa'); return; }
   if (e.code === 'KeyH' && !e.repeat) { tocarClaxon(); return; }
+  if (e.code === 'KeyF' && !e.repeat) { alternarPantallaCompleta(); return; }
   if (e.code === 'KeyC' && !e.repeat) { cambiarCamara(); return; }
   if (e.code === 'KeyN' && !e.repeat) { alternarSonido(); return; }
   if (e.code === 'KeyR' && !e.repeat) { pulsarSentido(); return; }
@@ -3282,6 +3349,29 @@ function alternarSonido() {
   mostrarAviso(activo ? 'Sonido activado' : 'Sonido quitado', 0.9);
 }
 $('btnSonido').textContent = Sonido.activo() ? '🔊' : '🔇';
+// --- pantalla completa: por defecto se abre al primer toque o tecla (el navegador solo deja abrirla tras un gesto) y gira a horizontal;
+// el botón ⛶ (o la tecla F) la quita o la vuelve a poner, y se recuerda ---
+let quierePantallaCompleta = true;
+try { quierePantallaCompleta = localStorage.getItem('cochesHuelva.pantalla') !== 'no'; } catch (err) { /* sin almacenamiento: pantalla completa */ }
+const enPantallaCompleta = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const pedirPantalla = document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen;
+function abrirPantallaCompleta() {
+  if (!pedirPantalla || enPantallaCompleta()) return;
+  const girar = () => { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); };
+  try {
+    const r = pedirPantalla.call(document.documentElement, { navigationUI: 'hide' });
+    if (r && r.then) r.then(girar).catch(() => {}); else girar();
+  } catch (err) { /* el navegador no la deja: se juega en la ventana */ }
+}
+function alternarPantallaCompleta() {
+  quierePantallaCompleta = !enPantallaCompleta();
+  if (quierePantallaCompleta) abrirPantallaCompleta();
+  else (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  try { localStorage.setItem('cochesHuelva.pantalla', quierePantallaCompleta ? 'si' : 'no'); } catch (err) { /* nada */ }
+}
+for (const tipo of ['pointerdown', 'keydown']) addEventListener(tipo, () => { if (quierePantallaCompleta) abrirPantallaCompleta(); }, true);
+if (pedirPantalla) $('btnPantalla').addEventListener('click', alternarPantallaCompleta);
+else $('btnPantalla').style.display = 'none';   // iPhone: se instala en la pantalla de inicio y ya se abre sin barras
 $('btnSonido').addEventListener('click', alternarSonido);
 $('btnMenu').addEventListener('click', () => { if (estado !== 'menu') pausar(performance.now() / 1000, 'Pausa'); });
 $('btnClaxon').addEventListener('pointerdown', ev => { ev.preventDefault(); $('btnClaxon').classList.add('pulsado'); tocarClaxon(); });
@@ -3366,7 +3456,7 @@ function avisarPeatones(x, z, R, susto = true) {
   for (const c of ciclistas) if (!timbre && Math.hypot(c.x - x, c.z - z) < R && ahora - (c.timbre || 0) > 3) { c.timbre = ahora; timbre = true; Sonido.timbre(Math.hypot(c.x - coche.x, c.z - coche.z)); }
 }
 // Modelos de tráfico: los dos coches reales en versión ligera (un 10 % de los triángulos), cada uno unido en una sola geometría
-const ARCHIVOS_TRAFICO = [...GALERIA.map(g => g.archivo), 'modelos/trafico-concept.glb', 'modelos/trafico-toy.glb'];
+const ARCHIVOS_TRAFICO = [...GALERIA.filter(g => g.trafico !== false).map(g => g.archivo), 'modelos/trafico-concept.glb', 'modelos/trafico-toy.glb'];
 let modelosTrafico = null;
 // Une las mallas de un modelo en una sola geometría (un grupo por material), en la posición que ya tiene el modelo
 function geometriaUnida(raiz) {
@@ -3442,7 +3532,7 @@ async function iniciarTrafico() {
     sombrasTrafico = new THREE.InstancedMesh(new THREE.PlaneGeometry(2.6, 4.9).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ map: texturaHalo(), color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), n);
     farosTrafico = new THREE.InstancedMesh(new THREE.BoxGeometry(0.3, 0.12, 0.05), new THREE.MeshBasicMaterial({ color: 0xfff4d6 }), 2 * n);
-    hacesTrafico = new THREE.InstancedMesh(new THREE.PlaneGeometry(6, 18).rotateX(-Math.PI / 2).rotateY(Math.PI).translate(0, 0.17, 10.5), materialHaz(0xfff0c8, 0.4), n);
+    hacesTrafico = new THREE.InstancedMesh(new THREE.PlaneGeometry(9, 28).rotateX(-Math.PI / 2).rotateY(Math.PI).translate(0, 0.17, 16), materialHaz(0xfff0c8, 0.6), n);
     for (const im of [lucesTrafico, sombrasTrafico, farosTrafico, hacesTrafico]) { im.frustumCulled = false; scene.add(im); }
     trafico.forEach(c => {   // altura y anchura de los pilotos según el modelo
       const b = modelos[c.modelo].geo.boundingBox;
@@ -4520,9 +4610,14 @@ function actualizarMalla(dt) {
   lucesCoche.frenos.forEach((f, i) => { const viva = i >= rotasAtras; f.material.opacity += ((frena && viva ? 0.95 : viva ? 0.12 : 0) - f.material.opacity) * Math.min(1, dt * 18); });
   lucesCoche.atras.forEach((a, i) => { a.material.opacity = atras && i >= rotasAtras ? 0.8 : 0; });
   const noche = uNoche.value, apagado = coche.destrozado;
-  lucesCoche.faros.forEach((f, i) => { f.material.opacity = noche > 0.2 && i >= rotasDelante && !apagado ? 0.85 : 0; });
+  lucesCoche.faros.forEach((f, i) => { f.material.opacity = noche > 0.2 && i >= rotasDelante && !apagado ? 0.55 : 0; });
   lucesCoche.haz.visible = noche > 0.2 && rotasDelante < 2 && !apagado;
-  lucesCoche.haz.material.opacity = 0.6 * (rotasDelante ? 0.5 : 1) * Math.min(1, noche * 1.4);
+  if (lucesCoche.leds) {
+    for (const m of lucesCoche.leds.rojo) m.emissiveIntensity = rotasAtras >= 2 ? 0 : frena ? 4 : 1.2;
+    for (const m of lucesCoche.leds.faro) m.emissiveIntensity = apagado || rotasDelante >= 2 ? 0 : noche > 0.2 ? 4 : 1.5;
+  }
+  const fuerzaHaz = (rotasDelante ? 0.5 : 1) * Math.min(1, noche * 1.4);
+  lucesCoche.haz.children[0].material.opacity = 0.8 * fuerzaHaz; lucesCoche.haz.children[1].material.opacity = 0.3 * fuerzaHaz;
   // motor tocado: humo blanco, luego negro, y llamas si está casi destrozado
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h), mx = coche.x + fx * 1.5, mz = coche.z + fz * 1.5;
   if (d.total > 35 && dt > 0 && Math.random() < (d.total - 30) / 70 * dt * 22) {
@@ -4575,9 +4670,7 @@ function pintarDano() {
   danoPintado = clave;
   $('zDelante').setAttribute('fill', colorDano(d.delante)); $('zDetras').setAttribute('fill', colorDano(d.detras));
   $('zIzq').setAttribute('fill', colorDano(d.izq)); $('zDer').setAttribute('fill', colorDano(d.der));
-  $('danoTxt').textContent = coche.destrozado ? 'Destrozado' : `Daño ${Math.round(d.total)} %`;
-  $('danoRelleno').style.width = Math.min(100, d.total) + '%';
-  $('danoRelleno').style.background = colorDano(d.total);
+  $('danoTxt').textContent = coche.destrozado ? '💥' : `${Math.round(d.total)}%`;
   $('dano').classList.toggle('grave', d.total >= 60);
 }
 function actualizarHUD(ahora) {
@@ -4595,18 +4688,21 @@ function actualizarHUD(ahora) {
   $('rpmBarra').style.width = Math.min(100, coche.rpm / 7000 * 100).toFixed(1) + '%';
   $('rpmBarra').classList.toggle('alto', coche.rpm >= 5200);
   $('rpmBarra').classList.toggle('corte', coche.rpm >= 6200);
-  $('rpmTexto').textContent = Math.round(coche.rpm / 10) * 10 + ' rpm';
+  $('rpmTexto').textContent = Math.round(coche.rpm / 100) * 100 + ' rpm';
   if (estado !== 'corriendo') { const r = calleMasCercana(zona.rejSeg, zona.tramos, coche.x, coche.z, 25); tramoActual = r ? r.t : null; dTramo2 = r ? r.d * r.d : Infinity; }
-  const el = $('limite');
+  // señal de límite (redonda, como las de verdad) y el nombre de la calle en una línea fina
+  const senal = $('senal');
   if (tramoActual) {
     const t = tramoActual;
     const enCalzada = Math.sqrt(dTramo2) <= t.ancho / 2 + 1.5;
-    el.textContent = `Límite ${t.velocidad} km/h (informativo)${t.nombre ? ' · ' + t.nombre : ''}`;
-    el.classList.toggle('excede', kmh > t.velocidad);
+    if (senal.textContent !== String(t.velocidad)) senal.textContent = t.velocidad;
+    senal.classList.toggle('excede', kmh > t.velocidad);
+    $('limite').textContent = t.nombre || 'Calle sin nombre';
     $('fuera').textContent = coche.acera ? 'En la acera' : (enCalzada ? '' : 'Fuera de la calzada');
   } else {
-    el.textContent = 'Límite: —';
-    el.classList.remove('excede');
+    senal.textContent = '—';
+    senal.classList.remove('excede');
+    $('limite').textContent = '';
     $('fuera').textContent = 'Fuera de la calzada';
   }
   pintarDano();
@@ -4646,6 +4742,7 @@ function bucle() {
   const ahora = performance.now() / 1000;
   materialAgua.uniforms.uTiempo.value = ahora % 1000;   // módulo: los móviles calculan peor con números grandes
   actualizarMobiliario(ahora);
+  actualizarBloquesFarolas();
   if (!volante.activo) volante.ang *= Math.exp(-9 * dt);   // la ruleta vuelve sola al centro
   pintarRuleta();
   if (estado === 'cuenta') {

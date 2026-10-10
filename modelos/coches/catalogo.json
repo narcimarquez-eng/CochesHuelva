@@ -1,5 +1,18 @@
 [
   {
+    "id": "suv-compacto",
+    "nombre": "SUV compacto",
+    "archivo": "modelos/coches/suv-compacto.glb",
+    "autor": "aportado por el autor del juego (generador procedural)",
+    "fuente": "subido al proyecto",
+    "licencia": "del autor del juego",
+    "triangulos": 58516,
+    "largo_m": 4.52,
+    "ancho_m": 2.19,
+    "alto_m": 2.13,
+    "trafico": false
+  },
+  {
     "id": "sedan",
     "nombre": "Berlina",
     "archivo": "modelos/coches/sedan.glb",

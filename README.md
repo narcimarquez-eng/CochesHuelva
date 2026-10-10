@@ -35,7 +35,7 @@ Cada golpe suma daño según la velocidad y lo que golpeas (una casa o un árbol
 
 ## Mobiliario urbano y fuentes
 
-- **Farolas** de dos estilos: báculos con brazo en las calles principales y las avenidas (en estas, entre los árboles y a los dos lados) y faroles fernandinos de hierro negro en las calles residenciales y alrededor de las rotondas. De noche se enciende el farol y alumbra el suelo.
+- **Farolas** (unas 11 000) de dos estilos: báculos con brazo en las calles principales y las avenidas (en estas, entre los árboles y a los dos lados) y faroles fernandinos de hierro negro en las calles residenciales y alrededor de las rotondas. Van en las calles con acera y también, pegadas al borde, en las residenciales sin acera; en las calles anchas, a los dos lados. De noche se enciende el farol y alumbra el suelo con un charco de luz amplio. Para que el móvil aguante, se dibujan por bloques de 200 m y solo las cercanas (420 m en el móvil, 650 m en el ordenador).
 - **Quioscos** de prensa (verde y octogonal, con las revistas a la vista), de helados (toldo de rayas y un cucurucho gigante), de flores (con cubos de ramos delante) y de lotería, en las aceras anchas junto a los cruces. De noche se iluminan. Si chocas con uno, salen volando papeles de colores.
 - **Termómetros de calle** en las aceras de las calles principales, con un panel de luces que alterna la hora (la de tu dispositivo), la temperatura (según la hora del día) y la fecha. Algunos llevan encima la cruz verde de farmacia, que parpadea.
 - **Fuentes decoradas** en las rotondas que lo parecen: el juego mira la foto aérea de cada isleta y, si es agua azulada o un disco claro de espuma, o si el mapa marca agua dentro, pone una fuente con su vaso de piedra, una fuente de dos tazas en el centro, surtidores en arco (en las grandes), cortinas de agua y un anillo de flores. Suena el agua al acercarte, y de noche se iluminan con luces de colores que van cambiando. En la zona incluida salen 8 fuentes.
@@ -44,7 +44,7 @@ Todo esto choca con el coche como las farolas y los árboles.
 
 ## Hora del día
 
-**Día**, **atardecer** (sol bajo y naranja, sombras largas) o **noche** (cielo con estrellas y luna). Al atardecer y de noche se encienden las ventanas de las casas, las farolas (con su charco de luz en el suelo) y los faros de todos los coches, que alumbran el asfalto por delante. La elección se recuerda.
+**Día**, **atardecer** (sol bajo y naranja, sombras largas) o **noche** (cielo con estrellas y luna, con luz de luna suficiente para ver las calles). Al atardecer y de noche se encienden las ventanas de las casas, las farolas (con su charco de luz en el suelo) y los faros de todos los coches, que alumbran el asfalto por delante: los del jugador llegan a unos 50 m. La elección se recuerda.
 
 
 En la partida hay tráfico: coches que circulan por la derecha de las calles, frenan si tienen a alguien delante (y pitan si el jugador les corta el paso) y encienden los pilotos al frenar. Si chocas con uno, los dos rebotan según la velocidad y el ángulo del golpe; el de tráfico sale despedido, gira, se queda parado con las luces de emergencia y luego vuelve a su carril. Los peatones van por las aceras y se apartan de un salto si el coche se les echa encima. El siguiente checkpoint (o el destino, en azul) es una columna de luz; los demás solo muestran un aro en el suelo, y arriba a la derecha una flecha indica hacia dónde queda.
@@ -65,6 +65,10 @@ Todo el sonido se sintetiza en el navegador (Web Audio, sin archivos): el motor 
 
 Teclado: flechas o WASD. `H` toca el claxon. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro; la de dentro va a la altura de un asiento alto para ver bien la calle. `M` (o **Menú**) pausa la partida; **Continuar** vuelve a ella.
 
+El juego se abre a **pantalla completa** y en horizontal con el primer toque (los navegadores solo la dejan abrir tras tocar la pantalla). El botón ⛶ de arriba (o la tecla `F`) la quita o la vuelve a poner, y se recuerda. En el iPhone el navegador no deja ponerla; instalado en la pantalla de inicio, el juego se abre sin barras.
+
+El panel de arriba a la izquierda está pensado para el móvil: en una sola línea van la velocidad, la marcha con las revoluciones, la señal de límite (redonda, como las de verdad, parpadea si vas más deprisa) y el daño; debajo, en letra pequeña, el nombre de la calle.
+
 En el móvil, abajo a la izquierda hay una **ruleta**: se gira con el dedo alrededor del centro (140° a cada lado es el giro completo), vibra a cada muesca, un arco ámbar marca cuánto giras y al soltarla vuelve sola al centro. A la derecha están los pedales **GAS** y **FRENO**, grandes y de colores, y el botón **D/R** de la marcha. Los límites de velocidad son solo informativos.
 
 El coche tiene caja automática de seis marchas. Arriba a la izquierda se ven la marcha y el tacómetro: la caja sube hacia las 6200 rpm y baja al acelerar a fondo con pocas vueltas o al frenar hasta casi parar. Para ir **marcha atrás** hay dos maneras:
@@ -80,7 +84,9 @@ Activa GitHub Pages en Settings → Pages, eligiendo la rama del juego y la carp
 
 ## Coches
 
-En la pantalla de inicio se elige el coche: el básico (una caja roja), uno de la galería, CarConcept o ToyCar.
+En la pantalla de inicio se elige el coche: el básico (una caja roja), el **SUV compacto**, uno de la galería, CarConcept o ToyCar.
+
+El SUV compacto (`modelos/coches/suv-compacto.glb`) lo ha aportado el autor del juego. Es el modelo más detallado (58 500 triángulos), así que solo lo conduce el jugador, no sale en el tráfico. Sus propios pilotos LED se encienden al frenar y sus faros LED de noche.
 
 La galería son ocho turismos de Kenney Car Kit, © Kenney (kenney.nl), licencia CC0 1.0: Berlina, Hatchback, Deportivo, SUV, SUV de lujo, Taxi, Patrulla y Furgoneta. Están en `modelos/coches/`, con sus datos en `catalogo.json`. Miden 4,2 m de largo y el frontal mira a +Z, que es el sentido en el que avanza el juego.
 
