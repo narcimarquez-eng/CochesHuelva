@@ -95,6 +95,15 @@
   #fueraRuta{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:rgba(200,30,25,.9);color:#fff;font-weight:800;padding:7px 14px;border-radius:10px;font-size:15px;pointer-events:none;display:none;z-index:4;box-shadow:0 4px 14px rgba(0,0,0,.4);max-width:calc(100vw - 420px);min-width:180px;text-align:center}
   @media (max-width:640px){#fueraRuta{bottom:auto;top:40%;max-width:80vw}}
   body.fuera #fueraRuta{display:block}
+  #podioPanel{display:none;position:fixed;right:calc(12px + env(safe-area-inset-right,0px));top:12px;bottom:12px;width:min(340px,46vw);flex-direction:column;gap:8px;padding:12px 14px;color:#fff;z-index:7;overflow:auto;box-sizing:border-box}
+  #podioPanel h2{margin:0;font-size:20px}
+  #podioPanel table{border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+  #podioPanel td{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.12);white-space:nowrap}
+  #podioPanel td:nth-child(2){white-space:normal}
+  #podioPanel tr.yo td{color:#f5b041;font-weight:800}
+  #podioPanel p{margin:0;font-size:12px;opacity:.8}
+  body.podio #hud,body.podio #controles,body.podio #carrera,body.podio #aviso{display:none}
+  #posicion{display:inline-block;background:var(--ambar);color:#1b1b1b;font-weight:900;border-radius:6px;padding:0 6px;margin-right:4px}
   #coches button{font-size:15px;padding:8px 14px;background:#4a5a6a;color:#fff}
   #coches button.activo{background:var(--ambar);color:#1b1b1b}
   @media (max-height:520px){#ruleta{width:140px;height:140px}.pedal{width:74px;height:94px}#btnFreno{height:80px}#btnSentido{width:54px;height:54px}#vel{font-size:36px}}
@@ -122,6 +131,12 @@
     </div>
   </div>
   <div id="calle"><span id="limite"></span><span id="fuera"></span></div>
+</div>
+<div id="podioPanel" class="panel">
+  <h2 id="podioTitulo">🏆 Podio</h2>
+  <table><tbody id="podioTabla"></tbody></table>
+  <p id="podioPie"></p>
+  <button id="podioSeguir">Continuar</button>
 </div>
 <div id="fueraRuta">⚠ Fuera de ruta: sigue las flechas rojas</div>
 <div id="carrera" class="panel"></div>
@@ -236,6 +251,8 @@ function parsearCalles(geo) {
       acera: typeof p.ancho_acera_m === 'number' ? p.ancho_acera_m : 0,   // ancho de cada acera (0 si no hay)
       dib: p.dibujada_como || '',                                         // calle con aceras, adoquín, camino de tierra…
       unSentido: !!p.sentido_unico,
+      carriles: Number(p.carriles) > 0 ? Number(p.carriles) : 0,                 // carriles reales de OpenStreetMap (0 si no se sabe)
+      tunel: p['osm:tunnel'] || '',                                              // 'building_passage': pasa bajo un edificio
       pts: g.coordinates.map(c => proyectar(c[0], c[1])),
     });
   }
@@ -376,6 +393,33 @@ function planearVuelta(G, rng, longitudMin, longitudMax, libre) {
     };
   }
   return null;
+}
+
+// --- casas que cortan calles: si la calzada de una calle pasa por dentro de una casa (pasajes bajo edificios, datos que no casan),
+// esa casa no se pone: si no, el coche se estrellaría contra una pared en mitad de la calle.
+// Se mira el eje de la calzada y dos líneas a un cuarto de su ancho, cada 1,5 m; con dos puntos dentro, la casa se quita.
+// Devuelve { quitar: Set de índices, calles: nombres de las calles afectadas }
+function casasQueCortanCalles(edif, rejilla, tramos) {
+  const dentro = new Map(), calles = new Map(), grandes = rejilla.get('*');
+  for (const t of tramos) {
+    const cum = acumulados(t.pts), L = cum[cum.length - 1];
+    for (let d = 0.75; d < L; d += 1.5) {
+      const e = enPolilinea(t.pts, cum, d);
+      for (const s of [0, -t.ancho / 4, t.ancho / 4]) {
+        const x = e.x - e.tz * s, z = e.z + e.tx * s;
+        for (const lista of [rejilla.get(Math.floor(x / TAM_CELDA) + ',' + Math.floor(z / TAM_CELDA)), grandes]) {
+          if (lista) for (const j of lista) {
+            const b = edif[j].bbox;
+            if (x < b[0] || x > b[2] || z < b[1] || z > b[3] || !enPoligono(edif[j].pts, x, z)) continue;
+            dentro.set(j, (dentro.get(j) || 0) + 1);
+            if (!calles.has(j)) calles.set(j, t.nombre);
+          }
+        }
+      }
+    }
+  }
+  const quitar = new Set([...dentro].filter(([, n]) => n >= 2).map(([j]) => j));
+  return { quitar, calles: [...new Set([...quitar].map(j => calles.get(j)).filter(Boolean))] };
 }
 
 // --- casas (edificios) ---
@@ -883,6 +927,19 @@ const AUTOVIAS = new Set(['motorway', 'motorway_link', 'trunk', 'trunk_link']);
 // --- marcas de la calzada: franjas {pts, s0, s1} (como las de la calzada), sin marcas en las rotondas ---
 // Línea central discontinua (calles de dos sentidos de 6,4 m o más), líneas de borde continuas (primarias y
 // secundarias) y, en los cruces, pasos de cebra
+// Carriles de un tramo: los de OpenStreetMap si se saben; si no, uno por sentido (más si la calzada es muy ancha).
+// { ida, vuelta, total }: ida son los del sentido del trazado (a → b)
+function carrilesTramo(t) {
+  const n = t.carriles || (t.unSentido ? (t.ancho >= 12 ? 3 : t.ancho >= 8.5 ? 2 : 1) : (t.ancho >= 13 ? 4 : 2));
+  if (t.unSentido) return { ida: n, vuelta: 0, total: n };
+  const total = Math.max(2, n);
+  return { ida: Math.ceil(total / 2), vuelta: Math.floor(total / 2), total };
+}
+// Desplazamiento hacia la derecha (según el sentido de marcha) del centro del carril k; k = 0 es el de más a la derecha
+function desplazamientoCarril(t, k, fwd) {
+  const c = carrilesTramo(t), w = t.ancho / c.total, n = fwd ? c.ida : c.vuelta;
+  return t.ancho / 2 - (Math.min(k, Math.max(0, n - 1)) + 0.5) * w;
+}
 function generarMarcas(tramos, rotondas, cruces) {
   const rejCruces = construirRejillaPuntos(cruces), marcas = [];
   for (const t of tramos) {
@@ -891,7 +948,18 @@ function generarMarcas(tramos, rotondas, cruces) {
     const a = chocaPuntos(rejCruces, p[0][0], p[0][1], 0.5) ? 12 : 0;   // sin marcas junto al cruce
     const b = chocaPuntos(rejCruces, p[p.length - 1][0], p[p.length - 1][1], 0.5) ? L - 12 : L;
     if (b - a < 4) continue;
-    if (t.ancho >= 6.4 && !t.unSentido && !AUTOVIAS.has(t.tipo)) {
+    // separaciones entre carriles (según los carriles reales): la que divide los dos sentidos es la línea central (doble continua
+    // si hay dos o más carriles por sentido) y las demás son discontinuas cortas
+    const c = carrilesTramo(t), w = t.ancho / c.total;
+    if (c.total >= 2 && w >= 2.6) {
+      for (let i = 1; i < c.total; i++) {
+        const s0 = t.ancho / 2 - i * w;   // en bandasH el desplazamiento positivo es a la derecha del trazado, donde van los carriles de ida
+        if (!t.unSentido && i === c.ida) {
+          if (c.total >= 4) { const tr = subPolilinea(p, cum, a, b); marcas.push({ pts: tr, s0: s0 - 0.22, s1: s0 - 0.1 }, { pts: tr, s0: s0 + 0.1, s1: s0 + 0.22 }); }
+          else if (!AUTOVIAS.has(t.tipo)) for (let d = a; d + 3 <= b; d += 9) marcas.push({ pts: subPolilinea(p, cum, d, d + 3), s0: s0 - 0.08, s1: s0 + 0.08 });
+        } else for (let d = a + 2; d + 3.5 <= b; d += 9) marcas.push({ pts: subPolilinea(p, cum, d, d + 3.5), s0: s0 - 0.07, s1: s0 + 0.07 });
+      }
+    } else if (t.ancho >= 6.4 && !t.unSentido && !AUTOVIAS.has(t.tipo)) {
       for (let d = a; d + 3 <= b; d += 9) marcas.push({ pts: subPolilinea(p, cum, d, d + 3), s0: -0.08, s1: 0.08 });
     }
     if (['primary', 'secondary'].includes(tipoBase(t.tipo))) {
@@ -1122,7 +1190,7 @@ function tramosCerca(G, x, z, R) {
 // Coche de tráfico sobre el tramo seg, en sentido fwd y a s metros de su inicio de sentido
 function nuevoCocheTrafico(G, rng, seg, fwd, s) {
   const t = prepararTramo(G.tramos[seg]);
-  return { seg, fwd, s, origen: fwd ? t.a : t.b, k: 0.75 + rng() * 0.25, color: rng() };
+  return { seg, fwd, s, origen: fwd ? t.a : t.b, k: 0.75 + rng() * 0.25, color: rng(), carril: Math.floor(rng() * 3) };
 }
 // Siguiente tramo al llegar a un nodo: uno cualquiera, sin volver por donde se venía (si no hay otro, se da la vuelta)
 function siguienteArista(G, nodo, desde, rng) {
@@ -1151,7 +1219,7 @@ function avanzaTrafico(G, c, dt, rng) {
 function posicionTrafico(G, c) {
   const t = prepararTramo(G.tramos[c.seg]);
   const e = enPolilinea(c.fwd ? t.pts : t.ptsRev, c.fwd ? t.cum : t.cumRev, c.s);
-  const carril = t.ancho / 4;
+  const carril = desplazamientoCarril(t, c.carril || 0, c.fwd);   // por su carril (los de la calle real)
   return { x: e.x - e.tz * carril, z: e.z + e.tx * carril, h: Math.atan2(e.tx, e.tz) };
 }
 // Peatón sobre una acera del tramo seg (lado -1 o 1): camina de un extremo al otro y da la vuelta
@@ -1545,6 +1613,38 @@ function distanciaPolilinea(pts, x, z, a = 0, b = pts.length - 1) {
   return { d: Math.sqrt(md), k: mk };
 }
 
+// --- rivales: velocidad a la que se puede ir en cada punto de la ruta (vuelta cerrada) ---
+// En cada vértice, la curvatura con los puntos 10 m antes y después; en curva, v = √(aLat / curvatura); luego se adelanta la frenada
+// (deceleración frenada) para llegar a cada curva a su velocidad. Devuelve un Float32Array con la velocidad (m/s) de cada vértice
+function perfilVelocidad(ruta, cum, vRecta = 34, aLat = 7, frenada = 7) {
+  const n = ruta.length, L = cum[n - 1], v = new Float32Array(n);
+  const en = d => enPolilinea(ruta, cum, ((d % L) + L) % L);
+  for (let k = 0; k < n; k++) {
+    const a = en(cum[k] - 10), b = en(cum[k] + 10), p = ruta[k];
+    const ux = p[0] - a.x, uz = p[1] - a.z, wx = b.x - p[0], wz = b.z - p[1];
+    const giro = Math.abs(Math.atan2(ux * wz - uz * wx, ux * wx + uz * wz)), largo = Math.max(4, Math.hypot(b.x - a.x, b.z - a.z));
+    const curv = giro / largo;
+    // en los cambios de sentido (la ruta da media vuelta en un checkpoint) se pasa despacio, pero nunca parado
+    v[k] = Math.max(4.5, curv > 1e-4 ? Math.min(vRecta, Math.sqrt(aLat / curv)) : vRecta);
+  }
+  for (let vuelta = 0; vuelta < 2; vuelta++) for (let k = n - 2; k >= 0; k--) {
+    const ds = cum[k + 1] - cum[k];
+    v[k] = Math.min(v[k], Math.sqrt(v[k + 1] * v[k + 1] + 2 * frenada * ds));
+    if (k === 0) v[n - 1] = Math.min(v[n - 1], v[0]);   // la vuelta es cerrada
+  }
+  return v;
+}
+// Índice del vértice de la ruta en el que cae la distancia d (búsqueda binaria)
+function indiceRuta(cum, d) {
+  let a = 0, b = cum.length - 1;
+  while (b - a > 1) { const m = (a + b) >> 1; if (cum[m] <= d) a = m; else b = m; }
+  return a;
+}
+// Tiempo estimado de llegada de un rival que no ha terminado: lo que le falta a su velocidad media
+function llegadaEstimada(t, recorrido, falta) {
+  return t + falta / Math.max(5, recorrido / Math.max(1, t));
+}
+
 // --- daño del coche: cada golpe suma daño a una zona (delante, detrás, izquierda, derecha) y al total ---
 const MATERIAL_DANO = { quiosco: 0.9, casa: 1, arbol: 1.1, farola: 0.9, riel: 0.6, agua: 0.3, isla: 0.7, coche: 0.9, bordillo: 0.35, bici: 0.15, valla: 0.4 };
 // Daño (en %) de un golpe a la velocidad impacto (m/s): por debajo de 2,5 m/s (9 km/h) no se rompe nada
@@ -1706,6 +1806,56 @@ const Efectos = (() => {
   return { crear, huella, cortarHuella, humo: emitirHumo, chispas: emitirChispas, llama: emitirLlama, fuegos: emitirFuegos, papeles: emitirPapeles, actualizar, limpiar };
 })();
 
+// --- restos de los choques: parachoques, puertas, chapas, alerones, ruedas y tuercas (Kenney Car Kit, CC0) que salen volando,
+// rebotan en el suelo y se quedan en la calzada un rato ---
+const Restos = (() => {
+  const ARCHIVOS = { parachoques: 'debris-bumper', puerta: 'debris-door', rueda: 'debris-tire', aleron: 'debris-spoiler-a', chapa: 'debris-plate-a', tuerca: 'debris-nut' };
+  const grupo = new THREE.Group(), vivos = [], ESC = 4.2 / 2.55;   // los modelos del Car Kit miden un 60 % de lo real
+  let modelos = null;
+  function cargar() {
+    if (modelos) return;
+    modelos = {};
+    for (const [k, a] of Object.entries(ARCHIVOS)) geometriaModelo(`modelos/restos/${a}.glb`).then(m => { modelos[k] = m; }).catch(() => {});
+  }
+  // Golpe en (x, z) con normal (nx, nz) hacia el coche; zona del coche que se rompe y fuerza (m/s)
+  function lanzar(x, z, nx, nz, zona, fuerza) {
+    cargar();
+    const piezas = (zona === 'izq' || zona === 'der' ? ['puerta', 'chapa'] : zona === 'detras' ? ['parachoques', 'aleron', 'chapa'] : ['parachoques', 'chapa']).filter(k => modelos[k]);
+    if (fuerza > 15 && modelos.rueda) piezas.push('rueda');
+    const n = Math.min(piezas.length, fuerza > 12 ? 3 : fuerza > 8 ? 2 : 1);
+    const lista = piezas.slice(0, n).concat(modelos.tuerca ? ['tuerca', 'tuerca', 'tuerca'] : []);
+    for (const k of lista) {
+      const m = modelos[k], malla = new THREE.Mesh(m.geo, m.materiales);
+      malla.scale.setScalar(ESC);
+      malla.position.set(x + (Math.random() - 0.5), 0.7, z + (Math.random() - 0.5));
+      malla.castShadow = sombras;
+      const v = fuerza * (0.25 + Math.random() * 0.25), a = Math.random() * 6.28;
+      vivos.push({ malla, vx: nx * v * 0.6 + Math.cos(a) * v * 0.4, vy: 2 + Math.random() * 3 + fuerza * 0.1, vz: nz * v * 0.6 + Math.sin(a) * v * 0.4,
+        wx: (Math.random() - 0.5) * 12, wy: (Math.random() - 0.5) * 12, wz: (Math.random() - 0.5) * 12, t: 0, quieto: false });
+      grupo.add(malla);
+    }
+    while (vivos.length > 36) grupo.remove(vivos.shift().malla);   // los más viejos desaparecen
+  }
+  function actualizar(dt) {
+    for (let i = vivos.length - 1; i >= 0; i--) {
+      const p = vivos[i], m = p.malla;
+      p.t += dt;
+      if (!p.quieto) {
+        p.vy -= 9.8 * dt;
+        m.position.x += p.vx * dt; m.position.y += p.vy * dt; m.position.z += p.vz * dt;
+        m.rotation.x += p.wx * dt; m.rotation.y += p.wy * dt; m.rotation.z += p.wz * dt;
+        if (m.position.y < 0.07) {   // rebota en el suelo y pierde fuerza; al final se queda tumbado
+          m.position.y = 0.07; p.vy = -p.vy * 0.3; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.5; p.wy *= 0.5; p.wz *= 0.5;
+          if (Math.abs(p.vy) < 0.6 && Math.hypot(p.vx, p.vz) < 0.4) { p.quieto = true; m.rotation.x = Math.round(m.rotation.x / Math.PI) * Math.PI; m.rotation.z = Math.round(m.rotation.z / Math.PI) * Math.PI; }
+        }
+      }
+      if (p.t > 40) { const k = Math.max(0, 1 - (p.t - 40)); m.scale.setScalar(ESC * k); if (k <= 0) { grupo.remove(m); vivos.splice(i, 1); } }
+    }
+  }
+  function limpiar() { for (const p of vivos) grupo.remove(p.malla); vivos.length = 0; }
+  return { grupo, cargar, lanzar, actualizar, limpiar };
+})();
+
 // --- abolladuras: los golpes hunden de verdad la carrocería del coche del jugador (y el taller la endereza) ---
 const Abolladuras = (() => {
   let mallas = [];
@@ -1805,6 +1955,7 @@ const Sonido = (() => {
     const traqueteo = ganancia(0), fTraq = filtro('bandpass', 260, 3);
     cadena(fuenteRuido(), fTraq, traqueteo, maestro);
     for (const o of [o1, o2, o3, lfo, oChirr, vib]) o.start();
+    cargarMuestras();
     n = { motor, fMotor, o1, o2, o3, lfo, admision, fAdm, rodar, fRodar, chirrido, oChirr, roce, traqueteo, fTraq, fuenteG };
   }
   function iniciar() {
@@ -1847,9 +1998,48 @@ const Sonido = (() => {
     s.connect(destino); s.start(t, desde ?? Math.random() * 1.5); s.stop(t + dur + 0.05);
   }
   // Golpe: crujido de chapa y golpe sordo; el quitamiedos y las farolas suenan a metal, los árboles a madera, el coche a cristales
+  // --- golpes grabados (Kenney Impact Sounds, CC0): si el navegador no puede con .ogg, se sintetizan como antes ---
+  const MUESTRAS = {
+    metal: ['impactMetal_heavy_000', 'impactMetal_heavy_001', 'impactMetal_heavy_002'], metalSuave: ['impactMetal_medium_000'],
+    chapa: ['impactPlate_heavy_000', 'impactPlate_heavy_001'], cristal: ['impactGlass_heavy_000', 'impactGlass_heavy_001', 'impactGlass_medium_000'],
+    madera: ['impactWood_heavy_000', 'impactWood_heavy_001'], blando: ['impactSoft_heavy_000'], lata: ['impactTin_medium_000'], seco: ['impactPunch_heavy_000'],
+  };
+  const muestras = {};
+  function cargarMuestras() {
+    for (const nombre of Object.values(MUESTRAS).flat()) {
+      fetch(`sonidos/${nombre}.ogg`).then(r => r.ok ? r.arrayBuffer() : Promise.reject())
+        .then(b => new Promise((res, rej) => ctx.decodeAudioData(b, res, rej)))
+        .then(buf => { muestras[nombre] = buf; }).catch(() => {});
+    }
+  }
+  // Suena una muestra del grupo al volumen vol; false si no hay ninguna cargada
+  function muestra(grupo, vol, t, tono = 1) {
+    const lista = MUESTRAS[grupo].map(n => muestras[n]).filter(Boolean);
+    if (!lista.length) return false;
+    const src = ctx.createBufferSource(), g = ganancia(vol);
+    src.buffer = lista[Math.floor(Math.random() * lista.length)];
+    src.playbackRate.value = tono * (0.9 + Math.random() * 0.2);
+    cadena(src, g, maestro); src.start(t);
+    return true;
+  }
+  // Qué suena en cada golpe: [grupo, volumen, tono], los demás solo si el golpe es fuerte
+  const SONIDO_GOLPE = {
+    casa: [['chapa', 1, 0.9], ['seco', 0.8, 0.8], ['cristal', 0.6, 1, 0.5]], coche: [['metal', 1, 1], ['chapa', 0.6, 1.1], ['cristal', 0.7, 1, 0.35]],
+    riel: [['metal', 0.9, 1.1], ['metalSuave', 0.6, 1]], farola: [['metal', 0.8, 1.2], ['metalSuave', 0.7, 1.1]], arbol: [['madera', 1, 0.9], ['chapa', 0.5, 1]],
+    quiosco: [['lata', 1, 1], ['cristal', 0.8, 1.1, 0.3], ['chapa', 0.6, 1]], valla: [['lata', 0.8, 0.9], ['blando', 0.6, 1]], bordillo: [['blando', 1, 0.8]],
+    isla: [['blando', 0.9, 0.9], ['chapa', 0.5, 0.9]], agua: [['blando', 0.7, 0.7]], bici: [['metalSuave', 0.6, 1.3]],
+  };
   function golpe(tipo, fuerza) {
     if (!ctx || !n) return;
     const t = t0(), k = Math.min(1, fuerza / 15);
+    let grabado = false;
+    for (const [grupo, vol, tono, desde = 0] of SONIDO_GOLPE[tipo] || SONIDO_GOLPE.casa) if (k >= desde) grabado = muestra(grupo, vol * (0.35 + 0.65 * k), t, tono) || grabado;
+    if (grabado) {   // con la grabación, solo un golpe grave debajo para que retumbe
+      const o = osc('sine', 90), go = ganancia(0);
+      o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(35, t + 0.3);
+      cadena(o, go, maestro); envolvente(go, 0.35 * k, 0.3, t); o.start(t); o.stop(t + 0.32);
+      return;
+    }
     const f = filtro('lowpass', tipo === 'riel' || tipo === 'farola' ? 4200 : 2200, 0.8), g = ganancia(0);
     f.frequency.setValueAtTime(f.frequency.value, t); f.frequency.exponentialRampToValueAtTime(180, t + 0.4);
     cadena(f, g, maestro); envolvente(g, 0.25 + 0.75 * k, 0.45, t); rafagaRuido(f, t, 0.45);
@@ -1897,6 +2087,20 @@ const Sonido = (() => {
     notas.forEach((fr, i) => setTimeout(() => pitido(fr, 0.22, 0.18), i * 110));
   }
   function clic() { pitido(1400, 0.05, 0.12); }
+  // Motor del rival más cercano: un diente de sierra que sube con su velocidad y se oye según la distancia
+  let rivalN = null;
+  function rival(dist, v) {
+    if (!ctx || !n) return;
+    if (!rivalN) {
+      const o = osc('sawtooth', 60), o2 = osc('square', 30), f = filtro('lowpass', 900, 2), g = ganancia(0);
+      cadena(o, f); cadena(o2, f); cadena(f, g, maestro); o.start(); o2.start();
+      rivalN = { o, o2, f, g };
+    }
+    const fr = 45 + v * 5.5 + (v % 9) * 4;   // como si cambiara de marcha
+    hacia(rivalN.o.frequency, fr, 0.05); hacia(rivalN.o2.frequency, fr / 2, 0.05); hacia(rivalN.f.frequency, 500 + v * 30, 0.1);
+    hacia(rivalN.g.gain, dist < 90 ? 0.12 / (1 + dist / 8) : 0, 0.1);
+  }
+  function callarRival() { if (rivalN) hacia(rivalN.g.gain, 0, 0.1); }
   // Rumor del agua de la fuente más cercana (dist en metros; lejos, nada)
   function fuente(dist) {
     if (!ctx || !n) return;
@@ -1963,7 +2167,7 @@ const Sonido = (() => {
     return activo;
   }
   document.addEventListener('visibilitychange', () => { if (ctx) { if (document.hidden) ctx.suspend(); else ctx.resume(); } });
-  return { iniciar, actualizar, golpe, bordillo, bocina, pitido, campana, clic, ladrido, timbre, claxon, aplausos, estallido, fuente, alternar, activo: () => activo };
+  return { iniciar, actualizar, golpe, bordillo, bocina, pitido, campana, clic, ladrido, timbre, claxon, aplausos, estallido, fuente, rival, callarRival, alternar, activo: () => activo };
 })();
 
 let renderer, scene, camara, reloj;
@@ -2025,7 +2229,7 @@ function iniciarRender() {
   }
   scene.add(sol, sol.target);
   cielo = crearCielo(sol.position.clone().normalize());
-  scene.add(cielo, Efectos.crear());
+  scene.add(cielo, Efectos.crear(), Restos.grupo);
   aplicarHora(horaElegida);
   reloj = new THREE.Clock();
   addEventListener('resize', () => {
@@ -3124,11 +3328,11 @@ const CATALOGO_COCHES = Object.fromEntries([
 let cocheElegido = 'basico';
 const cochesCargados = {};
 // Escala, gira y apoya el modelo: 4,2 m de largo, centrado en el coche y con las ruedas sobre el suelo
-function prepararModeloCoche(modelo, giro) {
+function prepararModeloCoche(modelo, giro, largo = 4.2) {
   modelo.rotation.y = giro;
   modelo.updateMatrixWorld(true);
   let caja = new THREE.Box3().setFromObject(modelo);
-  modelo.scale.setScalar(4.2 / caja.getSize(new THREE.Vector3()).z);
+  modelo.scale.setScalar(largo / caja.getSize(new THREE.Vector3()).z);
   modelo.updateMatrixWorld(true);
   caja = new THREE.Box3().setFromObject(modelo);
   const c = caja.getCenter(new THREE.Vector3());
@@ -3228,10 +3432,19 @@ async function cargarZona(archivo) {
   $('estado').textContent = 'Cargando casas…';
   await new Promise(r => setTimeout(r, 0));
   const casas = await leer('casas.geojson');
-  const edif = parsearCasas(casas);
+  let edif = parsearCasas(casas), rejilla = construirRejilla(edif);
+  // casas que cortan una calle (pasajes bajo edificios, datos que no casan): no se ponen, y se avisa
+  $('estado').textContent = 'Comprobando que ninguna casa corte una calle…';
+  await new Promise(r => setTimeout(r, 0));
+  const cortan = casasQueCortanCalles(edif, rejilla, tramos);
+  if (cortan.quitar.size) {
+    edif = edif.filter((_, j) => !cortan.quitar.has(j));
+    rejilla = construirRejilla(edif);
+    console.warn(`Se han quitado ${cortan.quitar.size} casas que cortaban calles:`, cortan.calles.join(', '));
+  }
   $('estado').textContent = 'Construyendo la zona…';
   await new Promise(r => setTimeout(r, 0));
-  zona = { tramos, G, edif, rejilla: construirRejilla(edif), enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos) };
+  zona = { tramos, G, edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan };
   prepararCasas(edif, zona.rejilla, tramos);
   $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas)…';
   await new Promise(r => setTimeout(r, 0));
@@ -3246,7 +3459,10 @@ async function cargarZona(archivo) {
   construirMallaZona();
   $('btnNueva').disabled = false;
   document.body.classList.add('zonaLista');   // ya no hace falta elegir el zip
-  mostrarMenu(`Huelva lista: ${tramos.length} calles, ${edif.length} casas, ${zona.nFuentes} fuentes.`);
+  const q = zona.casasQuitadas;
+  mostrarMenu(`Huelva lista: ${tramos.length} calles, ${edif.length} casas, ${zona.nFuentes} fuentes.` +
+    (q.quitar.size ? ` ⚠ Se han quitado ${q.quitar.size} casas que cortaban calles (${q.calles.slice(0, 3).join(', ')}${q.calles.length > 3 ? '…' : ''}).` : ''));
+  if (q.quitar.size) $('estado').title = 'Calles afectadas: ' + q.calles.join(', ');
 }
 
 $('archivo').addEventListener('change', async e => {
@@ -3456,7 +3672,15 @@ function avisarPeatones(x, z, R, susto = true) {
   for (const c of ciclistas) if (!timbre && Math.hypot(c.x - x, c.z - z) < R && ahora - (c.timbre || 0) > 3) { c.timbre = ahora; timbre = true; Sonido.timbre(Math.hypot(c.x - coche.x, c.z - coche.z)); }
 }
 // Modelos de tráfico: los dos coches reales en versión ligera (un 10 % de los triángulos), cada uno unido en una sola geometría
-const ARCHIVOS_TRAFICO = [...GALERIA.filter(g => g.trafico !== false).map(g => g.archivo), 'modelos/trafico-concept.glb', 'modelos/trafico-toy.glb'];
+// Tráfico: los turismos de la galería y, menos a menudo, ambulancias, camiones de bomberos y de basura, furgonetas de reparto y camionetas
+// (Kenney Car Kit, CC0), cada uno con su largo real
+const ARCHIVOS_TRAFICO = [
+  ...GALERIA.filter(g => g.trafico !== false).map(g => ({ archivo: g.archivo, largo: 4.2, peso: 3 })),
+  { archivo: 'modelos/trafico-concept.glb', largo: 4.2, peso: 2 }, { archivo: 'modelos/trafico-toy.glb', largo: 4.2, peso: 1 },
+  { archivo: 'modelos/trafico/delivery.glb', largo: 5.4, peso: 1.5 }, { archivo: 'modelos/trafico/truck.glb', largo: 4.9, peso: 1.5 },
+  { archivo: 'modelos/trafico/garbage-truck.glb', largo: 6.0, peso: 0.6 }, { archivo: 'modelos/trafico/ambulance.glb', largo: 5.4, peso: 0.5 },
+  { archivo: 'modelos/trafico/firetruck.glb', largo: 6.4, peso: 0.35 },
+];
 let modelosTrafico = null;
 // Une las mallas de un modelo en una sola geometría (un grupo por material), en la posición que ya tiene el modelo
 function geometriaUnida(raiz) {
@@ -3491,7 +3715,8 @@ function geometriaUnida(raiz) {
 }
 function cargarModelosTrafico() {
   if (!modelosTrafico) modelosTrafico = Promise.all(ARCHIVOS_TRAFICO.map(a => new Promise((res, rej) =>
-    new THREE.GLTFLoader().load(a, g => { const m = geometriaUnida(prepararModeloCoche(g.scene, 0)); m.geo.computeBoundingBox(); res(m); }, undefined, rej))));
+    new THREE.GLTFLoader().load(a.archivo, g => { const m = geometriaUnida(prepararModeloCoche(g.scene, 0, a.largo)); m.geo.computeBoundingBox(); m.largo = a.largo; res(m); }, undefined, () => res(null)))))
+    .then(lista => lista.map((m, i) => m && Object.assign(m, { peso: ARCHIVOS_TRAFICO[i].peso })).filter(Boolean));   // si alguno no carga, se sigue con los demás
   return modelosTrafico;
 }
 // Malla de peatones: cuerpo de color y cabeza, en instancias
@@ -3516,7 +3741,12 @@ async function iniciarTrafico() {
     trafico.forEach(c => colocarCoche(c));
     trafico = trafico.filter(c => c.seg !== undefined);   // los que no han encontrado calle no se dibujan
     const cuenta = modelos.map(() => 0);
-    trafico.forEach(c => { c.modelo = Math.floor(rngTrafico() * modelos.length); c.idx = cuenta[c.modelo]++; });
+    const pesoTotal = modelos.reduce((a, m) => a + m.peso, 0);
+    trafico.forEach(c => {   // cada modelo según su frecuencia: muchos turismos, pocos camiones
+      let r = rngTrafico() * pesoTotal, k = 0;
+      while (k < modelos.length - 1 && (r -= modelos[k].peso) > 0) k++;
+      c.modelo = k; c.idx = cuenta[k]++; c.largo = modelos[k].largo;
+    });
     mallaTrafico = modelos.map((m, k) => {
       const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k]));
       im.frustumCulled = false;
@@ -3576,9 +3806,9 @@ async function iniciarTrafico() {
 function contactoTrafico(x, z, R) {
   let mejor = null;
   for (const c of trafico) {
-    if ((c.x - x) ** 2 + (c.z - z) ** 2 > 49) continue;
-    const fx = Math.sin(c.h), fz = Math.cos(c.h);
-    for (const off of [1.15, -1.15]) {
+    if ((c.x - x) ** 2 + (c.z - z) ** 2 > 64) continue;
+    const fx = Math.sin(c.h), fz = Math.cos(c.h), m = (c.largo || 4.2) / 2 - 0.95;
+    for (const off of (m > 1.6 ? [m, 0, -m] : [m, -m])) {   // los camiones, con un círculo más en medio
       const k = contactoDesde(x, z, c.x + fx * off, c.z + fz * off, R + 0.95, false);
       if (k && (!mejor || k.prof > mejor.prof)) { k.tipo = 'coche'; k.coche = c; k.off = off; mejor = k; }
     }
@@ -3599,6 +3829,7 @@ function distanciaDelante(c) {
   };
   for (const o of trafico) if (o !== c) mira(o, o.x, o.z, false);
   if (coche) mira(null, coche.x, coche.z, true);
+  if (carrera && carrera.rivales) for (const r of carrera.rivales) if (r.x !== undefined) mira({ parado: 1 }, r.x, r.z, false);
   // ciclistas de su carril y peatones cruzando por delante (a estos se les espera aunque estén un poco más a un lado)
   for (const b of ciclistas) { const dx = b.x - c.x, dz = b.z - c.z, a = dx * fx + dz * fz; if (a > 1 && a < 16 && Math.abs(dx * fz - dz * fx) < 1.4 && a < dMin) dMin = a; }
   for (const p of peatones) {
@@ -3983,8 +4214,12 @@ let modoJuego = 'circuito';
 try { if (['circuito', 'exploracion'].includes(localStorage.getItem('cochesHuelva.modo'))) modoJuego = localStorage.getItem('cochesHuelva.modo'); } catch (err) { /* sin almacenamiento */ }
 let estadoPausado = null, tPausa = 0;   // al abrir el menú en plena partida, para poder seguir
 function limpiarCarrera() {
+  $('podioPanel').style.display = 'none';
+  document.body.classList.remove('podio');
+  if (cocheMesh) cocheMesh.visible = true;
+  Sonido.callarRival();
   if (carrera) {
-    for (const g of [...carrera.meshes, carrera.deco, ...carrera.talleres.map(t => t.grupo), carrera.destino && carrera.destino.baliza].filter(Boolean)) {
+    for (const g of [...carrera.meshes, carrera.deco, ...carrera.talleres.map(t => t.grupo), carrera.destino && carrera.destino.baliza, carrera.podio, ...(carrera.rivales || []).map(r => r.malla)].filter(Boolean)) {
       scene.remove(g);
       g.traverse(o => { if (o.material && !o.material.compartido) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); });
     }
@@ -3992,6 +4227,7 @@ function limpiarCarrera() {
   Ruta.limpiar();
   limpiarTrafico();
   Efectos.limpiar();
+  Restos.limpiar();
   carrera = null;
 }
 // Checkpoint: columna de luz que se desvanece hacia arriba, con bandas que suben, y un aro en el suelo
@@ -4140,7 +4376,94 @@ function decoracionCircuito(plan, cum) {
     for (const lado of [-1, 1]) { const p = local(e, lado * luz / 2, 0); obst.push([p.x, p.z, 0.6]); }
   });
   conSombra(deco, true, false);
+  decoracionKenney(plan, cum, deco, obst, luz0);   // piezas del Racing Kit (llegan un poco después)
   return { deco, semaforo, publico, obst };
+}
+// --- más decoración con piezas de Kenney Racing Kit (CC0): vallas rojas y blancas en los bordillos de la recta, torres de pancartas,
+// banderas a cuadros sobre el arco, una tribuna cubierta si cabe, una carpa en los boxes y conos en los arcos de los checkpoints ---
+const ESC_RACING = 3.1, GIRO_TRIBUNA = Math.PI;   // la tribuna del Racing Kit mira hacia su −Z   // una unidad del Racing Kit son unos 3,1 m (su coche mide 1,35 y uno real 4,2)
+const piezasCentradas = {};
+// Geometría del modelo con el centro en (0, 0) y apoyada en el suelo
+function piezaCentrada(archivo) {
+  if (!piezasCentradas[archivo]) piezasCentradas[archivo] = geometriaModelo(archivo).then(m => {
+    const geo = m.geo.clone();
+    geo.computeBoundingBox();
+    const b = geo.boundingBox;
+    geo.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+    geo.computeBoundingBox();
+    return { geo, materiales: m.materiales, tam: geo.boundingBox.getSize(new THREE.Vector3()) };
+  });
+  return piezasCentradas[archivo];
+}
+async function decoracionKenney(plan, cum, deco, obst, luz0) {
+  const RK = n => `modelos/carrera/${n}.glb`;
+  const local = (e, lado, adelante) => new THREE.Vector3(e.x - e.tz * lado + e.tx * adelante, 0, e.z + e.tx * lado + e.tz * adelante);
+  const libre = (x, z, i, r = 0.6) => {
+    for (let k = 0; k < 5; k++) {
+      const a = k * 1.57, px = k === 4 ? x : x + Math.cos(a) * r, pz = k === 4 ? z : z + Math.sin(a) * r;
+      if (dentroDeOtraCasa(zona.edif, zona.rejilla, px, pz, -1) || (i >= 0 && zona.enCalzadaAjena(px, pz, i))) return false;
+    }
+    return !contactoMundo(zona.mundo, x, z, r);
+  };
+  let piezas;
+  try {
+    piezas = Object.fromEntries(await Promise.all(['barrierRed', 'barrierWhite', 'bannerTowerRed', 'bannerTowerGreen', 'flagCheckers', 'grandStandCovered', 'tent']
+      .map(async n => [n, await piezaCentrada(RK(n))]).concat([piezaCentrada('modelos/carrera/cone.glb').then(m => ['cone', m])])));
+  } catch (err) { return; }   // sin las piezas, la carrera sigue con la decoración propia
+  if (!carrera || carrera.deco !== deco) return;
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3();
+  const instancias = (pieza, lista, esc = ESC_RACING) => {
+    if (!lista.length) return;
+    const im = new THREE.InstancedMesh(pieza.geo, pieza.materiales, lista.length), e3 = new THREE.Vector3(esc, esc, esc);
+    lista.forEach((p, i) => { m.compose(v.set(p.x, p.y || 0, p.z), q.setFromAxisAngle(eje, p.h), e3); im.setMatrixAt(i, m); });
+    im.instanceMatrix.needsUpdate = true;
+    im.frustumCulled = false;
+    deco.add(conSombra(im, true, false));
+  };
+  // vallas en los bordillos de la recta de salida, de 0,78 m, rojas y blancas alternas
+  const rojas = [], blancas = [], largoValla = piezas.barrierRed.tam.x * ESC_RACING;
+  let n = 0;
+  for (let d = -50; d < 75; d += largoValla) {
+    const e = puntoRuta(plan.ruta, cum, 10 + d), h = Math.atan2(e.tx, e.tz) + Math.PI / 2;
+    for (const lado of [-1, 1]) {
+      const c = local(e, lado * (e.ancho / 2 + 0.35), 0);
+      if (Math.abs(d) < 3 || !libre(c.x, c.z, e.i, 0.3)) continue;
+      (n++ % 2 ? blancas : rojas).push({ x: c.x, z: c.z, h, y: 0.15 });
+      if (n % 3 === 0) obst.push([c.x, c.z, 0.45]);
+    }
+  }
+  instancias(piezas.barrierRed, rojas); instancias(piezas.barrierWhite, blancas);
+  // torres de pancartas a los lados de la salida y banderas a cuadros sobre el arco
+  const e0 = puntoRuta(plan.ruta, cum, 10), torres = [];
+  for (const lado of [-1, 1]) {
+    const c = local(e0, lado * (luz0 / 2 + 1.6), 6);
+    if (libre(c.x, c.z, e0.i, 0.8)) { torres.push({ x: c.x, z: c.z, h: Math.atan2(e0.tx, e0.tz), lado }); obst.push([c.x, c.z, 0.7]); }
+  }
+  instancias(piezas.bannerTowerRed, torres.filter(t => t.lado < 0)); instancias(piezas.bannerTowerGreen, torres.filter(t => t.lado > 0));
+  instancias(piezas.flagCheckers, [-1, 1].map(lado => { const c = local(e0, lado * luz0 / 2, 0); return { x: c.x, z: c.z, y: 7.35, h: Math.atan2(e0.tx, e0.tz) + Math.PI / 2 }; }), 2.2);
+  // tribuna cubierta (tres piezas) detrás de una de las aceras, si hay sitio libre
+  for (const lado of [1, -1]) {
+    const e = puntoRuta(plan.ruta, cum, 30), off = e.ancho / 2 + Math.max(1, e.acera) + 2.2, trozos = [];
+    for (const a of [-3.1, 0, 3.1]) {
+      const c = local(e, lado * off, a);
+      if (!libre(c.x, c.z, e.i, 1.7)) { trozos.length = 0; break; }
+      trozos.push({ x: c.x, z: c.z, h: Math.atan2(lado * e.tz, -lado * e.tx) + GIRO_TRIBUNA });   // mirando a la calle
+    }
+    if (trozos.length === 3) { instancias(piezas.grandStandCovered, trozos); trozos.forEach(t => obst.push([t.x, t.z, 1.7])); break; }
+  }
+  // carpa junto a los boxes
+  const eb = puntoRuta(plan.ruta, cum, 40);
+  for (const lado of [1, -1]) {
+    const c = local(eb, lado * (eb.ancho / 2 + Math.max(1, eb.acera) + 2.5), 0);
+    if (libre(c.x, c.z, eb.i, 1.7)) { instancias(piezas.tent, [{ x: c.x, z: c.z, h: Math.atan2(eb.tx, eb.tz) }]); obst.push([c.x, c.z, 1.6]); break; }
+  }
+  // conos al pie de los arcos de los checkpoints
+  const conos = [];
+  plan.cortes.slice(0, -1).forEach(D => {
+    const e = puntoRuta(plan.ruta, cum, D - 4);
+    for (const lado of [-1, 1]) for (const a of [-2, 2]) { const c = local(e, lado * (e.ancho / 2 - 0.4), a); conos.push({ x: c.x, z: c.z, h: 0, y: 0.05 }); }
+  });
+  instancias(piezas.cone, conos, 1.25);
 }
 // Público: figuras de peatones que botan y levantan los brazos (botan más cuando pasa el coche o hay fiesta)
 async function crearPublico(lista) {
@@ -4165,6 +4488,225 @@ function actualizarPublico(ahora) {
   }
   P.mallas.forEach(im => { im.instanceMatrix.needsUpdate = true; });
 }
+// --- rivales: cinco pilotos que corren el mismo circuito; salen en parrilla (el jugador, el último), frenan antes de las curvas,
+// adelantan al tráfico cambiando de lado, se les puede empujar y al final hay podio ---
+const N_RIVALES = 5;
+const PILOTOS = ['Lola Márquez', 'Curro Domínguez', 'Rocío Vázquez', 'Manolo Garrido', 'Inma Rengel', 'Paco Cordero', 'Maribel Toscano'];   // inventados
+const MODELOS_RIVALES = ['modelos/rivales/race.glb', 'modelos/rivales/race-future.glb', 'modelos/rivales/sedan-sports.glb', 'modelos/rivales/hatchback-sports.glb'];
+const cocheRival = {};
+function modeloRival(archivo) {
+  if (!cocheRival[archivo]) cocheRival[archivo] = new Promise((res, rej) => new THREE.GLTFLoader().load(archivo, g => res(prepararModeloCoche(g.scene, 0)), undefined, rej));
+  return cocheRival[archivo];
+}
+// Puesto k de la parrilla: filas de dos, cada 8 m, detrás de la línea de salida
+function puestoParrilla(k) {
+  const { plan, cum } = carrera, L = cum[cum.length - 1], p = -12 - Math.floor(k / 2) * 8;
+  const e = puntoRuta(plan.ruta, cum, L + p), lado = k % 2 ? -1 : 1, off = lado * Math.max(0, Math.min(1.7, e.ancho / 2 - 1.1));
+  return { p, off, x: e.x - e.tz * off, z: e.z + e.tx * off, h: Math.atan2(e.tx, e.tz) };
+}
+function etiquetaRival(num, nombre) {
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 64;
+  const g = cv.getContext('2d');
+  g.fillStyle = 'rgba(12,18,26,.8)'; g.beginPath(); g.roundRect ? g.roundRect(2, 8, 252, 48, 14) : g.rect(2, 8, 252, 48); g.fill();
+  g.fillStyle = '#f5b041'; g.beginPath(); g.arc(32, 32, 20, 0, 6.3); g.fill();
+  g.fillStyle = '#111'; g.font = '900 26px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(num, 32, 33);
+  g.fillStyle = '#fff'; g.font = '700 24px system-ui, sans-serif'; g.textAlign = 'left'; g.fillText(nombre, 62, 33, 186);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthWrite: false, transparent: true }));
+  sp.scale.set(3.2, 0.8, 1); sp.position.y = 2.6;
+  return sp;
+}
+async function crearRivales() {
+  const nombres = PILOTOS.slice().sort(() => Math.random() - 0.5).slice(0, N_RIVALES);
+  const rivales = [];
+  for (let i = 0; i < N_RIVALES; i++) {
+    let modelo;
+    try { modelo = (await modeloRival(MODELOS_RIVALES[i % MODELOS_RIVALES.length])).clone(true); } catch (err) { modelo = construirCoche(new THREE.Color().setHSL(i / N_RIVALES, 0.7, 0.5).getHex()); }
+    if (!carrera || carrera.modo !== 'circuito') return;
+    const malla = new THREE.Group(), cuerpo = new THREE.Group();
+    cuerpo.add(conSombra(modelo, true, false));
+    const caja = new THREE.Box3().setFromObject(modelo), frenos = [];
+    for (const lado of [-1, 1]) {
+      const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: texturaHalo(), color: 0xff2a1a, transparent: true, opacity: 0.1, depthWrite: false, blending: THREE.AdditiveBlending }));
+      f.scale.set(1, 0.6, 1); f.position.set(lado * ((caja.max.x - caja.min.x) / 2 - 0.3), caja.min.y + (caja.max.y - caja.min.y) * 0.45, caja.min.z - 0.05);
+      cuerpo.add(f); frenos.push(f);
+    }
+    const etiqueta = etiquetaRival(i + 2, nombres[i]);
+    malla.add(cuerpo, etiqueta, crearSombraCoche());
+    scene.add(malla);
+    const puesto = puestoParrilla(i);
+    rivales.push({ nombre: nombres[i], num: i + 2, malla, cuerpo, etiqueta, frenos, p: puesto.p, p0: puesto.p, v: 0, off: puesto.off, offObj: puesto.off || (i % 2 ? -1.4 : 1.4),
+      habil: 0.86 + Math.random() * 0.1 + i * 0.006, terminado: false, tFin: 0, ex: 0, ez: 0, evx: 0, evz: 0, giro: 0, frena: false, tCambio: 0, ancho: 7, tAncho: 0 });
+  }
+  carrera.rivales = rivales;
+  colocarRivales(0);
+}
+// Progreso del jugador en la carrera (m): vueltas hechas más lo recorrido de la vuelta, buscando su posición en la ruta
+function progresoJugador() {
+  const { plan, cum } = carrera, L = cum[cum.length - 1], k = carrera.siguiente, ruta = plan.ruta;
+  const tramo = (a, b) => { const ia = Math.max(0, indiceRuta(cum, a) - 1), ib = Math.min(ruta.length - 1, indiceRuta(cum, b) + 1); const r = distanciaPolilinea(ruta, coche.x, coche.z, ia, ib); return r; };
+  const s = r => { const a = ruta[r.k], b = ruta[r.k + 1] || a, q = puntoEnSeg(coche.x, coche.z, a[0], a[1], b[0], b[1]); return cum[r.k] + Math.hypot(q[0] - a[0], q[1] - a[1]); };
+  const r = tramo(k ? plan.cortes[k - 1] : 0, plan.cortes[k]);
+  let d = s(r);
+  if (k === 0) {   // antes de la primera línea: la parrilla está al final de la vuelta
+    const r2 = tramo(plan.cortes[plan.cortes.length - 2], L);
+    if (r2.d < r.d) d = s(r2) - L;
+  }
+  return carrera.vueltas * L + d;
+}
+// Qué tiene delante un rival (tráfico, jugador u otro rival) en su lado de la calzada: { d, v } (metros y velocidad de lo que va delante)
+function bloqueoRival(r) {
+  const fx = Math.sin(r.h), fz = Math.cos(r.h);
+  let d = Infinity, v = 0;
+  const mira = (x, z, vel) => {
+    const dx = x - r.x, dz = z - r.z, a = dx * fx + dz * fz;
+    if (a > 1 && a < 32 && Math.abs(dx * fz - dz * fx) < 1.9 && a < d) { d = a; v = vel; }
+  };
+  for (const o of trafico) mira(o.x, o.z, Math.hypot(o.vx || 0, o.vz || 0));
+  mira(coche.x, coche.z, Math.abs(coche.v));
+  for (const o of carrera.rivales) if (o !== r && o.x !== undefined) mira(o.x, o.z, o.v);
+  return { d, v };
+}
+function colocarRivales(dt) { for (const r of carrera.rivales) colocarRival(r, dt); }
+function colocarRival(r, dt) {
+  const { plan, cum } = carrera, L = cum[cum.length - 1];
+  {
+    const pr = ((r.p % L) + L) % L, e = enPolilinea(plan.ruta, cum, pr), ad = enPolilinea(plan.ruta, cum, (pr + 5) % L);
+    const ahora = performance.now() / 1000;
+    if (ahora - r.tAncho > 0.5) { r.tAncho = ahora; const c = calleMasCercana(zona.rejSeg, zona.tramos, e.x, e.z, 15); r.ancho = c ? c.t.ancho : 6; }
+    const max = Math.max(0, r.ancho / 2 - 1.1);
+    r.off += (Math.max(-max, Math.min(max, r.offObj)) - r.off) * Math.min(1, dt * 1.5);
+    // empujones: se desplaza y vuelve poco a poco a su trazada
+    r.ex += r.evx * dt; r.ez += r.evz * dt;
+    const roz = Math.exp(-3 * dt); r.evx *= roz; r.evz *= roz;
+    const vuelve = Math.exp(-0.8 * dt); r.ex *= vuelve; r.ez *= vuelve; r.giro *= Math.exp(-2.5 * dt);
+    r.x = e.x - e.tz * r.off + r.ex; r.z = e.z + e.tx * r.off + r.ez;
+    const hx = ad.x - ad.tz * r.off - (e.x - e.tz * r.off), hz = ad.z + ad.tx * r.off - (e.z + e.tx * r.off);
+    r.h = Math.atan2(hx, hz) + r.giro;
+    r.malla.position.set(r.x, 0, r.z);
+    r.malla.rotation.y = r.h;
+    r.cuerpo.rotation.z = Math.max(-0.06, Math.min(0.06, (r.v * (r.dh || 0)) * 0.006));
+    r.etiqueta.visible = Math.hypot(r.x - camara.position.x, r.z - camara.position.z) < 90;
+    r.frenos.forEach(f => { f.material.opacity = r.frena ? 0.95 : 0.12; });
+  }
+}
+function actualizarRivales(dt, ahora) {
+  if (!carrera || !carrera.rivales) return;
+  const { plan, cum } = carrera, L = cum[cum.length - 1], perfil = carrera.perfil, total = VUELTAS * L;
+  const pj = carrera.progreso ?? 0;
+  for (const r of carrera.rivales) {
+    if (estado === 'corriendo' || estado === 'fin') {
+      let objetivo;
+      if (r.terminado) objetivo = Math.max(0, 12 - (r.p - total) * 0.3);   // tras la meta, frena y se para
+      else {
+        // velocidad de la curva que viene, su habilidad, y un poco de «goma» para que la carrera esté reñida
+        const k = indiceRuta(cum, ((r.p % L) + L) % L), dif = r.p - pj;
+        const goma = dif > 150 ? 0.9 : dif < -150 ? 1.08 : 1 - dif / 150 * 0.05;
+        objetivo = perfil[k] * r.habil * goma;
+        const b = bloqueoRival(r);
+        if (b.d < 26 && ahora - r.tCambio > 1.6) { r.offObj = -(r.offObj || 1.4); r.tCambio = ahora; }   // intenta adelantar por el otro lado
+        if (b.d < 14) objetivo = Math.min(objetivo, b.v + (b.d - 6) * 0.4);
+      }
+      const antes = r.v;
+      r.v += Math.max(-9 * dt, Math.min(4.6 * dt * Math.max(0.2, 1 - r.v / 48), objetivo - r.v));
+      r.v = Math.max(0, r.v);
+      r.frena = r.v < antes - 0.02;
+      const hAntes = r.h;
+      r.p += r.v * dt;
+      if (!r.terminado && r.p >= total && estado === 'corriendo') {
+        r.terminado = true; r.tFin = ahora - tInicio;
+        mostrarAviso(`🏁 ${r.nombre} cruza la meta`, 1.8);
+      }
+      colocarRival(r, dt);
+      r.dh = dt > 0 && hAntes !== undefined ? (r.h - hAntes) / dt : 0;
+    }
+  }
+  if (estado !== 'corriendo' && estado !== 'fin') colocarRivales(dt);
+  // motor del rival más cercano
+  let cerca = null, dmin = Infinity;
+  for (const r of carrera.rivales) { const d = Math.hypot(r.x - coche.x, r.z - coche.z); if (d < dmin) { dmin = d; cerca = r; } }
+  if (cerca) Sonido.rival(dmin, cerca.v);
+}
+// Contacto con los rivales (dos círculos cada uno, como el tráfico)
+function contactoRivales(x, z, R) {
+  let mejor = null;
+  if (!carrera || !carrera.rivales) return null;
+  for (const r of carrera.rivales) {
+    if (r.x === undefined || (r.x - x) ** 2 + (r.z - z) ** 2 > 49) continue;
+    const fx = Math.sin(r.h), fz = Math.cos(r.h);
+    for (const off of [1.15, -1.15]) {
+      const k = contactoDesde(x, z, r.x + fx * off, r.z + fz * off, R + 0.95, false);
+      if (k && (!mejor || k.prof > mejor.prof)) { k.tipo = 'coche'; k.rival = r; k.off = off; mejor = k; }
+    }
+  }
+  return mejor;
+}
+// Clasificación: los que han terminado por tiempo, y después los demás por lo que llevan recorrido
+function clasificacion() {
+  const L = carrera.cum[carrera.cum.length - 1], total = VUELTAS * L;
+  const lista = carrera.rivales.map(r => ({ nombre: r.nombre, num: r.num, rival: r, terminado: r.terminado, t: r.tFin, p: r.p, estimado: r.estimado }));
+  lista.push({ nombre: 'Tú', num: 1, jugador: true, terminado: carrera.vueltas >= VUELTAS, t: carrera.tJugador || 0, p: carrera.progreso ?? 0 });
+  return lista.sort((a, b) => (a.terminado && b.terminado ? a.t - b.t : a.terminado ? -1 : b.terminado ? 1 : b.p - a.p));
+}
+// --- podio: tres escalones con los tres primeros coches encima, fuegos, confeti y la tabla de tiempos ---
+function mostrarPodio(lista) {
+  estado = 'podio';
+  document.body.classList.add('podio');
+  const { plan, cum } = carrera, e = puntoRuta(plan.ruta, cum, 35), g = new THREE.Group();
+  g.position.set(e.x, 0, e.z);
+  g.rotation.y = Math.atan2(e.tx, e.tz) + Math.PI;   // de cara a quien llega por la recta
+  const ESCALONES = [[0, 1.4, '#f1c40f', '1'], [-4.8, 0.95, '#bdc3c7', '2'], [4.8, 0.6, '#cd7f32', '3']];
+  lista.slice(0, 3).forEach((c, i) => {
+    const [x, h, color, num] = ESCALONES[i];
+    const lados = new THREE.MeshLambertMaterial({ color: 0xf4f4f0 }), cara = new THREE.MeshLambertMaterial({ map: texturaTexto(num, '#f4f4f0', color, false, 128, 128) });
+    const tapa = new THREE.MeshLambertMaterial({ color });
+    const bloque = new THREE.Mesh(new THREE.BoxGeometry(4.6, h, 5.4), [lados, lados, tapa, lados, cara, lados]);
+    bloque.position.set(x, h / 2, 0);
+    g.add(bloque);
+    // el coche de cada uno encima de su escalón, mirando al frente
+    let modelo = null;
+    if (c.jugador) { const m = cuerpoCoche.children.find(o => o !== lucesCoche.grupo); modelo = m && m.clone(true); }
+    else if (c.rival) { const m = c.rival.cuerpo.children.find(o => !o.isSprite); modelo = m && m.clone(true); }
+    if (modelo) { const h0 = new THREE.Group(); h0.add(modelo); h0.position.set(x, h, 0); h0.rotation.y = 0.35 * (i === 1 ? 1 : i === 2 ? -1 : 0); g.add(h0); }
+    const et = etiquetaRival(i + 1, c.jugador ? '¡Tú!' : c.nombre);
+    et.position.set(x, h + 3.2, 0); et.scale.set(4, 1, 1);
+    g.add(et);
+  });
+  conSombra(g);
+  scene.add(g);
+  carrera.podio = g;
+  cocheMesh.visible = false;
+  for (const r of carrera.rivales) r.malla.visible = false;
+  for (const t of carrera.talleres) t.grupo.visible = false;   // el letrero de los boxes quedaría detrás del podio
+  carrera.tPodio = performance.now() / 1000;
+  carrera.centroPodio = new THREE.Vector3(e.x, 1.5, e.z);
+  carrera.frentePodio = [-e.tx, -e.tz];   // la cámara mira el podio desde la recta, por donde se llega
+  Sonido.aplausos(6);
+  // tabla de resultados
+  const ganador = lista[0].t;
+  $('podioTabla').innerHTML = lista.map((c, i) => `<tr class="${c.jugador ? 'yo' : ''}"><td>${['🥇', '🥈', '🥉'][i] || i + 1 + 'º'}</td><td>${c.jugador ? 'Tú' : c.nombre}</td>` +
+    `<td>${formato(c.t)}${c.estimado ? '*' : ''}</td><td>${i ? '+' + (c.t - ganador >= 60 ? formato(c.t - ganador) : (c.t - ganador).toFixed(1) + ' s') : ''}</td></tr>`).join('');
+  const pos = lista.findIndex(c => c.jugador) + 1;
+  $('podioTitulo').textContent = pos === 1 ? '🏆 ¡Has ganado!' : pos <= 3 ? `🏆 ¡${pos}º puesto, al podio!` : `Has quedado ${pos}º de ${lista.length}`;
+  $('podioPie').textContent = (lista.some(c => c.estimado) ? '* Tiempo estimado: aún no había terminado. ' : '') + `Daño del coche: ${Math.round(coche.dano.total)} % — ${valoracionDano(Math.round(coche.dano.total))}`;
+  $('podioPanel').style.display = 'flex';
+}
+function actualizarPodio(ahora) {
+  if (estado !== 'podio' || !carrera || !carrera.centroPodio) return;
+  // de frente, desde la calzada (donde no hay casas), con un ligero vaivén y acercándose poco a poco
+  const c = carrera.centroPodio, t = ahora - carrera.tPodio, [fx, fz] = carrera.frentePodio;
+  const a = Math.sin(t * 0.35) * 0.35, dist = 15 - Math.min(4, t * 0.4), ca = Math.cos(a), sa = Math.sin(a);
+  camara.position.set(c.x + (fx * ca - fz * sa) * dist, 4.8, c.z + (fz * ca + fx * sa) * dist);
+  camara.lookAt(c.x + fz * 4.5, 2.2, c.z - fx * 4.5);   // un poco a la derecha: el podio queda a la izquierda de la tabla
+  if (Math.random() < 0.025) { Efectos.fuegos(c.x + (Math.random() - 0.5) * 30, 26 + Math.random() * 12, c.z + (Math.random() - 0.5) * 30); Sonido.estallido(); }
+  if (Math.random() < 0.06) Efectos.papeles(c.x + (Math.random() - 0.5) * 8, 6, c.z + (Math.random() - 0.5) * 6, 10);
+}
+$('podioSeguir').addEventListener('click', () => {
+  $('podioPanel').style.display = 'none';
+  document.body.classList.remove('podio');
+  mostrarMenu($('podioTitulo').textContent + '. ' + $('podioPie').textContent);
+});
+
 // --- talleres: un aro azul con una llave flotando; parado (o despacio) dentro, el coche se arregla ---
 let texturaLlaveCache = null;
 function crearTaller(x, z, rotulo) {
@@ -4229,6 +4771,7 @@ function tallerMasCercano() {
 async function nuevaCarrera() {
   if (!zona) return;
   Sonido.iniciar();
+  Restos.cargar();
   $('estado').textContent = 'Cargando el coche…';
   await montarCoche(cocheElegido);
   const rng = mulberry32((Date.now() & 0xffffff) || 1);
@@ -4256,6 +4799,13 @@ async function nuevaCarrera() {
     carrera.talleres.push(crearTaller(box.x, box.z, 'BOXES'));
     pintarCheckpoints();
     ponerPierna();
+    // parrilla: el jugador sale el último; los rivales delante
+    carrera.perfil = perfilVelocidad(plan.ruta, cum);
+    const yo = puestoParrilla(N_RIVALES);
+    Object.assign(coche, { x: yo.x, z: yo.z, h: yo.h });
+    carrera.progreso = yo.p;
+    $('estado').textContent = 'Llegan los rivales…';
+    await crearRivales();
   } else {
     Object.assign(carrera, { paradas: 0, usados: new Set(), visitados: [[plan.inicio.x, plan.inicio.z]], nodoActual: plan.checkpoints[plan.checkpoints.length - 1].nodo });
     siguienteDestino(rng);
@@ -4271,8 +4821,10 @@ async function nuevaCarrera() {
 }
 // Circuito: flechas del tramo que va del último checkpoint al siguiente
 function ponerPierna() {
-  const { plan, cum } = carrera, k = carrera.siguiente;
-  Ruta.poner(subPolilinea(plan.ruta, cum, k ? plan.cortes[k - 1] : 0, plan.cortes[k]), plan.checkpoints[k].nodo);
+  const { plan, cum } = carrera, k = carrera.siguiente, L = cum[cum.length - 1];
+  let pts = subPolilinea(plan.ruta, cum, k ? plan.cortes[k - 1] : 0, plan.cortes[k]);
+  if (k === 0) pts = subPolilinea(plan.ruta, cum, Math.max(plan.cortes[plan.cortes.length - 2], L - 50), L).concat(pts.slice(1));   // con la recta de la parrilla
+  Ruta.poner(pts, plan.checkpoints[k].nodo);
 }
 // Exploración: el siguiente destino, por calles que aún no se han recorrido
 function siguienteDestino(rng = Math.random) {
@@ -4351,6 +4903,7 @@ function actualizarCarrera(ahora, dt) {
     }
     return;
   }
+  if (carrera.rivales) carrera.progreso = progresoJugador();
   if (carrera.modo === 'exploracion') {
     const D = carrera.destino;
     if (D && Math.hypot(coche.x - D.x, coche.z - D.z) < 22) {
@@ -4394,6 +4947,16 @@ function terminar(ahora) {
   mostrarAviso(`🏁 ¡META! ${formato(total)}`, 5);
   const lista = carrera.tiempos.map((t, i) => `V${i + 1}: ${formato(t)}`).join(' · ');
   const danoFinal = Math.round(coche.dano.total);
+  carrera.tJugador = total;
+  if (carrera.rivales) {
+    // los que aún no han llegado: su tiempo se estima con lo que les falta a su velocidad media
+    const L = carrera.cum[carrera.cum.length - 1];
+    for (const r of carrera.rivales) if (!r.terminado) { r.tFin = llegadaEstimada(total, r.p - r.p0, VUELTAS * L - r.p); r.estimado = true; r.terminado = true; }
+    const pos = clasificacion().findIndex(c => c.jugador) + 1;
+    mostrarAviso(`🏁 ¡META! ${pos}º · ${formato(total)}`, 4.5);
+    setTimeout(() => { if (estado === 'fin') mostrarPodio(clasificacion()); }, 4500);
+    return;
+  }
   setTimeout(() => { if (estado === 'fin') mostrarMenu(`🏁 Carrera terminada en ${formato(total)}${carrera.penal ? ` (con ${carrera.penal} s de grúa)` : ''}. ${lista}. Daño del coche: ${danoFinal} % — ${valoracionDano(danoFinal)}`); }, 5000);
 }
 function valoracionDano(d) {
@@ -4416,6 +4979,7 @@ function contactoCoche(x, z, R) {
   let c = conTipo(contactoPoligonos(zona.edif, zona.rejilla, x, z, R), 'casa');
   c = masHondo(c, contactoMundo(zona.mundo, x, z, R));
   if (carrera) for (const [ox, oz, r] of carrera.obstaculos) c = masHondo(c, conTipo(contactoDesde(x, z, ox, oz, R + r, false), 'valla'));   // pancartas y arcos de la carrera
+  c = masHondo(c, contactoRivales(x, z, R));
   return masHondo(c, contactoTrafico(x, z, R));
 }
 function obstaculo(x, z, R = RADIO_COCHE) { return !!contactoCoche(x, z, R); }
@@ -4437,7 +5001,21 @@ function resolverChoques(c) {
       algo = true;
       const Vx = fx * c.v + c.sx, Vz = fz * c.v + c.sz;
       let r;
-      if (k.tipo === 'coche') {
+      if (k.rival) {
+        // contra un rival: los dos se reparten el golpe; el rival pierde velocidad, se desplaza de su trazada y da un coletazo
+        const o = k.rival, m1 = FISICA.masa, m2 = 1200, ofx = Math.sin(o.h), ofz = Math.cos(o.h);
+        const vn = (Vx - (ofx * o.v + o.evx)) * k.nx + (Vz - (ofz * o.v + o.evz)) * k.nz;
+        c.x += k.nx * k.prof * 0.5; c.z += k.nz * k.prof * 0.5;
+        o.ex -= k.nx * k.prof * 0.5; o.ez -= k.nz * k.prof * 0.5;
+        if (vn < 0) {
+          const j = -(1 + 0.3) * vn / (1 / m1 + 1 / m2), dvx = -j / m2 * k.nx, dvz = -j / m2 * k.nz;
+          const largo = dvx * ofx + dvz * ofz;
+          o.v = Math.max(0, o.v + largo);
+          o.evx += dvx - ofx * largo; o.evz += dvz - ofz * largo;
+          o.giro = Math.max(-0.6, Math.min(0.6, o.giro - (ofx * k.off * dvz - ofz * k.off * dvx) * 0.08));
+          r = { vx: Vx + j / m1 * k.nx, vz: Vz + j / m1 * k.nz, impacto: -vn, roce: 0 };
+        }
+      } else if (k.tipo === 'coche') {
         // choque entre dos coches de masa parecida: se reparten el golpe; el de tráfico sale despedido y se queda parado
         const o = k.coche, m1 = FISICA.masa, m2 = 1300;
         const vn = (Vx - o.vx) * k.nx + (Vz - o.vz) * k.nz;
@@ -4517,6 +5095,7 @@ function efectoGolpe(g) {
   if (cuanto > 0 && g.nx !== undefined && !coche.destrozado) {
     const fx = Math.sin(coche.h), fz = Math.cos(coche.h), zonaG = zonaGolpe(fx, fz, g.nx, g.nz);
     sumarDano(coche.dano, zonaG, cuanto);
+    if (g.impacto > 7 && g.tipo !== 'bordillo' && g.tipo !== 'agua') Restos.lanzar(g.x, g.z, g.nx, g.nz, zonaG, g.impacto);
     if (g.tipo !== 'bordillo') Abolladuras.abollar(new THREE.Vector3(g.x, 0.65, g.z), new THREE.Vector3(g.nx, -0.15, g.nz).normalize(), Math.min(1, cuanto / 25));
     const NOMBRE = { delante: 'delantero', detras: 'trasero', izq: 'izquierdo', der: 'derecho' };
     if (cuanto > 6) mostrarAviso(`Golpe ${NOMBRE[zonaG]} · daño ${Math.round(coche.dano.total)} %`, 1.3);
@@ -4713,7 +5292,14 @@ function actualizarHUD(ahora) {
     let html;
     if (carrera.modo === 'circuito') {
       const cp = carrera.cps[carrera.siguiente], dist = Math.round(Math.hypot(coche.x - cp.x, coche.z - cp.z));
-      html = `Vuelta ${Math.min(carrera.vueltas + 1, VUELTAS)} / ${VUELTAS}<br>${formato(t)}<br>` +
+      let pos = '';
+      if (carrera.rivales) {
+        const cl = clasificacion(), i = cl.findIndex(c => c.jugador), delante = cl[i - 1];
+        pos = `<span id="posicion">${i + 1}º/${cl.length}</span>`;
+        if (delante && !delante.terminado) pos += ` <small>tras ${delante.nombre.split(' ')[0]}: ${Math.max(0, Math.round(delante.p - cl[i].p))} m</small>`;
+        pos += '<br>';
+      }
+      html = pos + `Vuelta ${Math.min(carrera.vueltas + 1, VUELTAS)} / ${VUELTAS}<br>${formato(t)}<br>` +
         `${carrera.siguiente === carrera.cps.length - 1 ? 'Meta' : 'Checkpoint ' + (carrera.siguiente + 1)}: ${dist} m${flecha(cp.x, cp.z)}`;
     } else {
       const D = carrera.destino;
@@ -4774,8 +5360,9 @@ function bucle() {
     actualizarArboles();
     if (estado === 'corriendo') Ruta.actualizar(ahora, dt);
     actualizarPublico(ahora);
+    actualizarRivales(dt, ahora);
     actualizarMalla(dt);
-    actualizarCamara(dt);
+    if (estado === 'podio') actualizarPodio(ahora); else actualizarCamara(dt);
     actualizarHUD(ahora);
     if (carrera) {
       const animar = (g, rapido) => { g.children[0].material.uniforms.uT.value = ahora % 1000; g.children[1].rotation.y = ahora * (rapido ? 1.2 : 0.3); };
@@ -4788,8 +5375,10 @@ function bucle() {
     }
   }
   const enMarcha = coche && (estado === 'corriendo' || estado === 'cuenta' || estado === 'fin');
+  if (!enMarcha) Sonido.callarRival();
   Sonido.actualizar(enMarcha ? { rpm: coche.rpm, gas: coche.gas, v: Math.abs(coche.v), derrape: coche.derrape, roce: coche.roce, cambio: coche.cambio > 0, acera: coche.acera, dano: coche.dano.total / 100, apagado: coche.destrozado } : null);
   Efectos.actualizar(dt, camara, renderer);
+  Restos.actualizar(dt);
   cielo.position.copy(camara.position);
   renderer.render(scene, camara);
 }

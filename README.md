@@ -11,10 +11,17 @@ Carrera de coches por Huelva
 
 ## Modos de juego
 
-- **Circuito · 3 vueltas**: un circuito generado sobre las calles de la zona, con tres checkpoints y la meta. Tiene decoración de carrera: un arco de salida y meta con un semáforo de cinco luces que se encienden en la cuenta atrás y se ponen verdes al «¡YA!», línea a cuadros, pancartas y público que salta cuando pasas, arcos hinchables de colores en cada checkpoint y unos **boxes** a 40 m de la salida. Al cruzar la meta en la última vuelta hay fuegos artificiales y aplausos, y el resumen dice los tiempos y cómo ha quedado el coche.
+- **Circuito · 3 vueltas**: un circuito generado sobre las calles de la zona, con tres checkpoints y la meta, **contra cinco rivales**. Tiene decoración de carrera: un arco de salida y meta con un semáforo de cinco luces que se encienden en la cuenta atrás y se ponen verdes al «¡YA!», línea a cuadros, pancartas y público que salta cuando pasas, arcos hinchables de colores en cada checkpoint y unos **boxes** a 40 m de la salida. Al cruzar la meta en la última vuelta hay fuegos artificiales y aplausos, y el resumen dice los tiempos y cómo ha quedado el coche.
+  Los rivales (pilotos inventados, con su nombre flotando encima del coche) salen en parrilla de dos en dos; tú sales el último. Siguen la vuelta frenando antes de cada curva según lo cerrada que sea, intentan adelantar al tráfico cambiando de lado y se les puede empujar: pierden velocidad, se salen de su trazada y vuelven a ella. Para que la carrera esté reñida, el que va muy por delante afloja un poco y el que va muy por detrás aprieta. Arriba a la derecha se ve tu puesto (por ejemplo, 3º/6) y a cuántos metros tienes al de delante, y se oye el motor del rival más cercano.
+
+  Al cruzar la meta en la última vuelta hay **podio**: tres escalones de oro, plata y bronce con los coches de los tres primeros encima, fuegos artificiales, confeti y aplausos, y la tabla con el puesto, el tiempo y la diferencia de cada uno. A los rivales que aún no han llegado se les estima el tiempo con lo que les falta a su velocidad media (van con *).
 - **Exploración**: una ruta por la ciudad de destino en destino, sin vueltas. Cada destino está a unos 350–900 m, lejos de los ya visitados y por calles que aún no has recorrido; arriba a la derecha se ven la calle del destino, la distancia, las paradas y los kilómetros. Es infinita: se termina desde el menú.
 
 La ruta se marca con flechas y una línea **verdes** en la calzada, solo las del tramo actual y desde el coche en adelante. Si te sales del camino, a los pocos segundos se calcula cómo volver desde donde estás y las flechas y la línea se ponen **rojas**, con un aviso; al volver a la ruta vuelven a ser verdes.
+
+## Casas que cortan calles
+
+Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 100 de 32 382.
 
 ## Daño del coche
 
@@ -41,6 +48,18 @@ Cada golpe suma daño según la velocidad y lo que golpeas (una casa o un árbol
 - **Fuentes decoradas** en las rotondas que lo parecen: el juego mira la foto aérea de cada isleta y, si es agua azulada o un disco claro de espuma, o si el mapa marca agua dentro, pone una fuente con su vaso de piedra, una fuente de dos tazas en el centro, surtidores en arco (en las grandes), cortinas de agua y un anillo de flores. Suena el agua al acercarte, y de noche se iluminan con luces de colores que van cambiando. En la zona incluida salen 8 fuentes.
 
 Todo esto choca con el coche como las farolas y los árboles.
+
+## Detalles reales
+
+- **Carriles de verdad**: el número de carriles de cada calle sale de OpenStreetMap (unas mil calles lo tienen). Se pintan las líneas entre carriles (discontinuas) y la central (doble continua si hay dos o más carriles por sentido), y el tráfico circula por un carril concreto.
+- **Más vehículos en el tráfico**: furgonetas de reparto, camionetas, camiones de basura, ambulancias y camiones de bomberos, menos frecuentes que los turismos y con su largo real (de 5 a 6,5 m).
+- **Restos en los choques**: en un golpe fuerte salen volando parachoques, puertas, chapas, alerones, alguna rueda y tuercas; rebotan, se quedan en la calzada y desaparecen a los 40 s.
+- **Golpes grabados**: chapa, metal, cristales, madera y plástico grabados de verdad, según contra qué choques (con un golpe grave sintetizado debajo). Si el navegador no puede reproducir `.ogg` (iPhone antiguo), se oyen los sintetizados de antes.
+- **Decoración de carrera**: vallas rojas y blancas en los bordillos de la recta de salida, torres con pancartas, banderas a cuadros sobre el arco, una tribuna cubierta si cabe, una carpa en los boxes y conos en los checkpoints.
+
+Las piezas son de Kenney (kenney.nl), con licencia CC0: Car Kit 3.1 (coches de los rivales en `modelos/rivales/`, vehículos de `modelos/trafico/`, restos en `modelos/restos/` y el cono), Racing Kit (`modelos/carrera/`) e Impact Sounds (`sonidos/`). Cada carpeta lleva su licencia; los modelos del Car Kit leen su textura de `Textures/colormap.png`.
+
+Desde el entorno en el que se ha hecho esto no se podía llegar a Poly Haven, ambientCG ni a la API de Overpass de OpenStreetMap (la política de red los bloquea), así que no hay texturas ni cielos fotográficos de esos repositorios.
 
 ## Hora del día
 
@@ -85,6 +104,8 @@ Activa GitHub Pages en Settings → Pages, eligiendo la rama del juego y la carp
 ## Coches
 
 En la pantalla de inicio se elige el coche: el básico (una caja roja), el **SUV compacto**, uno de la galería, CarConcept o ToyCar.
+
+Los rivales del circuito llevan coches de carreras y deportivos de Kenney Car Kit 3.1 (CC0): `race`, `race-future`, `sedan-sports` y `hatchback-sports`.
 
 El SUV compacto (`modelos/coches/suv-compacto.glb`) lo ha aportado el autor del juego. Es el modelo más detallado (58 500 triángulos), así que solo lo conduce el jugador, no sale en el tráfico. Sus propios pilotos LED se encienden al frenar y sus faros LED de noche.
 
