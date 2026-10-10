@@ -9,6 +9,24 @@ Carrera de coches por Huelva
 2. La zona se carga sola desde `zona-huelva.zip`, que va junto al juego (es la zona exportada por «Paseo por el relieve»). Si abres el HTML desde el disco y no la encuentra, elige el zip con el selector.
 3. Elige el modo y la hora del día y pulsa **Nueva partida**.
 
+## Otros lugares
+
+El juego trae Huelva, pero se puede correr en cualquier sitio de España con el **Paseo por el relieve** (`paseo.html`, la misma página de meteohuelva.es, copiada aquí):
+
+1. En el menú del juego, en **Lugar**, pulsa **➕ Otro lugar**: se abre el Paseo.
+2. Busca el pueblo o mueve el mapa, elige la zona y ábrela en 3D (el Paseo descarga alturas, foto aérea, OpenStreetMap y casas del Catastro).
+3. Pulsa **🏁 Jugar aquí** (arriba): el Paseo prepara la zona como si fuera a descargar el .zip, la guarda en este navegador y abre el juego con ella.
+
+Las zonas traídas así (o abiertas con **📂 Abrir zip**) quedan en la fila **Lugar** del menú, con su nombre, y se pueden borrar con ✕. El juego recuerda el último lugar elegido. Al cambiar de lugar, el centro del mapa, el título y las pancartas de la carrera pasan a ser los de ese sitio.
+
+El Paseo y el juego tienen que estar en la misma web (por ejemplo, los dos en GitHub Pages) para compartir las zonas del navegador. Las casas del Catastro se piden a través de `catastro.php`, que está en meteohuelva.es porque GitHub Pages no ejecuta PHP: ese archivo tiene que dejar que lo llame la web del juego, con esta línea al principio:
+
+```php
+header('Access-Control-Allow-Origin: https://narcimarquez-eng.github.io');
+```
+
+Sin ella, el Paseo en GitHub Pages saca las casas de OpenStreetMap (menos y sin colores). Las zonas de más de 25 km² también salen sin el Catastro, y las muy grandes pueden ir lentas en el móvil (el menú avisa).
+
 ## Modos de juego
 
 - **Circuito · 3 vueltas**: un circuito generado sobre las calles de la zona, con tres checkpoints y la meta, **contra cinco rivales**. Tiene decoración de carrera: un arco de salida y meta con un semáforo de cinco luces que se encienden en la cuenta atrás y se ponen verdes al «¡YA!», línea a cuadros, pancartas y público que salta cuando pasas, arcos hinchables de colores en cada checkpoint y unos **boxes** a 40 m de la salida. Al cruzar la meta en la última vuelta hay fuegos artificiales y aplausos, y el resumen dice los tiempos y cómo ha quedado el coche.

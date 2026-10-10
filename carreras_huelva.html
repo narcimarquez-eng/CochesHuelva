@@ -82,6 +82,11 @@
   .selector{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
   .selector button{font-size:15px;padding:8px 13px;background:#3a4856;color:#fff}
   .selector button.activo{background:var(--ambar);color:#1b1b1b}
+  .lugar{display:inline-flex;align-items:stretch;border-radius:10px;overflow:hidden}
+  .lugar button{border-radius:0}
+  .lugar button.borrar{padding:6px 9px;background:#2b3641;color:#ff8f86;font-size:13px}
+  #lugares a.btnOtro{display:inline-block;font-size:15px;padding:8px 13px;border-radius:10px;background:#1d78d6;color:#fff;font-weight:600;text-decoration:none}
+  @media (max-height:520px){#lugares a.btnOtro{padding:6px 11px;font-size:14px}}
   #botonesMenu{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
   #btnSeguir{background:#2ecc71}
   #dano{display:flex;align-items:center;gap:4px;font-size:12px;flex:none}
@@ -174,10 +179,11 @@
   </div>
 </div>
 <div id="pantalla">
-  <h1>Carreras por Huelva</h1>
+  <h1 id="titulo">Carreras por Huelva</h1>
   <p class="intro">Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
   <div id="estado"></div>
+  <div class="opcion"><span>Lugar</span><div class="selector" id="lugares"></div></div>
   <div class="opcion"><span>Modo</span><div class="selector" id="modos">
     <button data-modo="circuito">🏁 Circuito · 3 vueltas</button><button data-modo="exploracion">🧭 Exploración</button>
   </div></div>
@@ -197,9 +203,20 @@
 <script>
 /*CORE-START*/
 // ---------- Lógica pura (sin Three.js): proyección, calles, grafo, rutas, colisiones ----------
-const ORIGEN = { lat: 37.2599535, lon: -6.9401955 };   // centro de la zona (LEEME.txt)
+let ORIGEN = { lat: 37.2599535, lon: -6.9401955 };   // centro de la zona (el de Huelva hasta que se carga otra)
 const K_LAT = 110540;
-const K_LON = 111320 * Math.cos(ORIGEN.lat * Math.PI / 180);
+let K_LON = 111320 * Math.cos(ORIGEN.lat * Math.PI / 180);
+// Cada zona tiene su centro: las coordenadas en metros se cuentan desde él
+function ponerOrigen(lat, lon) {
+  ORIGEN = { lat, lon };
+  K_LON = 111320 * Math.cos(lat * Math.PI / 180);
+}
+// Centro de unas calles en GeoJSON (para zips sin zona.json)
+function centroDeCalles(geo) {
+  let n = 0, la = 0, lo = 0;
+  for (const f of geo.features) if (f.geometry && f.geometry.type === 'LineString') for (const c of f.geometry.coordinates) { lo += c[0]; la += c[1]; n++; }
+  return n ? { lat: la / n, lon: lo / n } : null;
+}
 const TAM_CELDA = 25;
 const RADIO_COCHE = 1.5;
 const CONDUCIBLES = new Set(['motorway','motorway_link','trunk','trunk_link','primary','primary_link',
@@ -3374,7 +3391,7 @@ function crearSombraCoche(largo = 5, ancho = 2.7) {
 }
 
 function construirMallaZona() {
-  if (mallaZona) scene.remove(mallaZona);
+  if (mallaZona) { scene.remove(mallaZona); mallaZona.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }   // la zona anterior deja de ocupar memoria
   matsNoche = []; fuentes = []; bloquesFarolas = [];
   mallaZona = new THREE.Group();
   const m = zona.mundo;
@@ -3425,6 +3442,12 @@ async function cargarZona(archivo) {
   };
   const opcional = async (nombre, vacio) => zip.file(nombre) ? leer(nombre) : vacio;
   const calles = await leer('calles.geojson');
+  // el centro y el nombre del lugar: de zona.json (zips del Paseo) o, si no está, del centro de las calles
+  const meta = await opcional('zona.json', null);
+  const g = meta && meta.geo, centro = g ? { lat: (g.n + g.s) / 2, lon: (g.e + g.w) / 2 } : centroDeCalles(calles);
+  if (centro) ponerOrigen(centro.lat, centro.lon);
+  const nombreLugar = (meta && meta.nombre) || 'Huelva';
+  limpiarCarrera(); coche = null; zona = null;   // si había otra zona abierta
   $('estado').textContent = 'Procesando calles…';
   await new Promise(r => setTimeout(r, 0));
   const tramos = parsearCalles(calles);
@@ -3444,7 +3467,7 @@ async function cargarZona(archivo) {
   }
   $('estado').textContent = 'Construyendo la zona…';
   await new Promise(r => setTimeout(r, 0));
-  zona = { tramos, G, edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan };
+  zona = { nombre: nombreLugar, tramos, G, edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan };
   prepararCasas(edif, zona.rejilla, tramos);
   $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas)…';
   await new Promise(r => setTimeout(r, 0));
@@ -3460,7 +3483,11 @@ async function cargarZona(archivo) {
   $('btnNueva').disabled = false;
   document.body.classList.add('zonaLista');   // ya no hace falta elegir el zip
   const q = zona.casasQuitadas;
-  mostrarMenu(`Huelva lista: ${tramos.length} calles, ${edif.length} casas, ${zona.nFuentes} fuentes.` +
+  $('titulo').textContent = 'Carreras por ' + zona.nombre;
+  document.title = `Carreras por ${zona.nombre} · prototipo`;
+  const grande = edif.length > 45000 || tramos.length > 4500;
+  mostrarMenu(`${zona.nombre} lista: ${tramos.length} calles, ${edif.length} casas, ${zona.nFuentes} fuentes.` +
+    (grande ? ' Es una zona grande: en el móvil puede ir lenta.' : '') +
     (q.quitar.size ? ` ⚠ Se han quitado ${q.quitar.size} casas que cortaban calles (${q.calles.slice(0, 3).join(', ')}${q.calles.length > 3 ? '…' : ''}).` : ''));
   if (q.quitar.size) $('estado').title = 'Calles afectadas: ' + q.calles.join(', ');
 }
@@ -3468,8 +3495,11 @@ async function cargarZona(archivo) {
 $('archivo').addEventListener('change', async e => {
   const f = e.target.files[0];
   if (!f) return;
-  try { await cargarZona(f); }
-  catch (err) { $('estado').textContent = 'Error: ' + err.message; }
+  try {
+    await cargarZona(f);
+    const id = await guardarZipComoLugar(f);   // queda en la lista de lugares
+    if (id) { lugarActual = id; try { localStorage.setItem('cochesHuelva.lugar', id); } catch (err) { /* nada */ } pintarLugares(); }
+  } catch (err) { $('estado').textContent = 'Error: ' + err.message; }
 });
 
 // --- menús y avisos ---
@@ -4280,8 +4310,12 @@ function texturaAjedrez() {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
-const PANCARTAS = [['GRAN PREMIO DE HUELVA', '#c0392b', '#fff'], ['COSTA DE LA LUZ', '#1d5fa8', '#ffd166'], ['🏁  CARRERAS  🏁', '#111', '#fff'],
+const PANCARTAS_HUELVA = [['GRAN PREMIO DE HUELVA', '#c0392b', '#fff'], ['COSTA DE LA LUZ', '#1d5fa8', '#ffd166'], ['🏁  CARRERAS  🏁', '#111', '#fff'],
   ['RÍA DE HUELVA', '#0f7b5f', '#fff'], ['VELOCIDAD · 3 VUELTAS', '#f5b041', '#1b1b1b'], ['PUNTA UMBRÍA ⟶', '#6b2d8f', '#fff']];
+// En otros lugares, las pancartas llevan su nombre
+const pancartas = () => !zona || /^huelva$/i.test(zona.nombre || 'Huelva') ? PANCARTAS_HUELVA : [
+  [`GRAN PREMIO DE ${zona.nombre.toUpperCase()}`, '#c0392b', '#fff'], ['🏁  CARRERAS  🏁', '#111', '#fff'], [`${zona.nombre.toUpperCase()} · 3 VUELTAS`, '#1d5fa8', '#ffd166'],
+  ['VELOCIDAD', '#0f7b5f', '#fff'], ['¡A TODO GAS!', '#f5b041', '#1b1b1b'], ['META ⟶', '#6b2d8f', '#fff']];
 // Punto de la ruta a d metros (negativo: antes de la meta, contando desde el final) con su dirección y el ancho de la calle
 function puntoRuta(ruta, cum, d) {
   const L = cum[cum.length - 1], e = enPolilinea(ruta, cum, ((d % L) + L) % L);
@@ -4340,7 +4374,7 @@ function decoracionCircuito(plan, cum) {
       const off = e.ancho / 2 + Math.max(0.5, Math.min(e.acera, 2.5) * 0.55);
       const c = local(e, lado * off, 0);
       if (!libre(c.x, c.z, e.i)) continue;
-      const [txt, fondo, tinta] = PANCARTAS[n++ % PANCARTAS.length];
+      const lista = pancartas(), [txt, fondo, tinta] = lista[n++ % lista.length];
       const tex = new THREE.MeshLambertMaterial({ map: texturaTexto(txt, fondo, tinta) });
       const valla = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.95, 0.08), [rayas, rayas, rayas, rayas, tex, tex]);
       valla.position.set(c.x, 0.85, c.z);
@@ -5399,9 +5433,93 @@ async function cargarZonaIncluida() {
   try { await cargarZona(archivo); }
   catch (err) { $('estado').textContent = 'Error: ' + err.message; }
 }
+// --- lugares: Huelva (incluida) y las zonas traídas del Paseo o abiertas desde un zip, guardadas en este navegador ---
+// Se comparten con el Paseo (misma web): la base de datos «carreras-zonas», con { id, nombre, geo, fecha, tam, blob }
+const Zonas = (() => {
+  const abrir = () => new Promise((res, rej) => {
+    const rq = indexedDB.open('carreras-zonas', 1);
+    rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains('zonas')) rq.result.createObjectStore('zonas', { keyPath: 'id' }); };
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+  });
+  const op = (modo, fn) => abrir().then(db => new Promise((res, rej) => {
+    const tx = db.transaction('zonas', modo), r = fn(tx.objectStore('zonas'));
+    tx.oncomplete = () => { db.close(); res(r && r.result); }; tx.onerror = () => { db.close(); rej(tx.error); };
+  }));
+  return {
+    listar: () => op('readonly', st => st.getAll()).then(l => (l || []).sort((a, b) => b.fecha - a.fecha)).catch(() => []),
+    leer: id => op('readonly', st => st.get(id)).catch(() => null),
+    guardar: z => op('readwrite', st => st.put(z)),
+    borrar: id => op('readwrite', st => st.delete(id)),
+  };
+})();
+let lugarActual = 'huelva';
+try { lugarActual = localStorage.getItem('cochesHuelva.lugar') || 'huelva'; } catch (err) { /* sin almacenamiento */ }
+async function pintarLugares() {
+  const cont = $('lugares'), zonas = await Zonas.listar();
+  cont.innerHTML = '';
+  const boton = (texto, id) => {
+    const b = document.createElement('button');
+    b.textContent = texto;
+    b.classList.toggle('activo', id === lugarActual);
+    b.onclick = () => elegirLugar(id);
+    return b;
+  };
+  cont.appendChild(boton('🏙️ Huelva', 'huelva'));
+  for (const z of zonas) {
+    const caja = document.createElement('span');
+    caja.className = 'lugar';
+    const borrar = document.createElement('button');
+    borrar.className = 'borrar'; borrar.textContent = '✕'; borrar.title = `Borrar ${z.nombre} de este navegador`;
+    borrar.onclick = async () => {
+      if (!confirm(`¿Borrar «${z.nombre}» de este navegador? Puedes volver a traerla desde el Paseo.`)) return;
+      await Zonas.borrar(z.id);
+      if (lugarActual === z.id) await elegirLugar('huelva'); else pintarLugares();
+    };
+    caja.append(boton('📍 ' + z.nombre, z.id), borrar);
+    cont.appendChild(caja);
+  }
+  const otro = document.createElement('a');
+  otro.className = 'btnOtro'; otro.href = 'paseo.html'; otro.textContent = '➕ Otro lugar';
+  otro.title = 'Abre el Paseo por el relieve: elige la zona en el mapa, ábrela en 3D y pulsa «Jugar aquí»';
+  cont.appendChild(otro);
+  const zip = document.createElement('button');
+  zip.textContent = '📂 Abrir zip'; zip.title = 'Abrir un .zip de una zona descargado del Paseo';
+  zip.onclick = () => $('archivo').click();
+  cont.appendChild(zip);
+}
+async function elegirLugar(id) {
+  lugarActual = id;
+  try { localStorage.setItem('cochesHuelva.lugar', id); } catch (err) { /* nada */ }
+  $('btnNueva').disabled = true;
+  pintarLugares();
+  if (id === 'huelva') return cargarZonaIncluida();
+  const z = await Zonas.leer(id);
+  if (!z) { lugarActual = 'huelva'; return cargarZonaIncluida(); }
+  mostrarMenu(`Abriendo ${z.nombre}…`);
+  try { await cargarZona(z.blob); }
+  catch (err) { $('estado').textContent = 'Error: ' + err.message; }
+}
+// Un zip abierto a mano también queda guardado como lugar
+async function guardarZipComoLugar(archivo) {
+  try {
+    const zip = await JSZip.loadAsync(archivo), zj = zip.file('zona.json');
+    const meta = zj ? JSON.parse(await zj.async('string')) : null;
+    const nombre = (meta && meta.nombre) || archivo.name.replace(/\.zip$/i, '').replace(/^zona-/, '') || 'Zona';
+    const id = String((meta && meta.id) || nombre);
+    await Zonas.guardar({ id, nombre, geo: meta && meta.geo, fecha: Date.now(), tam: archivo.size, blob: archivo });
+    return id;
+  } catch (err) { return null; }
+}
+// Al abrir: la zona que trae el Paseo (?zona=…) o la última elegida
+async function arrancarLugar() {
+  const pedida = new URLSearchParams(location.search).get('zona');
+  if (pedida) { lugarActual = pedida; history.replaceState(null, '', location.pathname); }
+  await pintarLugares();
+  await elegirLugar(lugarActual);
+}
 
 iniciarRender();
-cargarZonaIncluida();
+arrancarLugar();
 /*RENDER-END*/
 </script>
 </body>
