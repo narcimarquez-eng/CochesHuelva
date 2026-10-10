@@ -9,6 +9,7 @@
  *   ?z=25830&bbox=x0,y0,x1,y1&t=building   edificios (BU.Building)
  *   ?z=25830&bbox=x0,y0,x1,y1&t=parcela    parcelas catastrales (CP.CadastralParcel)     <- nuevo
  *   ?foto=REFERENCIA                        foto de la fachada (JPEG); 404 si no la hay
+ *   ?foto=REFERENCIA&tam=640                la misma foto reducida a 640 px de ancho (pesa unas 4 veces menos)  <- nuevo
  *
  * z: sistema de coordenadas (25828 a 25831, ETRS89 UTM husos 28 a 31; 4082 y 4083 en Canarias).
  * bbox: en metros de ese sistema, como mucho 2 km de lado.
@@ -101,6 +102,20 @@ if (isset($_GET['foto'])) {
     if ($codigo !== 200) error_xml(502, "el Catastro contestó HTTP $codigo", false);
     $img = $cuerpo;
     a_cache($clave, $img);
+  }
+  // reducida, si se pide y el servidor tiene GD (si no, va la original)
+  $tam = isset($_GET['tam']) ? max(64, min(1600, (int)$_GET['tam'])) : 0;
+  if ($tam && function_exists('imagecreatefromstring')) {
+    $chica = de_cache($clave . '-' . $tam, $CACHE_DIAS['foto']);
+    if ($chica === null) {
+      $src = @imagecreatefromstring($img);
+      if ($src && imagesx($src) > $tam) {
+        $dst = imagescale($src, $tam, -1, IMG_BICUBIC);
+        ob_start(); imagejpeg($dst, null, 82); $chica = ob_get_clean();
+        a_cache($clave . '-' . $tam, $chica);
+      }
+    }
+    if ($chica) $img = $chica;
   }
   header('Content-Type: ' . (substr($img, 0, 3) === "\xFF\xD8\xFF" ? 'image/jpeg' : 'image/png'));
   header('Cache-Control: public, max-age=2592000');

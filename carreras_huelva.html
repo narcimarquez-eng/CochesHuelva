@@ -3665,6 +3665,11 @@ const FRAGMENTO_FACHADA = `#include <color_fragment>
     vec3 base=diffuseColor.rgb;
     float n1=hh(floor(vec2(u,v)*1.5)),n2=hh(floor(vec2(u,v)*0.2+7.0));
     vec3 col=base*mix(1.0,0.95+0.08*n1,aa)*(0.97+0.05*n2);
+    if(vT>-0.5){   // textura real de la pared (ladrillo, azulejo, enfoscado), sacada de su foto de fachada: cada 1,6 m, en espejo para que no se vean costuras
+      vec2 t=abs(fract(vec2(u,v)/3.2)*2.0-1.0),o=vec2(mod(vT,32.0),floor(vT/32.0));
+      vec3 d=texture2D(uParches,(o*64.0+2.0+t*60.0)/2048.0).rgb*2.0;
+      col*=mix(vec3(1.0),d,0.85*aa);
+    }
     float zh=vZc.a*4.0;
     col*=1.0-0.07*(1.0-smoothstep(zh,zh+1.3,v));
     col=mix(col,vZc.rgb*(0.93+0.1*n1),1.0-step(zh,v));
@@ -3742,19 +3747,20 @@ const FRAGMENTO_FACHADA = `#include <color_fragment>
 
 let matFachadas = null;
 const uFotoTejados = { value: null }, uConFoto = { value: 0 };   // la foto aérea de la zona, para pintar los tejados
+const uParches = { value: null };   // el atlas con los parches de textura de las fachadas
 function materialFachadas() {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   m.onBeforeCompile = sh => {
-    sh.uniforms.uNoche = uNoche; sh.uniforms.uFoto = uFotoTejados; sh.uniforms.uConFoto = uConFoto;
+    sh.uniforms.uNoche = uNoche; sh.uniforms.uFoto = uFotoTejados; sh.uniforms.uConFoto = uConFoto; sh.uniforms.uParches = uParches;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF; attribute vec2 aR;
-varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR;`)
+attribute vec3 aW; attribute vec4 aZ; attribute vec4 aC; attribute vec4 aF; attribute vec2 aR; attribute float aT;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR; varying float vT;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-vWw = aW; vZc = aZ; vCp = aC; vFa = aF; vR = aR;`);
+vWw = aW; vZc = aZ; vCp = aC; vFa = aF; vR = aR; vT = aT;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR; uniform float uNoche, uConFoto; uniform sampler2D uFoto;
+varying vec3 vWw; varying vec4 vZc; varying vec4 vCp; varying vec4 vFa; varying vec2 vR; varying float vT; uniform float uNoche, uConFoto; uniform sampler2D uFoto, uParches;
 float hh(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}`)
       .replace('#include <color_fragment>', FRAGMENTO_FACHADA);
   };
@@ -3843,11 +3849,12 @@ function tejadosDeFoto(edif, foto) {
 function nuevoBufer(n) {
   const B = { n: 0, I: [] };
   B.reservar = m => {
-    const o = B, P = new Float32Array(m * 3), N = new Float32Array(m * 3), C = new Uint8Array(m * 3), W = new Float32Array(m * 3), Z = new Uint8Array(m * 4), K = new Uint8Array(m * 4), F = new Float32Array(m * 4), R = new Float32Array(m * 2);
-    if (o.P) { P.set(o.P); N.set(o.N); C.set(o.C); W.set(o.W); Z.set(o.Z); K.set(o.K); F.set(o.F); R.set(o.R); }
-    Object.assign(o, { P, N, C, W, Z, K, F, R, cap: m });
+    const o = B, P = new Float32Array(m * 3), N = new Float32Array(m * 3), C = new Uint8Array(m * 3), W = new Float32Array(m * 3), Z = new Uint8Array(m * 4), K = new Uint8Array(m * 4), F = new Float32Array(m * 4), R = new Float32Array(m * 2), T = new Float32Array(m);
+    if (o.P) { P.set(o.P); N.set(o.N); C.set(o.C); W.set(o.W); Z.set(o.Z); K.set(o.K); F.set(o.F); R.set(o.R); T.set(o.T); }
+    Object.assign(o, { P, N, C, W, Z, K, F, R, T, cap: m });
   };
   B.reservar(n);
+  B.casilla = -1;   // casilla del parche de textura de la casa que se está haciendo (solo sus paredes)
   // vértice: posición, normal, color (bytes), aW (u, v, alto o marca), zócalo y carpintería (bytes), datos de fachada, uv de la foto
   B.v = (x, y, z, nr, col, w0, w1, w2, zb, kb, f, ru, rv) => {
     if (B.n >= B.cap) B.reservar(B.cap * 2);
@@ -3856,6 +3863,7 @@ function nuevoBufer(n) {
     B.C[i3] = col[0]; B.C[i3 + 1] = col[1]; B.C[i3 + 2] = col[2]; B.W[i3] = w0; B.W[i3 + 1] = w1; B.W[i3 + 2] = w2;
     B.Z.set(zb, i4); B.K.set(kb, i4); B.F[i4] = f[0]; B.F[i4 + 1] = f[1]; B.F[i4 + 2] = f[2]; B.F[i4 + 3] = f[3];
     B.R[i * 2] = ru; B.R[i * 2 + 1] = rv;
+    B.T[i] = B.casilla;
     return i;
   };
   // triángulo con la cara de delante hacia la normal
@@ -3902,6 +3910,8 @@ function mallaEdificios(edif, foto) {
     const pared = (P, Q, nr, ya, yb, yc, yd, ua, ub, F, col, marca) =>
       quad([[P[0], ya, P[1]], [Q[0], yb, Q[1]], [Q[0], yc, Q[1]], [P[0], yd, P[1]]], nr, col, [[ua, ya, marca], [ub, yb, marca], [ub, yc, marca], [ua, yd, marca]], F, false);
     e.vw0 = G.n;   // desde aquí, sus paredes: se repintan si llega el color de su foto de fachada
+    e.casilla = Parches.casilla(e.ref, e.parche);
+    G.casilla = e.casilla;
     // paredes de fuera (con su tipo de fachada) y de los patios
     const paredesAnillo = (rr_, hueco, hi) => {
       let u = 1000 + hi * 300;
@@ -3952,6 +3962,7 @@ function mallaEdificios(edif, foto) {
       quad([[P2[0], y0 - drop - 0.1, P2[1]], [Q2[0], y0 - drop - 0.1, Q2[1]], [Q2[0], y0 - drop + 0.03, Q2[1]], [P2[0], y0 - drop + 0.03, P2[1]]], [o[0], 0, o[1]], wc, [plano, plano, plano, plano], SIN_FACHADA, false);
     }
     e.vw1 = G.n;
+    G.casilla = -1;
     // tejados: marca -1 con tejas, -2 plano
     const tejado = (poli, huecos, yf, nr, marca, uvf) => {
       if (poli.length < 3) return;
@@ -4017,6 +4028,7 @@ function mallaEdificios(edif, foto) {
   geo.setAttribute('aC', new THREE.BufferAttribute(G.K.slice(0, nV * 4), 4, true));
   geo.setAttribute('aF', new THREE.BufferAttribute(G.F.slice(0, nV * 4), 4));
   geo.setAttribute('aR', new THREE.BufferAttribute(G.R.slice(0, nV * 2), 2));
+  geo.setAttribute('aT', new THREE.BufferAttribute(G.T.slice(0, nV), 1));
   geo.setIndex(new THREE.BufferAttribute(nV > 65535 ? new Uint32Array(G.I) : new Uint16Array(G.I), 1));
   geo.computeBoundingSphere();
   if (!matFachadas) matFachadas = materialFachadas();   // un solo material para todos los bloques
@@ -4027,14 +4039,16 @@ function mallaEdificios(edif, foto) {
 function repintarCasa(e) {
   const g = e.geoMalla;
   if (!g || e.vw0 == null) return;
-  const C = g.attributes.color.array, W = g.attributes.aW.array, Z = g.attributes.aZ.array, K = g.attributes.aC.array;
+  const C = g.attributes.color.array, W = g.attributes.aW.array, Z = g.attributes.aZ.array, K = g.attributes.aC.array, T = g.attributes.aT.array;
+  e.casilla = Parches.casilla(e.ref, e.parche);
+  T.fill(e.casilla, e.vw0, e.vw1);
   const wc = a255(hexA01(e.colPared)), zb = a255([...hexA01(e.colZoc), e.zh / 4]), kb = a255([...hexA01(e.colCarp), e.rec]);
   for (let i = e.vw0; i < e.vw1; i++) {
     const f = W[i * 3 + 2] > 0.5 ? 1 : 0.86;   // el pretil y el alero, un poco más oscuros
     C[i * 3] = Math.round(wc[0] * f); C[i * 3 + 1] = Math.round(wc[1] * f); C[i * 3 + 2] = Math.round(wc[2] * f);
     Z.set(zb, i * 4); K.set(kb, i * 4);
   }
-  for (const nombre of ['color', 'aZ', 'aC']) g.attributes[nombre].needsUpdate = true;   // se sube el bloque entero: pasa pocas veces por segundo
+  for (const nombre of ['color', 'aZ', 'aC', 'aT']) g.attributes[nombre].needsUpdate = true;   // se sube el bloque entero: pasa pocas veces por segundo
 }
 // Coche básico: carrocería con capó y maletero, cabina con cristales, faros, pilotos y ruedas con llanta
 // Edificios por bloques de 300 m: así la cámara (y la de las sombras) solo dibuja los bloques que ve
@@ -4259,11 +4273,16 @@ async function cargarZona(archivo) {
   const casas = await opcional('casas.geojson', { features: [] });   // sin casas (el Catastro no respondió) la zona se juega igual
   let edif = parsearCasas(casas), rejilla = construirRejilla(edif);
   // colores de fachada sacados antes en este navegador (al conducir por aquí o por otra zona con las mismas casas)
-  const guardados = await Catastro.coloresGuardados();
+  const guardados = await Catastro.coloresGuardados(), deZona = new Map();
+  for (const c of (meta && meta.colores) || []) if (c && c.ref && c.col && !c.off) deZona.set(c.ref, c.col);   // los que trae el Paseo, con su parche
   for (const e of edif) {
-    const c = e.ref && !e.pared && guardados.get(e.ref);
-    if (c && !c.sin) { e.pared = c.pared; e.zoc = c.zocalo; e.carp = c.carpinteria; }
+    if (!e.ref) continue;
+    const c = guardados.get(e.ref), z = deZona.get(e.ref);
+    if (c && !c.sin && !e.pared) { e.pared = c.pared; e.zoc = c.zocalo; e.carp = c.carpinteria; }
+    e.parche = (c && c.parche) || (z && z.parche) || null;
+    e.foto4 = !!((c && c.v >= Catastro.VERSION_COLOR) || (z && z.v >= Catastro.VERSION_COLOR));
   }
+  Parches.empezar();
   // lo que el Catastro aún puede dar: los trozos de casas que fallaron (se leen sin abrir el archivo entero, que es grande) y las parcelas
   let catastro = null, parcelasDatos = null;
   if (meta && meta.catastro && zip.file(meta.catastro)) {
@@ -6454,6 +6473,29 @@ const Catastro = (() => {
     const ybMed=ybs.length?ybs.slice().sort((p,q)=>p-q)[Math.floor(ybs.length/2)]:y1;
     const fac=cand.filter(i=>Math.floor(i/W0)<ybMed-1&&!esPared(i)&&dist(i,wc)>70&&L[i]>=22&&L[i]<=125&&SA[i]>0.28&&SA[i]<0.72&&!(green(i)&&L[i]>=95));
     if(fac.length>=cand.length*0.01){const cc=km(fac,3).find(o=>o.n>=cand.length*0.008&&o.n<=cand.length*0.12);if(cc)out.carp=cc.c;}
+    // parche de la pared: el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible (sin ventanas
+    // ni esquinas), recortado de la foto original a 64 × 64 y con la media de cada color llevada a gris medio: así solo guarda la textura
+    // (ladrillo, azulejo, enfoscado) y el color sigue siendo el de la pared
+    {const lado=Math.max(5,Math.round(W0*0.09)),A=(W0+1)*(H0+1),S=new Float32Array(A),C=new Float32Array(A),L1=new Float32Array(A),L2=new Float32Array(A);
+      for(let y=0;y<H0;y++)for(let x=0;x<W0;x++){const i=y*W0+x,k=(y+1)*(W0+1)+x+1,a=k-1,b=k-W0-1,c=k-W0-2;
+        S[k]=S[a]+S[b]-S[c]+(esPared(i)?1:0);C[k]=C[a]+C[b]-C[c]+sky[i];L1[k]=L1[a]+L1[b]-L1[c]+L[i];L2[k]=L2[a]+L2[b]-L2[c]+L[i]*L[i];}
+      const suma=(T,x,y)=>T[(y+lado)*(W0+1)+x+lado]-T[y*(W0+1)+x+lado]-T[(y+lado)*(W0+1)+x]+T[y*(W0+1)+x],n=lado*lado;
+      let best=-1e9,bx=-1,by=-1;
+      for(let y=y0;y+lado<=y1;y++)for(let x=x0;x+lado<=x1;x++){
+        if(suma(C,x,y)>0)continue;const fr=suma(S,x,y)/n;if(fr<0.93)continue;
+        const m=suma(L1,x,y)/n,sd=Math.sqrt(Math.max(0,suma(L2,x,y)/n-m*m));
+        const sc=-sd/Math.max(30,m)-0.25*Math.abs((x+lado/2)/W0-0.5)-0.15*Math.abs((y+lado/2)/H0-0.45);   // uniforme, y cerca del centro
+        if(sc>best){best=sc;bx=x;by=y;}}
+      if(bx>=0&&best>-0.6){
+        const P=64,cv=document.createElement('canvas');cv.width=cv.height=P;const g2=cv.getContext('2d',{willReadFrequently:true});
+        g2.drawImage(im,bx/W0*iw,by/H0*ih,lado/W0*iw,lado/H0*ih,0,0,P,P);
+        const id=g2.getImageData(0,0,P,P),q=id.data,m=[0,0,0];
+        for(let k=0;k<q.length;k+=4){m[0]+=q[k];m[1]+=q[k+1];m[2]+=q[k+2];}
+        for(let c=0;c<3;c++)m[c]=Math.max(8,m[c]/(P*P));
+        let s1=0,s2=0;
+        for(let k=0;k<q.length;k+=4){for(let c=0;c<3;c++)q[k+c]=clamp(Math.round(q[k+c]*128/m[c]),0,255);const l=(q[k]+q[k+1]+q[k+2])/3;s1+=l;s2+=l*l;}
+        const cvar=Math.sqrt(Math.max(0,s2/(P*P)-(s1/(P*P))**2))/128;   // cuánto varía: con ventanas, esquinas u hojas varía mucho y no vale
+        if(cvar<0.1){g2.putImageData(id,0,0);out.parche=cv.toDataURL('image/jpeg',0.85);}}}
     return out;
   }
   const pedirTexto = async url => {
@@ -6481,7 +6523,7 @@ const Catastro = (() => {
   }
 
   // --- colores de las fachadas: guardados en este navegador por referencia catastral (valen para cualquier zona) ---
-  const VERSION_COLOR = 3;
+  const VERSION_COLOR = 4;   // 4: con parche de textura de la pared
   const abrirDB = () => new Promise((res, rej) => {
     const rq = indexedDB.open('carreras-fachadas', 1);
     rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains('colores')) rq.result.createObjectStore('colores'); };
@@ -6504,7 +6546,7 @@ const Catastro = (() => {
   // Pide la foto de la fachada y saca sus colores: { pared, zocalo, carpinteria } en hex, { sin: true } si no hay foto,
   // o lanza un error si no hay forma de llegar a catastro.php
   async function colorDeFachada(ref) {
-    const r = await fetch(`${URL_PHP}?foto=${encodeURIComponent(ref)}`);
+    const r = await fetch(`${URL_PHP}?foto=${encodeURIComponent(ref)}&tam=640`);   // reducida en el servidor (si sabe): pesa unas 4 veces menos
     if (r.status === 404) return { sin: true, v: VERSION_COLOR, t: Date.now() };
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const url = URL.createObjectURL(await r.blob());
@@ -6513,7 +6555,7 @@ const Catastro = (() => {
       im.src = url;
       await im.decode();
       const c = photoColors(im);
-      return c.wall ? { pared: hex(c.wall), zocalo: hex(c.zoc), carpinteria: hex(c.carp), v: VERSION_COLOR, t: Date.now() } : { sin: true, porque: c.why, v: VERSION_COLOR, t: Date.now() };
+      return c.wall ? { pared: hex(c.wall), zocalo: hex(c.zoc), carpinteria: hex(c.carp), parche: c.parche || null, v: VERSION_COLOR, t: Date.now() } : { sin: true, porque: c.why, v: VERSION_COLOR, t: Date.now() };
     } finally { URL.revokeObjectURL(url); }
   }
   return { URL_PHP, trozos, casasDeTrozo, parcelasDeTrozo, enParalelo, coloresGuardados, guardarColor, colorDeFachada, deUTM, VERSION_COLOR };
@@ -6621,6 +6663,47 @@ async function descargarLoQueFalta() {
   } finally { boton.disabled = false; }
 }
 
+// --- parches de textura de las fachadas: un atlas de 2048 × 2048 con casillas de 64 × 64 (1024 casas como mucho) ---
+// Cada casa con parche (sacado de su foto de fachada) tiene su casilla; el sombreador lo repite por todas sus paredes
+const Parches = (() => {
+  const TAM = 2048, CAS = 64, POR_FILA = TAM / CAS, MAX = POR_FILA * POR_FILA;
+  let cv = null, g = null, textura = null, porRef = new Map(), libre = 0, subiendo = false;
+  function crear() {
+    cv = document.createElement('canvas');
+    cv.width = cv.height = TAM;
+    g = cv.getContext('2d');
+    textura = new THREE.CanvasTexture(cv);
+    textura.flipY = false; textura.generateMipmaps = false;   // sin mipmaps: las casillas no se mezclan entre sí
+    textura.minFilter = textura.magFilter = THREE.LinearFilter;
+    uParches.value = textura;
+  }
+  function subir() {   // la textura se sube a la tarjeta gráfica como mucho cada medio segundo
+    if (subiendo) return;
+    subiendo = true;
+    setTimeout(() => { subiendo = false; textura.needsUpdate = true; }, 500);
+  }
+  return {
+    empezar() {   // zona nueva: atlas en gris medio (= sin textura)
+      if (!cv) crear();
+      g.fillStyle = 'rgb(128,128,128)'; g.fillRect(0, 0, TAM, TAM);
+      porRef = new Map(); libre = 0; textura.needsUpdate = true;
+    },
+    // casilla de la casa (por su referencia); -1 si no tiene parche o ya no queda sitio
+    casilla(ref, dataURL) {
+      if (!ref || !dataURL || !cv) return -1;
+      if (porRef.has(ref)) return porRef.get(ref);
+      if (libre >= MAX) return -1;
+      const k = libre++;
+      porRef.set(ref, k);
+      const im = new Image();
+      im.onload = () => { g.drawImage(im, (k % POR_FILA) * CAS, Math.floor(k / POR_FILA) * CAS, CAS, CAS); subir(); };
+      im.src = dataURL;
+      return k;
+    },
+    usadas: () => libre,
+  };
+})();
+
 // --- colores de fachada mientras conduces: la casa sin color más cercana (hasta 90 m), de una en una o de dos en dos ---
 const Fachadas = { activas: 0, tUltima: 0, intentadas: new Set(), fallos: 0, parado: false, hechas: 0 };
 function actualizarFachadas(ahora) {
@@ -6632,7 +6715,7 @@ function actualizarFachadas(ahora) {
     for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++)
       for (const j of zona.rejilla.get(cx + ',' + cz) || []) {
         const e = zona.edif[j];
-        if (!e.ref || e.pared || e.simulada || Fachadas.intentadas.has(e.ref)) continue;
+        if (!e.ref || e.foto4 || e.simulada || Fachadas.intentadas.has(e.ref)) continue;   // ya mirada con el análisis de ahora (color y parche)
         const b = e.bbox, d = ((b[0] + b[2]) / 2 - x) ** 2 + ((b[1] + b[3]) / 2 - z) ** 2;
         if (d < md) { md = d; mejor = e; }
       }
@@ -6643,6 +6726,7 @@ function actualizarFachadas(ahora) {
   Catastro.colorDeFachada(ref).then(c => {
     Fachadas.fallos = 0;
     Catastro.guardarColor(ref, c);
+    for (const e of (zona && zona.porRef && zona.porRef.get(ref)) || []) e.foto4 = true;
     if (!c.sin) { ponerColoresFachada(ref, c); Fachadas.hechas++; }
   }).catch(() => { if (++Fachadas.fallos >= 4) Fachadas.parado = true; })   // sin conexión con catastro.php: se deja de pedir
     .finally(() => { Fachadas.activas--; });
@@ -6653,6 +6737,7 @@ function ponerColoresFachada(ref, c) {
   if (!lista) return;
   for (const e of lista) {
     e.pared = c.pared; e.zoc = c.zocalo; e.carp = c.carpinteria;
+    if (c.parche) e.parche = c.parche;
     coloresCasa(e, zona.edif.indexOf(e));
     repintarCasa(e);
   }

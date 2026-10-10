@@ -2814,7 +2814,7 @@ function roadMaterial(){
 const fotoSt0=()=>({red:0,db:0,ok:0,sin:0,err:0,errs:new Map(),col:0,desc:0,whys:new Map(),rest:0,last:''});
 const FOTO={ok:null,cache:new Map(),active:0,count:0,max:500,d0:1e12,d1:-1,st:fotoSt0(),off:new Set(),msg:''};
 const fotoURL=ref=>`${CATASTRO_URL}?foto=${encodeURIComponent(ref)}`;
-const COLV=3;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra)
+const COLV=4;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra; 4: y un parche de su textura)
 function imgDe(url){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error('la foto está dañada'));im.src=url;});}
 function colorsDe(im){let c;try{c=photoColors(im);}catch(err){c={why:'no se ha podido analizar la foto'};}c.v=COLV;return c;}
 function contarCol(col){const f=FOTO.st;if(col&&col.wall)f.col++;else{f.desc++;cuenta(f.whys,(col&&col.why)||'no se ha podido analizar la foto');}}
@@ -2939,6 +2939,29 @@ function photoColors(im){
   const ybMed=ybs.length?ybs.slice().sort((p,q)=>p-q)[Math.floor(ybs.length/2)]:y1;
   const fac=cand.filter(i=>Math.floor(i/W0)<ybMed-1&&!esPared(i)&&dist(i,wc)>70&&L[i]>=22&&L[i]<=125&&SA[i]>0.28&&SA[i]<0.72&&!(green(i)&&L[i]>=95));
   if(fac.length>=cand.length*0.01){const cc=km(fac,3).find(o=>o.n>=cand.length*0.008&&o.n<=cand.length*0.12);if(cc)out.carp=cc.c;}
+  // parche de la pared: el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible (sin ventanas
+  // ni esquinas), recortado de la foto original a 64 × 64 y con la media de cada color llevada a gris medio: así solo guarda la textura
+  // (ladrillo, azulejo, enfoscado) y el color sigue siendo el de la pared
+  {const lado=Math.max(5,Math.round(W0*0.09)),A=(W0+1)*(H0+1),S=new Float32Array(A),C=new Float32Array(A),L1=new Float32Array(A),L2=new Float32Array(A);
+    for(let y=0;y<H0;y++)for(let x=0;x<W0;x++){const i=y*W0+x,k=(y+1)*(W0+1)+x+1,a=k-1,b=k-W0-1,c=k-W0-2;
+      S[k]=S[a]+S[b]-S[c]+(esPared(i)?1:0);C[k]=C[a]+C[b]-C[c]+sky[i];L1[k]=L1[a]+L1[b]-L1[c]+L[i];L2[k]=L2[a]+L2[b]-L2[c]+L[i]*L[i];}
+    const suma=(T,x,y)=>T[(y+lado)*(W0+1)+x+lado]-T[y*(W0+1)+x+lado]-T[(y+lado)*(W0+1)+x]+T[y*(W0+1)+x],n=lado*lado;
+    let best=-1e9,bx=-1,by=-1;
+    for(let y=y0;y+lado<=y1;y++)for(let x=x0;x+lado<=x1;x++){
+      if(suma(C,x,y)>0)continue;const fr=suma(S,x,y)/n;if(fr<0.93)continue;
+      const m=suma(L1,x,y)/n,sd=Math.sqrt(Math.max(0,suma(L2,x,y)/n-m*m));
+      const sc=-sd/Math.max(30,m)-0.25*Math.abs((x+lado/2)/W0-0.5)-0.15*Math.abs((y+lado/2)/H0-0.45);   // uniforme, y cerca del centro
+      if(sc>best){best=sc;bx=x;by=y;}}
+    if(bx>=0&&best>-0.6){
+      const P=64,cv=document.createElement('canvas');cv.width=cv.height=P;const g2=cv.getContext('2d',{willReadFrequently:true});
+      g2.drawImage(im,bx/W0*iw,by/H0*ih,lado/W0*iw,lado/H0*ih,0,0,P,P);
+      const id=g2.getImageData(0,0,P,P),q=id.data,m=[0,0,0];
+      for(let k=0;k<q.length;k+=4){m[0]+=q[k];m[1]+=q[k+1];m[2]+=q[k+2];}
+      for(let c=0;c<3;c++)m[c]=Math.max(8,m[c]/(P*P));
+      let s1=0,s2=0;
+      for(let k=0;k<q.length;k+=4){for(let c=0;c<3;c++)q[k+c]=clamp(Math.round(q[k+c]*128/m[c]),0,255);const l=(q[k]+q[k+1]+q[k+2])/3;s1+=l;s2+=l*l;}
+      const cvar=Math.sqrt(Math.max(0,s2/(P*P)-(s1/(P*P))**2))/128;   // cuánto varía: con ventanas, esquinas u hojas varía mucho y no vale
+      if(cvar<0.1){g2.putImageData(id,0,0);out.parche=cv.toDataURL('image/jpeg',0.85);}}}
   return out;
 }
 const fromSRGB=a=>new THREE.Color().setRGB(a[0]/255,a[1]/255,a[2]/255,THREE.SRGBColorSpace);

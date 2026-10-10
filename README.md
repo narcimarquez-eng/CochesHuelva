@@ -33,6 +33,7 @@ En `servidor/catastro.php` está la versión nueva, para subirla a meteohuelva.e
 - Un recuadro sin nada (el mar, el campo) devuelve una lista vacía, en vez del error «No records» del Catastro, que el Paseo contaba como trozo fallido.
 - Guarda unos días lo que llega del Catastro en una carpeta temporal del servidor: lo repetido no se vuelve a pedir.
 - Deja que la llamen `narcimarquez-eng.github.io` y meteohuelva.es (lista `$ORIGENES` al principio del archivo).
+- `foto=REF&tam=640`: la foto de fachada reducida a 640 px de ancho (56 KB en vez de 178 KB), si el servidor tiene la extensión GD de PHP; si no, va la original. El juego la pide así: para el color y el parche basta.
 
 Está probada contra un Catastro de mentira (mismas URL y respuestas), no contra el de verdad, que no se alcanza desde aquí. Con la versión antigua todo sigue funcionando, solo que sin parcelas: el Paseo y el juego lo detectan y lo dicen.
 
@@ -47,7 +48,7 @@ Al abrir un lugar, el menú dice si le falta algo del Catastro y deja descargarl
 
 **⬇️ Descargar lo que falta** los pide, los mete en la zona, la guarda en este navegador y la vuelve a abrir. Huelva también: su versión completada se guarda y se usa en lugar de la incluida.
 
-Los **colores de las fachadas** se piden solos **mientras conduces**: la casa del Catastro sin color más cercana (a menos de 90 m), de una en una o de dos en dos. Su foto de fachada se analiza igual que en el Paseo y la casa se repinta al momento. Los colores se guardan en este navegador por referencia catastral, así que la próxima vez ya están, en esa zona o en otra que tenga las mismas casas. Si `catastro.php` no contesta, deja de pedir.
+Los **colores y la textura de las fachadas** se piden solos **mientras conduces**: la casa del Catastro sin color más cercana (a menos de 90 m), de una en una o de dos en dos. Su foto de fachada se analiza igual que en el Paseo y la casa se repinta al momento. Los colores se guardan en este navegador por referencia catastral, así que la próxima vez ya están, en esa zona o en otra que tenga las mismas casas. Si `catastro.php` no contesta, deja de pedir.
 
 ### Si no llegan las casas del Catastro
 
@@ -88,6 +89,8 @@ El análisis de la foto (en el Paseo) agrupa los píxeles por **tono**, la propo
 - La pared blanca a la sombra, que sale azulada, cuenta como blanca.
 - Lo gris pesa menos que lo que tiene color, porque gris son también la calle, los cristales y el cielo con calima. También cuentan menos lo muy oscuro, la parte de abajo de la foto (calle y coches) y los lados (la casa de la parcela suele estar en el centro).
 - Las hojas al sol, de verde amarillento, no cuentan como pared.
+
+**Textura de la pared**: además de los colores, de cada foto se saca un **parche** de 64 × 64 de la pared real. Es el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible: sin ventanas, esquinas ni hojas. Si aun así varía demasiado, no se usa y la casa se queda con su color. El parche se guarda con la media de cada color en gris medio, así que solo lleva la textura (ladrillo, azulejo, enfoscado, piedra), y el color sigue siendo el de la pared. En el juego se repite por **todas las paredes de la casa**, cada 1,6 m y en espejo para que no se vean costuras, debajo de las ventanas y puertas dibujadas, y se difumina de lejos. En las 157 fotos de Huelva, 94 dan parche. Pesa poco más de 1 KB y va en `zona.json` con los colores; el juego los junta en una sola textura de 2048 × 2048 (hasta 1.024 casas).
 
 Antes solo se miraban los píxeles claros, así que el ladrillo y las paredes rojas en sombra quedaban fuera y salía blanco o gris. En las 157 fotos de la zona incluida se ha comprobado a ojo, y sus colores ya están rehechos. En el Paseo, los colores guardados con el análisis anterior se rehacen solos desde la foto guardada, sin descargar nada.
 
