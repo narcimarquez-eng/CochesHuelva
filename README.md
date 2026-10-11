@@ -170,6 +170,7 @@ Todo esto choca con el coche como las farolas y los árboles.
 
 ## Detalles reales
 
+- **Calles sin aceras y de un sentido**: las calles de pueblo con la categoría «calle con aceras» llevan aceras aunque el Paseo no las haya medido, y las calles de servicio con fachadas a los dos lados también. Las que solo tienen sitio para un carril (menos de 7,5 m entre fachadas) se dibujan de un solo sentido, con una calzada de 3,3 m y aceras con lo que sobra.
 - **Carriles de verdad**: el número de carriles de cada calle sale de OpenStreetMap (unas mil calles lo tienen). Se pintan las líneas entre carriles (discontinuas) y la central (doble continua si hay dos o más carriles por sentido), y el tráfico circula por un carril concreto.
 - **Más vehículos en el tráfico**: furgonetas de reparto, camionetas, camiones de basura, ambulancias y camiones de bomberos, menos frecuentes que los turismos y con su largo real (de 5 a 6,5 m).
 - **Restos en los choques**: en un golpe fuerte salen volando parachoques, puertas, chapas, alerones, alguna rueda y tuercas; rebotan, se quedan en la calzada y desaparecen a los 40 s.
@@ -207,14 +208,14 @@ El juego se abre a **pantalla completa** y en horizontal con el primer toque (lo
 
 El panel de arriba a la izquierda está pensado para el móvil: en una sola línea van la velocidad, la marcha con las revoluciones, la señal de límite (redonda, como las de verdad, parpadea si vas más deprisa) y el daño; debajo, en letra pequeña, el nombre de la calle.
 
-En el móvil, abajo a la izquierda hay una **ruleta**: se gira con el dedo alrededor del centro (140° a cada lado es el giro completo), vibra a cada muesca, un arco ámbar marca cuánto giras y al soltarla vuelve sola al centro. A la derecha están los pedales **GAS** y **FRENO**, grandes y de colores, y el botón **D/R** de la marcha. Los límites de velocidad son solo informativos.
+En el móvil, abajo a la izquierda hay una **ruleta**: se gira con el dedo alrededor del centro (140° a cada lado es el giro completo; con las flechas, la ruleta gira sola para mostrar hacia dónde va el coche), vibra a cada muesca, un arco ámbar marca cuánto giras y al soltarla vuelve sola al centro. A la derecha están los pedales **GAS** y **FRENO**, grandes y de colores, y el botón **D/R** de la marcha. Los límites de velocidad son solo informativos.
 
 El coche tiene caja automática de seis marchas. Arriba a la izquierda se ven la marcha y el tacómetro: la caja sube hacia las 6200 rpm y baja al acelerar a fondo con pocas vueltas o al frenar hasta casi parar. Para ir **marcha atrás** hay dos maneras:
 
 - Parado, mantén el freno (↓ o **FRENO**): a las tres décimas entra la R y el freno empuja hacia atrás (y el acelerador frena). Para volver, pisa el acelerador: frena, y parado pone la marcha adelante.
 - Con el coche casi parado, toca **D/R** (o la tecla `R`): con la R así puesta, el acelerador va hacia atrás y el freno frena, como en un coche automático. Otro toque vuelve a la D.
 
-La física es la de un turismo de unos 150 CV: de 0 a 100 km/h en unos 8 s, frenada de 100 a 0 en unos 45 m y punta de unos 200 km/h. El volante responde menos a más velocidad.
+La física es la de un turismo de unos 150 CV: de 0 a 100 km/h en unos 8 s, frenada de 100 a 0 en unos 45 m y punta de unos 200 km/h. El volante responde menos a más velocidad, pero el agarre es de juego de conducción (unos 1,3 g): a 40 km/h el radio de giro a volante completo es de unos 10 m y a 60 km/h de unos 21 m.
 
 ## Instalar en el móvil
 
@@ -228,7 +229,7 @@ Los rivales del circuito llevan coches de carreras y deportivos de Kenney Car Ki
 
 El SUV compacto (`modelos/coches/suv-compacto.glb`) lo ha aportado el autor del juego. Es el modelo más detallado (58 500 triángulos), así que solo lo conduce el jugador, no sale en el tráfico. Sus propios pilotos LED se encienden al frenar y sus faros LED de noche.
 
-La galería son ocho turismos de Kenney Car Kit, © Kenney (kenney.nl), licencia CC0 1.0: Berlina, Hatchback, Deportivo, SUV, SUV de lujo, Taxi, Patrulla y Furgoneta. Están en `modelos/coches/`, con sus datos en `catalogo.json`. Miden 4,2 m de largo y el frontal mira a +Z, que es el sentido en el que avanza el juego.
+La galería son ocho turismos de Kenney Car Kit, © Kenney (kenney.nl), licencia CC0 1.0: Berlina, Hatchback, Deportivo, SUV, SUV de lujo, Taxi, Patrulla y Furgoneta. Están en `modelos/coches/`, con sus datos en `catalogo.json`. Miden 4,2 m de largo; los que son más anchos o más altos de lo normal (sedán, taxi, deportivo, SUV) se estrechan o se bajan al cargarlos, sin agrandar ninguno, y el coche básico tiene silueta de coche, no una caja. El frontal mira a +Z, que es el sentido en el que avanza el juego.
 
 CarConcept y ToyCar vienen de los modelos de ejemplo de Khronos glTF y están optimizados:
 
@@ -257,7 +258,7 @@ En el tráfico de la carrera circulan los coches de la galería y versiones lige
 
 Todo choca. En Huelva salen 60.
 
-Los árboles son modelos de Kenney Nature Kit (roble, álamo, pino y arbusto), con licencia CC0: están en `modelos/arboles/`. Los peatones son ocho figuras de Kenney Blocky Characters (CC0), en `modelos/peatones/`, de 1,75 m. Las licencias de cada paquete van junto a los modelos. Se dibujan solo los árboles cercanos al coche, para que el móvil no sufra.
+Los árboles son modelos de Kenney Nature Kit (roble, álamo, pino y arbusto), con licencia CC0: están en `modelos/arboles/`. Los peatones y el público de las gradas son figuras humanas hechas en el propio juego (cabeza, torso, brazos y piernas con proporciones reales, con pelo, ojos y ropa de colores al azar). Caminan con el paso animado en el shader, y se paran cuando están quietos. Las licencias de cada paquete van junto a los modelos. Se dibujan solo los árboles cercanos al coche, para que el móvil no sufra.
 
 Cada peatón tiene edad, personalidad y, a veces, ocupación, y una ira de 0 a 100. El claxon (`H`), un coche parado a su lado o uno que pasa rozándole la suben; se calma cuando el coche se aleja. Según el carácter reacciona de una manera: el niño y el tímido huyen, el anciano huye despacio, el pasivo y el distraído se quedan quietos, el agresivo, el joven y el protector se enfrentan mirando al coche, el adolescente graba, el curioso saca una foto, y el agente de policía no se mueve y multa. Con ira alta gritan (con un tono según la edad), y algunos golpean el coche o le tiran objetos. Los peatones no llevan accesorios (móvil, cochecito, bastón…) porque el juego no tiene esos modelos: su carácter se nota en el movimiento, el color y el sonido.
 

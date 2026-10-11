@@ -258,21 +258,41 @@ function enPoligono(pts, x, z) {
 }
 
 // --- calles ---
+// Aceras que el Paseo no midió (o que dejó a cero pese a tener sitio): las calles de pueblo con la categoría «calle con aceras»
+// las llevan aunque falten las fachadas. Una calle con menos de 7,5 m entre fachadas solo cabe con un carril: se trata como de
+// un sentido (calzada de 3,3 m) y lo que sobra son las aceras
+const ACERA_POR_TIPO = { primary: 2.2, secondary: 2, tertiary: 2, residential: 1.5, unclassified: 1.5 };
+function completarAceras(p, ancho, acera, unSentido, carriles) {
+  if (acera > 0) return { ancho, acera, unSentido, carriles };
+  const fach = typeof p.ancho_entre_fachadas_m === 'number' ? p.ancho_entre_fachadas_m : 0;
+  if (fach > 0 && fach < 7.5) {
+    const sw = (fach - 3.3) / 2;
+    return { ancho: 3.3, acera: sw >= 0.7 ? Math.min(2, sw) : 0, unSentido: true, carriles: 1 };
+  }
+  if (fach >= 8 && p.tipo === 'service') {   // calle de servicio con fachadas a los dos lados: calzada y, a cada lado, la acera que sobra
+    const cal = Math.min(ancho, unSentido ? 3.6 : 6), sw = (fach - cal) / 2;
+    return { ancho: cal, acera: sw >= 0.7 ? Math.min(2.5, sw) : 0, unSentido, carriles };
+  }
+  if (p.dibujada_como === 'calle con aceras') return { ancho, acera: ACERA_POR_TIPO[tipoBase(p.tipo)] || 1.5, unSentido, carriles };
+  return { ancho, acera, unSentido, carriles };
+}
 function parsearCalles(geo) {
   const tramos = [];
   for (const f of geo.features) {
     const g = f.geometry, p = f.properties || {};
     if (!g || g.type !== 'LineString' || !CONDUCIBLES.has(p.tipo)) continue;
     const bt = tipoBase(p.tipo);
-    const ancho = typeof p.ancho_calzada_m === 'number' ? p.ancho_calzada_m : (ANCHO_TIPO[bt] || 6);
+    const anchoDatos = typeof p.ancho_calzada_m === 'number' ? p.ancho_calzada_m : (ANCHO_TIPO[bt] || 6);
     let vel = parseInt(String(p['osm:maxspeed'] ?? ''), 10);
     if (!(vel > 0)) vel = VEL_TIPO[bt] || 30;
+    const carrilesOSM = Number(p.carriles) > 0 ? Number(p.carriles) : 0;   // carriles reales de OpenStreetMap (0 si no se sabe)
+    const cal = completarAceras(p, anchoDatos, typeof p.ancho_acera_m === 'number' ? p.ancho_acera_m : 0, !!p.sentido_unico, carrilesOSM);
     tramos.push({
-      id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho, velocidad: vel,
-      acera: typeof p.ancho_acera_m === 'number' ? p.ancho_acera_m : 0,   // ancho de cada acera (0 si no hay)
-      dib: p.dibujada_como || '',                                         // calle con aceras, adoquín, camino de tierra…
-      unSentido: !!p.sentido_unico,
-      carriles: Number(p.carriles) > 0 ? Number(p.carriles) : 0,                 // carriles reales de OpenStreetMap (0 si no se sabe)
+      id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho: cal.ancho, velocidad: vel,
+      acera: cal.acera,                                                          // ancho de cada acera (0 si no hay)
+      dib: p.dibujada_como || '',                                                // calle con aceras, adoquín, camino de tierra…
+      unSentido: cal.unSentido,
+      carriles: cal.carriles,
       tunel: p['osm:tunnel'] || '',                                              // 'building_passage': pasa bajo un edificio
       pts: g.coordinates.map(c => proyectar(c[0], c[1])),
     });
@@ -1938,7 +1958,7 @@ const FISICA = {
   rodadura: 0.012,
   aero: 0.42,                                  // N·s²/m²: ½ · densidad del aire · Cd · área frontal
   distanciaEjes: 2.6,                          // m
-  agarre: 8.5,                                 // m/s²: aceleración lateral que aguanta el asfalto
+  agarre: 13,                                  // m/s²: aceleración lateral que aguanta el asfalto (unos 1,3 g, como en un juego de conducción)
   fuerzaAtras: 4000,                           // N en marcha atrás
   marchaAtras: 5,                              // m/s (18 km/h) como mucho en marcha atrás
 };
@@ -2038,7 +2058,7 @@ function pasoMotor(c, acel, freno, dt) {
 // del que tiene el asfalto, el coche se abre y pierde velocidad
 function giroCoche(c, dt) {
   const F = FISICA, v = Math.abs(c.v);
-  const ruedas = c.dir * 0.6 / (1 + v / 12);                    // ángulo de las ruedas (rad)
+  const ruedas = c.dir * 0.7 / (1 + v / 30);                    // ángulo de las ruedas (rad): casi todo el giro se mantiene hasta 100 km/h
   let w = v * Math.tan(ruedas) / F.distanciaEjes;
   const maxW = F.agarre * (c.agarreDano ?? 1) / Math.max(v, 0.5);
   c.exceso = 0;   // m/s² de giro que el asfalto no aguanta: el coche derrapa hacia fuera
@@ -4416,12 +4436,17 @@ function construirCoche(color) {
   const cristal = new THREE.MeshPhongMaterial({ color: 0x1c2733, specular: 0xaaaaaa, shininess: 90 });
   const negro = new THREE.MeshLambertMaterial({ color: 0x151515 });
   const caja = (w, h, l, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat); m.position.set(x, y, z); g.add(m); return m; };
-  caja(1.9, 0.55, 4.2, pintura, 0, 0.62, 0);                 // carrocería
-  caja(1.94, 0.22, 4.24, negro, 0, 0.38, 0);                 // bajos y paragolpes
-  caja(1.64, 0.5, 2.0, pintura, 0, 1.13, -0.25);             // techo y pilares
-  caja(1.66, 0.4, 1.7, cristal, 0, 1.12, -0.25);             // cristales laterales
-  const parabrisas = caja(1.6, 0.05, 0.75, cristal, 0, 1.1, 0.88); parabrisas.rotation.x = -0.95;
-  const luneta = caja(1.6, 0.05, 0.6, cristal, 0, 1.1, -1.38); luneta.rotation.x = 0.9;
+  // carrocería: perfil lateral (morro, capó, parabrisas, techo, luneta y maletero) extruido a lo ancho de 1,8 m
+  // los puntos son [z, y] con el morro en +z; la ventanilla es una capa más estrecha y oscura a cada lado
+  const perfil = (puntos, ancho) => {
+    const s = new THREE.Shape(); puntos.forEach(([z, y], i) => (i ? s.lineTo(-z, y) : s.moveTo(-z, y)));
+    const geo = new THREE.ExtrudeGeometry(s, { depth: ancho, bevelEnabled: false }).rotateY(Math.PI / 2).translate(-ancho / 2, 0, 0);
+    return new THREE.Mesh(geo, pintura);
+  };
+  const carroceria = [[-2.1, 0.32], [2.1, 0.32], [2.1, 0.62], [1.85, 0.8], [0.9, 0.92], [0.42, 1.36], [0.12, 1.42], [-0.85, 1.42], [-1.35, 1.2], [-2.1, 0.95]];
+  const ventanilla = [[0.84, 0.95], [0.4, 1.32], [0.12, 1.36], [-0.8, 1.36], [-1.26, 1.16], [-0.84, 0.98]];
+  g.add(perfil(carroceria, 1.8));
+  const vent = perfil(ventanilla, 1.82); vent.material = cristal; g.add(vent);
   const faro = new THREE.MeshBasicMaterial({ color: 0xfff6d8 }), piloto = new THREE.MeshBasicMaterial({ color: 0x9c1010 });
   for (const x of [-0.68, 0.68]) { caja(0.42, 0.14, 0.04, faro, x, 0.72, 2.11); caja(0.42, 0.14, 0.04, piloto, x, 0.74, -2.11); }
   caja(0.5, 0.1, 0.03, new THREE.MeshLambertMaterial({ color: 0xe8e8e8 }), 0, 0.5, 2.13);   // matrícula
@@ -4483,11 +4508,21 @@ const CATALOGO_COCHES = Object.fromEntries([
 let cocheElegido = 'basico';
 const cochesCargados = {};
 // Escala, gira y apoya el modelo: 4,2 m de largo, centrado en el coche y con las ruedas sobre el suelo
-function prepararModeloCoche(modelo, giro, largo = 4.2) {
+// Anchura y altura (m) de cada modelo de turismo a 4,2 m de largo, como un coche real. Si el modelo es más ancho o más alto,
+// se estrecha o se baja (nunca se agranda): así no quedan cajas anchas y altas
+const MEDIDAS_COCHE = {
+  'modelos/coches/sedan.glb': [1.84, 1.5], 'modelos/coches/hatch.glb': [1.84, 1.45], 'modelos/coches/deportivo.glb': [1.9, 1.3],
+  'modelos/coches/suv.glb': [1.9, 1.75], 'modelos/coches/suv-lujo.glb': [1.95, 1.7], 'modelos/coches/suv-compacto.glb': [1.85, 1.7],
+  'modelos/coches/taxi.glb': [1.84, 1.55], 'modelos/coches/policia.glb': [1.9, 1.5], 'modelos/coches/furgoneta.glb': [2, 1.95],
+  'modelos/carconcept.glb': [1.95, 1.3], 'modelos/trafico-concept.glb': [1.95, 1.3],
+};
+function prepararModeloCoche(modelo, giro, largo = 4.2, medidas = null) {
   modelo.rotation.y = giro;
   modelo.updateMatrixWorld(true);
   let caja = new THREE.Box3().setFromObject(modelo);
-  modelo.scale.setScalar(largo / caja.getSize(new THREE.Vector3()).z);
+  const tam = caja.getSize(new THREE.Vector3()), k = largo / tam.z;
+  const sx = medidas ? Math.min(1, medidas[0] / (tam.x * k)) : 1, sy = medidas ? Math.min(1, medidas[1] / (tam.y * k)) : 1;
+  modelo.scale.set(k * sx, k * sy, k);
   modelo.updateMatrixWorld(true);
   caja = new THREE.Box3().setFromObject(modelo);
   const c = caja.getCenter(new THREE.Vector3());
@@ -4499,7 +4534,7 @@ function cargarCoche(clave) {
     cochesCargados[clave] = clave === 'basico'
       ? Promise.resolve(construirCoche(0xe74c3c))
       : new Promise((res, rej) => new THREE.GLTFLoader().load(CATALOGO_COCHES[clave].archivo,
-          g => res(prepararModeloCoche(g.scene, CATALOGO_COCHES[clave].giro)), undefined, rej));
+          g => res(prepararModeloCoche(g.scene, CATALOGO_COCHES[clave].giro, 4.2, MEDIDAS_COCHE[CATALOGO_COCHES[clave].archivo])), undefined, rej));
   }
   return cochesCargados[clave];
 }
@@ -4854,8 +4889,6 @@ $('btnCamara').addEventListener('click', cambiarCamara);
 const N_TRAFICO = 40, N_PEATONES = 120, N_CRUZAN = 14, MAX_PERROS = 24, N_CICLISTAS = 14, RADIO_TRAFICO = 320;
 const COLORES_PERRO = [0x8b5a2b, 0x1c1c1c, 0xe8dcc4, 0xc89b5a, 0x6e6e6e, 0xa0522d];
 let ciclistas = [], mallasPerros = null, mallasCiclistas = null, farosTrafico = null, hacesTrafico = null;
-// Peatones de modelos/peatones/ (Kenney Blocky Characters, CC0): 1,75 m, con el frontal hacia +Z
-const ARCHIVOS_PEATONES = [1, 2, 3, 4, 5, 6, 7, 8].map(n => `modelos/peatones/peaton-${n}.glb`);
 const COLORES_COCHE = [0xe63946, 0x1d3557, 0xf1faee, 0x457b9d, 0xf4a261, 0x2a9d8f, 0x6d6875, 0xffb703, 0x8d99ae];
 let rngTrafico = mulberry32(1);
 // Tramos del grafo que empiezan a menos de R metros del coche y cumplen la condición
@@ -4972,9 +5005,117 @@ function geometriaUnida(raiz) {
 }
 function cargarModelosTrafico() {
   if (!modelosTrafico) modelosTrafico = Promise.all(ARCHIVOS_TRAFICO.map(a => new Promise((res, rej) =>
-    new THREE.GLTFLoader().load(a.archivo, g => { const m = geometriaUnida(prepararModeloCoche(g.scene, 0, a.largo)); m.geo.computeBoundingBox(); m.largo = a.largo; res(m); }, undefined, () => res(null)))))
+    new THREE.GLTFLoader().load(a.archivo, g => { const m = geometriaUnida(prepararModeloCoche(g.scene, 0, a.largo, MEDIDAS_COCHE[a.archivo])); m.geo.computeBoundingBox(); m.largo = a.largo; res(m); }, undefined, () => res(null)))))
     .then(lista => lista.map((m, i) => m && Object.assign(m, { peso: ARCHIVOS_TRAFICO[i].peso })).filter(Boolean));   // si alguno no carga, se sigue con los demás
   return modelosTrafico;
+}
+// --- personas: figuras humanas hechas aquí (cabeza, torso, brazos y piernas con proporciones reales). Todas las de la calle
+// comparten una malla instanciada; el paso mueve brazos y piernas en el shader y cada una lleva sus colores ---
+const PIELES = [0xf3cba8, 0xe2b08a, 0xc68a5c, 0x9d6a42, 0x6e4a2e, 0x4a3020];
+const CAMISAS = [0x2e4a7d, 0xb23a3a, 0x3d7d4a, 0xe8e2d4, 0x2b2b2b, 0xd9a43a, 0x6a4c9c, 0x4aa3b8, 0x8c8f94, 0xd96c8a];
+const PANTALONES = [0x2c3240, 0x4a4f5c, 0x6b5a45, 0x1f2a44, 0xd8cfb8, 0x3a3a3a, 0x5a3f2a];
+const PELOS = [0x1a1410, 0x3b2a1e, 0x6d4c2b, 0xa98456, 0xd8c39a, 0x8a8a8a, 0x222222];
+// Cada vértice lleva parte = (pieza, miembro). Piezas: 0 piel, 1 camisa, 2 pantalón, 3 pelo, 4 zapato, 5 ojo.
+// Miembros: 0 cuerpo, 1 brazo izq., 2 brazo der., 3 pierna izq., 4 pierna der. (los miembros pivotan en el hombro o la cadera)
+function construirPersona() {
+  const partes = [];
+  const añade = (geo, pieza, miembro = 0) => partes.push({ geo: geo.toNonIndexed(), pieza, miembro });
+  // piernas y zapatos (morro hacia +z)
+  for (const [m, x] of [[3, -0.105], [4, 0.105]]) {
+    añade(new THREE.CylinderGeometry(0.095, 0.075, 0.46, 12).translate(x, 0.69, 0), 2, m);
+    añade(new THREE.CylinderGeometry(0.075, 0.055, 0.42, 12).translate(x, 0.25, 0), 2, m);
+    añade(new THREE.BoxGeometry(0.12, 0.09, 0.27).translate(x, 0.045, 0.05), 4, m);
+  }
+  // caderas y torso con camisa: hombros, pecho y cintura con su perfil
+  añade(new THREE.SphereGeometry(0.17, 14, 10).scale(1.05, 0.6, 0.9).translate(0, 0.93, 0), 2);
+  const torso = [[0.15, 0.92], [0.165, 0.99], [0.165, 1.06], [0.148, 1.15], [0.176, 1.26], [0.2, 1.36], [0.19, 1.45], [0.14, 1.52], [0.05, 1.54]].map(([r, y]) => new THREE.Vector2(r, y));
+  añade(new THREE.LatheGeometry(torso, 14).scale(1, 1, 0.64), 1);
+  // cuello, cabeza, pelo, nariz y ojos
+  añade(new THREE.CylinderGeometry(0.055, 0.06, 0.12, 10).translate(0, 1.6, 0), 0);
+  añade(new THREE.SphereGeometry(1, 16, 12).scale(0.078, 0.11, 0.095).translate(0, 1.655, 0), 0);
+  añade(new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, 0, 1.25).scale(0.084, 0.122, 0.104).translate(0, 1.66, -0.008), 3);
+  añade(new THREE.SphereGeometry(0.016, 6, 5).scale(1, 1.2, 1.4).translate(0, 1.64, 0.095), 0);
+  for (const x of [-0.03, 0.03]) añade(new THREE.SphereGeometry(0.011, 5, 4).translate(x, 1.667, 0.09), 5);
+  // brazos: la manga pivota en el hombro; antebrazo y mano siguen al brazo, en piel
+  for (const [m, x] of [[1, -0.215], [2, 0.215]]) {
+    añade(new THREE.SphereGeometry(0.055, 10, 8).translate(x, 1.44, 0), 1, m);
+    añade(new THREE.CylinderGeometry(0.052, 0.045, 0.28, 10).translate(x, 1.30, 0), 1, m);
+    añade(new THREE.CylinderGeometry(0.045, 0.036, 0.26, 10).translate(x, 1.03, 0), 0, m);
+    añade(new THREE.SphereGeometry(0.042, 8, 6).scale(0.9, 1.25, 0.6).translate(x, 0.86, 0.01), 0, m);
+  }
+  // una sola geometría, con la parte de cada vértice
+  let nV = 0;
+  for (const p of partes) nV += p.geo.attributes.position.count;
+  const pos = new Float32Array(nV * 3), nor = new Float32Array(nV * 3), parte = new Float32Array(nV * 2);
+  let o = 0;
+  for (const p of partes) {
+    const P = p.geo.attributes.position, N = p.geo.attributes.normal;
+    pos.set(P.array, o * 3); nor.set(N.array, o * 3);
+    for (let i = 0; i < P.count; i++) { parte[(o + i) * 2] = p.pieza; parte[(o + i) * 2 + 1] = p.miembro; }
+    o += P.count;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('parte', new THREE.BufferAttribute(parte, 2));
+  return geo;
+}
+// Material de las personas: iluminación normal de Lambert, con el paso (brazos y piernas) y los colores de cada una en el shader.
+// Un atributo instanciado (aPaso) guarda la fase y la amplitud del paso; los colores van en aPiel, aCamisa, aPantalon y aPelo
+let materialPersonas = null;
+function crearMaterialPersonas() {
+  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  mat.onBeforeCompile = sh => {
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute vec2 parte;
+attribute vec2 aPaso;
+attribute vec3 aCamisa;
+attribute vec3 aPantalon;
+attribute vec3 aPiel;
+attribute vec3 aPelo;
+varying vec3 vBase;
+varying vec3 vTinte;
+mat3 rotX(float a) { float c = cos(a), s = sin(a); return mat3(1.0, 0.0, 0.0, 0.0, c, s, 0.0, -s, c); }
+vec3 pivotePara(float m) { return m < 1.5 ? vec3(-0.215, 1.44, 0.0) : m < 2.5 ? vec3(0.215, 1.44, 0.0) : m < 3.5 ? vec3(-0.105, 0.92, 0.0) : vec3(0.105, 0.92, 0.0); }`)
+      .replace('#include <beginnormal_vertex>', `float pieza = parte.x, miembro = parte.y;
+float f = sin(aPaso.x);
+float ang = miembro == 1.0 ? -0.45 * aPaso.y * f : miembro == 2.0 ? 0.45 * aPaso.y * f : miembro == 3.0 ? 0.55 * aPaso.y * f : miembro == 4.0 ? -0.55 * aPaso.y * f : 0.0;
+mat3 rot = rotX(ang);
+vec3 objectNormal = miembro > 0.5 ? rot * normal : normal;
+vBase = pieza < 0.5 ? aPiel : pieza < 1.5 ? aCamisa : pieza < 2.5 ? aPantalon : pieza < 3.5 ? aPelo : pieza < 4.5 ? vec3(0.13, 0.11, 0.1) : vec3(0.04, 0.03, 0.03);
+#ifdef USE_INSTANCING_COLOR
+vTinte = instanceColor;
+#else
+vTinte = vec3(1.0);
+#endif`)
+      .replace('#include <begin_vertex>', 'vec3 pv = pivotePara(miembro);\nvec3 transformed = miembro > 0.5 ? pv + rot * (position - pv) : position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vBase;
+varying vec3 vTinte;`)
+      .replace('#include <color_fragment>', 'diffuseColor.rgb = vBase * vTinte;');
+  };
+  mat.customProgramCacheKey = () => 'personas';
+  return mat;
+}
+// Una malla con n personas: cada una tiene sus atributos (colores y paso) y su instancia
+function mallaPersonas(n) {
+  if (!materialPersonas) materialPersonas = crearMaterialPersonas();
+  const geo = construirPersona(), k = Math.max(1, n);
+  for (const nombre of ['aCamisa', 'aPantalon', 'aPiel', 'aPelo']) geo.setAttribute(nombre, new THREE.InstancedBufferAttribute(new Float32Array(k * 3), 3));
+  geo.setAttribute('aPaso', new THREE.InstancedBufferAttribute(new Float32Array(k * 2), 2));
+  const im = new THREE.InstancedMesh(geo, materialPersonas, k);
+  im.frustumCulled = false;
+  im.castShadow = sombras;
+  for (let i = 0; i < k; i++) im.setColorAt(i, BLANCO_IRA);   // tinte de la ira: blanco (sin ira)
+  return im;
+}
+// Colores al azar de la persona i de la malla
+function colorearPersona(im, i, rng) {
+  const elegir = paleta => new THREE.Color(paleta[Math.floor(rng() * paleta.length)]);
+  const poner = (nombre, c) => im.geometry.attributes[nombre].array.set([c.r, c.g, c.b], i * 3);
+  poner('aPiel', elegir(PIELES)); poner('aCamisa', elegir(CAMISAS)); poner('aPantalon', elegir(PANTALONES)); poner('aPelo', elegir(PELOS));
 }
 // Malla de peatones: cuerpo de color y cabeza, en instancias
 function limpiarTrafico() {
@@ -5040,26 +5181,10 @@ async function iniciarTrafico() {
   });
   crearMallasPerros();
   iniciarCiclistas();
-  let modelosPeatones = null;
-  try { modelosPeatones = await Promise.all(ARCHIVOS_PEATONES.map(geometriaModelo)); } catch (err) { modelosPeatones = null; }
-  if (modelosPeatones && modelosPeatones.length) {
-    const cuenta = modelosPeatones.map(() => 0);
-    peatones.forEach(p => { p.modelo = Math.floor(rngTrafico() * modelosPeatones.length); p.idx = cuenta[p.modelo]++; });
-    mallaPeatones = modelosPeatones.map((m, k) => {
-      const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k]));
-      im.frustumCulled = false;
-      im.castShadow = sombras;
-      scene.add(im);
-      return im;
-    });
-  } else {
-    // sin modelos de peatones: un cilindro de color por peatón
-    const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.24, 1.7, 6).translate(0, 0.85, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, peatones.length));
-    im.frustumCulled = false;
-    peatones.forEach((p, i) => { p.modelo = 0; p.idx = i; p.base = new THREE.Color().setHSL(p.color, 0.5, 0.45); im.setColorAt(i, p.base); });
-    mallaPeatones = [im];
-    scene.add(im);
-  }
+  // personas: una malla instanciada para todas; cada una con sus colores (y su tamaño, en actualizarPeatones)
+  mallaPeatones = [mallaPersonas(peatones.length)];
+  peatones.forEach((p, i) => { p.modelo = 0; p.idx = i; colorearPersona(mallaPeatones[0], i, rngTrafico); });
+  scene.add(mallaPeatones[0]);
   peatones.forEach(p => asignarPerfil(p, rngTrafico));
 }
 // Contacto de un círculo (x, z, R) con el tráfico: cada coche son dos círculos de 0,95 m (delante y detrás)
@@ -5157,9 +5282,10 @@ const proyectiles = [];   // objetos que lanzan los peatones (botellas, sombrero
 let geoProyectil = null, matProyectil = null, avisoPeatonHasta = 0;
 // Perfil de un peatón (una vez, con su modelo): el modelo da la edad del anciano y del agente; lo demás sale al azar
 function asignarPerfil(p, rng) {
-  const edad = p.modelo === 4 ? 'anciano' : ['nino', 'adolescente', 'joven', 'adulto', 'mediana'][Math.floor(rng() * 5)];
-  const ocup = p.modelo === 5 ? 'policia' : rng() < 0.35 ? OCUPACIONES[Math.floor(rng() * OCUPACIONES.length)] : null;
-  Object.assign(p, { edad, ocup, pers: PERSONALIDADES[Math.floor(rng() * PERSONALIDADES.length)], ira: ocup === 'manifestante' ? 20 : 0, escala: edad === 'nino' ? 0.62 : edad === 'adolescente' ? 0.85 : 1 });
+  const edad = rng() < 0.12 ? 'anciano' : ['nino', 'adolescente', 'joven', 'adulto', 'mediana'][Math.floor(rng() * 5)];
+  const ocup = rng() < 0.03 ? 'policia' : rng() < 0.35 ? OCUPACIONES[Math.floor(rng() * OCUPACIONES.length)] : null;
+  Object.assign(p, { edad, ocup, pers: PERSONALIDADES[Math.floor(rng() * PERSONALIDADES.length)], ira: ocup === 'manifestante' ? 20 : 0, escala: edad === 'nino' ? 0.62 : edad === 'adolescente' ? 0.85 : 1,
+    anchura: 0.93 + rng() * 0.14, altura: 0.97 + rng() * 0.07 });
 }
 // Estado de partida al colocar al peatón (la ira y el perfil se quedan)
 function reiniciarEstadoPeaton(p) {
@@ -5304,10 +5430,17 @@ function actualizarPeatones(dt) {
     const h = p.mira ? Math.atan2(p.mira.x - x, p.mira.z - z) : p.mirar ? Math.atan2(coche.x - x, coche.z - z) : pos.h;   // se vuelve a mirar el golpe o el claxon, o al coche si se enfrenta
     p.ultimo = { x, z, h };
     const e = p.escala || 1;
-    m.compose(v.set(x, bote + salto, z), q.setFromAxisAngle(eje, h), escala.set(e, e, e));
+    m.compose(v.set(x, bote + salto, z), q.setFromAxisAngle(eje, h), escala.set(e * (p.anchura || 1), e * (p.altura || 1), e));
+    // el paso: la velocidad medida sobre el suelo mueve brazos y piernas (y se para cuando el peatón está quieto)
+    const rapidez = p.px === undefined ? 0 : Math.hypot(x - p.px, z - p.pz) / Math.max(dt, 1e-3);
+    p.px = x; p.pz = z;
+    p.amp = (p.amp || 0) + (Math.min(1, rapidez / 0.8) - (p.amp || 0)) * Math.min(1, dt * 6);
+    p.fase = ((p.fase || 0) + dt * Math.min(rapidez, 3) * 4.6) % (2 * Math.PI);
     const im = mallaPeatones[p.modelo];
     if (im) {
       im.setMatrixAt(p.idx, m);
+      im.geometry.attributes.aPaso.array[p.idx * 2] = p.fase;
+      im.geometry.attributes.aPaso.array[p.idx * 2 + 1] = p.amp;
       // se tiñe de rojo según la ira (sin ira, el color de siempre)
       const a = Math.min(1, (p.ira || 0) / 100);
       COLOR_IRA.setRGB(1, 1 - 0.55 * a, 1 - 0.55 * a);
@@ -5315,7 +5448,11 @@ function actualizarPeatones(dt) {
       im.setColorAt(p.idx, COLOR_IRA);
     }
   });
-  mallaPeatones.forEach(im => { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; });
+  mallaPeatones.forEach(im => {
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.geometry.attributes.aPaso.needsUpdate = true;
+  });
   actualizarPerros(dt, ahora);
 }
 // --- perros: cuerpo, patas que trotan y rabo que se mueve, con su correa; van delante de su dueño y ladran al coche ---
@@ -5857,12 +5994,9 @@ async function decoracionKenney(plan, cum, deco, obst, luz0) {
 // Público: figuras de peatones que botan y levantan los brazos (botan más cuando pasa el coche o hay fiesta)
 async function crearPublico(lista) {
   if (!lista.length) return null;
-  let modelos;
-  try { modelos = await Promise.all(ARCHIVOS_PEATONES.slice(0, 4).map(geometriaModelo)); } catch (err) { return null; }
-  const cuenta = modelos.map(() => 0);
-  lista.forEach((p, i) => { p.modelo = i % modelos.length; p.idx = cuenta[p.modelo]++; });
-  const mallas = modelos.map((m, k) => { const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k])); im.frustumCulled = false; im.castShadow = sombras; return im; });
-  return { mallas, lista };
+  const im = mallaPersonas(lista.length);
+  lista.forEach((p, i) => { p.modelo = 0; p.idx = i; colorearPersona(im, i, Math.random); });
+  return { mallas: [im], lista };
 }
 function actualizarPublico(ahora) {
   const P = carrera && carrera.publico;
@@ -5884,7 +6018,7 @@ const PILOTOS = ['Lola Márquez', 'Curro Domínguez', 'Rocío Vázquez', 'Manolo
 const MODELOS_RIVALES = ['modelos/rivales/race.glb', 'modelos/rivales/race-future.glb', 'modelos/rivales/sedan-sports.glb', 'modelos/rivales/hatchback-sports.glb'];
 const cocheRival = {};
 function modeloRival(archivo) {
-  if (!cocheRival[archivo]) cocheRival[archivo] = new Promise((res, rej) => new THREE.GLTFLoader().load(archivo, g => res(prepararModeloCoche(g.scene, 0)), undefined, rej));
+  if (!cocheRival[archivo]) cocheRival[archivo] = new Promise((res, rej) => new THREE.GLTFLoader().load(archivo, g => res(prepararModeloCoche(g.scene, 0, 4.2, MEDIDAS_COCHE[archivo])), undefined, rej));
   return cocheRival[archivo];
 }
 // Puesto k de la parrilla: filas de dos, cada 8 m, detrás de la línea de salida
@@ -6718,7 +6852,12 @@ function bucle() {
   materialAgua.uniforms.uTiempo.value = ahora % 1000;   // módulo: los móviles calculan peor con números grandes
   actualizarMobiliario(ahora);
   actualizarBloquesFarolas();
-  if (!volante.activo) volante.ang *= Math.exp(-9 * dt);   // la ruleta vuelve sola al centro
+  // la ruleta vuelve sola al centro; con las flechas, gira hacia donde se dirige el coche (así se ve el giro)
+  if (!volante.activo) {
+    const teclas = (controles.izq ? 1 : 0) - (controles.der ? 1 : 0);
+    if (teclas) volante.ang += (-teclas * GIRO_RULETA - volante.ang) * Math.min(1, dt * 10);
+    else volante.ang *= Math.exp(-9 * dt);
+  }
   pintarRuleta();
   if (estado === 'cuenta') {
     cuenta -= dt;
