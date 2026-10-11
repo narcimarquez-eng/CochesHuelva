@@ -1307,7 +1307,27 @@ async function patchSat(sat,s){
   sat.failed=still;return n;
 }
 const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
+/* OpenStreetMap: si ningún servidor da la zona entera (suele ser por tiempo en las zonas grandes), se pide por cuartos; si las dos
+   primeras partes tampoco llegan, el servidor no está y no se insiste. Los cuartos que fallen se piden otra vez por cuartos (una vez más)
+   y luego se junta todo sin repetir. Si falta algún trozo, el mapa queda incompleto (y se vuelve a pedir al preparar la zona otra vez) */
 async function fetchOSM(geo,areaKm2){
+  const j=await fetchOSMuna(geo,areaKm2,0);
+  if(j||areaKm2<0.2)return j;
+  repLog('osm','La zona entera no ha llegado: la pido en cuatro partes más pequeñas.');
+  return await fetchOSMpartes(geo,areaKm2,1);
+}
+async function fetchOSMpartes(geo,areaKm2,nivel){
+  const la=(geo.n+geo.s)/2,lo=(geo.e+geo.w)/2,partes=[{n:geo.n,s:la,w:geo.w,e:lo},{n:geo.n,s:la,w:lo,e:geo.e},{n:la,s:geo.s,w:geo.w,e:lo},{n:la,s:geo.s,w:lo,e:geo.e}];
+  const res=[];
+  for(const p of partes){res.push(await fetchOSMuna(p,areaKm2/4,nivel));if(res.length>=2&&!res.some(Boolean))return null;}
+  if(!res.some(Boolean))return null;
+  if(nivel<2&&areaKm2/4>=0.2)for(let i=0;i<4;i++)if(!res[i]){repLog('osm','Una de las partes no ha llegado: la pido en cuatro más pequeñas.');res[i]=await fetchOSMpartes(partes[i],areaKm2/4,nivel+1);}
+  const vistos=new Set(),elements=[];let len=0,incompleto=res.some(r=>!r||r.incompleto);
+  for(const r of res){if(!r)continue;len+=r.__len||0;for(const e of r.elements){const k=e.type+'/'+e.id;if(vistos.has(k))continue;vistos.add(k);elements.push(e);}}
+  repLog('osm',`Juntados ${fmt(elements.length)} elementos de las cuatro partes${incompleto?' (falta alguna: el mapa queda incompleto)':''}.`);
+  const out={elements,__len:len};if(incompleto)out.incompleto=true;return out;
+}
+async function fetchOSMuna(geo,areaKm2,nivel){
   const bb=`${geo.s},${geo.w},${geo.n},${geo.e}`,big=areaKm2>45;
   const q=`[out:json][timeout:90];(
 way["natural"~"^(water|wetland|beach|sand|shingle|wood|scrub|heath|grassland|bare_rock|scree|dune)$"](${bb});
@@ -1466,30 +1486,48 @@ function trozoDentro(poligono){
     for(let i=0;i<P.length;i++){const a=P[i],b=P[(i+1)%P.length];if(lados.some(([c,d])=>cruza(a,b,c,d)))return true;}
     return false;};
 }
-async function fetchCatastro(g,have=null,dentro=null){
-  const {zona,srs,jobs:todos}=catTiles(g),jobs=dentro?todos.filter(dentro):todos,tiles={},failed=[],errs=new Map();
-  if(have)for(const j of jobs)if(have[j.key])tiles[j.key]=have[j.key];
-  const todo=jobs.filter(j=>!tiles[j.key]),guardados=jobs.length-todo.length;
+/* Trozos que fallan: se vuelven a pedir partidos en cuatro (700 m → 350 → 175 → 88 m), con claves «trozo/cuadrante/…».
+   Al reintentar otro día, los que quedaron sin llegar se piden ya partidos */
+const TROZO_MIN=100;
+function hijosDeTrozo(j){const [x0,y0,x1,y1]=j.bb,xm=(x0+x1)/2,ym=(y0+y1)/2;
+  return [[x0,y0,xm,ym],[xm,y0,x1,ym],[x0,ym,xm,y1],[xm,ym,x1,y1]].map((bb,i)=>({key:j.key+'/'+i,bb}));}
+const partible=j=>j.bb[2]-j.bb[0]>TROZO_MIN*1.5;
+function trozoDeClave(key,padres){const [p,...camino]=key.split('/');let j=padres.get(p);if(!j)return null;for(const q of camino){j=hijosDeTrozo(j)[+q];if(!j)return null;}return j;}
+// Lo que queda por pedir: los trozos sin nada guardado y, de los que fallaron, sus cuatro partes
+function trozosPendientes(jobs,tiles,failed){
+  const padres=new Map(jobs.map(j=>[j.key,j])),claves=Object.keys(tiles||{}),out=[];
+  for(const j of jobs){
+    if(tiles&&tiles[j.key])continue;
+    const fal=(failed||[]).filter(f=>f===j.key||f.startsWith(j.key+'/'));
+    if(fal.length){for(const f of fal){const t=trozoDeClave(f,padres);if(t)out.push(...(partible(t)?hijosDeTrozo(t):[t]));}}
+    else if(!claves.some(k=>k.startsWith(j.key+'/')))out.push(j);}
+  return out;
+}
+// Lo guardado que es de esta zona (trozos enteros o partes de trozos)
+const deEstaZona=(tiles,jobs)=>{const out={};if(!tiles)return out;const ok=new Set(jobs.map(j=>j.key));for(const k in tiles)if(ok.has(k.split('/')[0]))out[k]=tiles[k];return out;};
+async function fetchCatastro(g,have=null,dentro=null,failedPrev=null){
+  const {zona,srs,jobs:todos}=catTiles(g),jobs=dentro?todos.filter(dentro):todos,tiles=deEstaZona(have,jobs),failed=[],errs=new Map();
+  const todo=trozosPendientes(jobs,tiles,failedPrev),guardados=Object.keys(tiles).length;
   const urlDe=(bb,t)=>`${CATASTRO_URL}?z=${srs}&bbox=${bb.map(v=>v.toFixed(1)).join(',')}${t?'&t=building':''}`;
-  let k=0,lastErr=null,okN=0,stop=false,motivo='';
+  let k=0,lastErr=null,okN=0,stop=false,motivo='',partidos=0;
   async function worker(){
     while(k<todo.length&&!stop){const job=todo[k++];let ok=false,err=null;
       for(const t of [false,true]){
         try{const r=await fetch(urlDe(job.bb,t));if(!r.ok)throw await errHTTP(r);tiles[job.key]=leerGMLCatastro(await r.text(),zona);ok=true;break;}
         catch(e){err=e;if((e.status===404&&!e.propio)||e instanceof TypeError)break;}}   // sin catastro.php o sin conexión no vale la pena repetir
       if(ok)okN++;
+      else if(partible(job)&&!(err&&err.status===404&&!err.propio)&&!(err instanceof TypeError)){todo.splice(k,0,...hijosDeTrozo(job));partidos++;}   // en cuatro más pequeños, que se piden enseguida (si el Catastro está caído se nota pronto y se para)
       else{lastErr=err;failed.push(job.key);cuenta(errs,errCat(err));if(!motivo)motivo=err&&err.propio&&err.body?err.body:errCat(err);
         if((failed.length>=3&&!okN&&!Object.keys(tiles).length)||(err&&err.status===404&&!err.propio)||(err instanceof TypeError&&location.protocol==='file:'))stop=true;}}
   }
   await Promise.all(Array.from({length:4},worker));
   const sinPedir=stop?todo.filter(j=>!tiles[j.key]&&!failed.includes(j.key)).length:0;
   if(stop)for(const j of todo)if(!tiles[j.key]&&!failed.includes(j.key))failed.push(j.key);
-  repLog('cat',`${jobs.length} trozos de 700 m pedidos a ${CATASTRO_URL}${location.host?` en ${location.host}`:''}: ${okN} han llegado ahora${guardados?`, ${guardados} ya estaban guardados`:''}${failed.length?`, ${failed.length} sin llegar`:''}.`);
+  repLog('cat',`${jobs.length} trozos de 700 m pedidos a ${CATASTRO_URL}${location.host?` en ${location.host}`:''}: ${okN} han llegado ahora${guardados?`, ${guardados} ya estaban guardados`:''}${partidos?`; ${partidos} que fallaron se han vuelto a pedir partidos en cuatro`:''}${failed.length?`, ${failed.length} sin llegar`:''}.`);
   for(const t of agrupa(errs))repLog('cat',`Trozos que fallaron: ${t}.`);
   if(sinPedir)repLog('cat',`Tras varios fallos seguidos no he pedido los otros ${sinPedir} trozos, para no insistir en balde.`);
   if(!Object.keys(tiles).length&&failed.length){const e=lastErr||new Error('sin respuesta');e.cat=errCat(lastErr);throw e;}
-  const partes=[],vistos=new Set();
-  for(const j of jobs){const a=tiles[j.key];if(!a)continue;for(const p of a){const key=p.id||p.ring[0].join(',');if(vistos.has(key))continue;vistos.add(key);partes.push(p);}}
+  const partes=catPartes({tiles});   // de los trozos enteros y de sus partes, sin repetir
   return {partes,tiles,failed,fails:failed.length,total:jobs.length,fetched:okN,guardados,errs:agrupa(errs),motivo};
 }
 
@@ -1515,17 +1553,18 @@ function leerGMLParcelas(txt,zona){
   }
   return out;
 }
-async function fetchParcelas(g,have=null,dentro=null){
-  const {zona,srs,jobs:todos}=catTiles(g),jobs=dentro?todos.filter(dentro):todos,tiles={},failed=[];
-  if(have)for(const j of jobs)if(have[j.key])tiles[j.key]=have[j.key];
-  const todo=jobs.filter(j=>!tiles[j.key]);let k=0,okN=0,viejo=false;
+async function fetchParcelas(g,have=null,dentro=null,failedPrev=null){
+  const {zona,srs,jobs:todos}=catTiles(g),jobs=dentro?todos.filter(dentro):todos,tiles=deEstaZona(have,jobs),failed=[];
+  const todo=trozosPendientes(jobs,tiles,failedPrev);let k=0,okN=0,viejo=false,stop=false;
   async function worker(){
-    while(k<todo.length&&!viejo){const job=todo[k++];
+    while(k<todo.length&&!viejo&&!stop){const job=todo[k++];
       try{const r=await fetch(`${CATASTRO_URL}?z=${srs}&bbox=${job.bb.map(v=>v.toFixed(1)).join(',')}&t=parcela`);if(!r.ok)throw await errHTTP(r);tiles[job.key]=leerGMLParcelas(await r.text(),zona);okN++;}
-      catch(e){if(e.viejo)viejo=true;else failed.push(job.key);}}
+      catch(e){if(e.viejo)viejo=true;else if(partible(job)&&!(e instanceof TypeError))todo.splice(k,0,...hijosDeTrozo(job));   // si falla, en cuatro más pequeños
+        else{failed.push(job.key);if(failed.length>=3&&!okN&&!Object.keys(tiles).length)stop=true;}}}   // nada de nada: el Catastro no contesta, no se insiste
   }
   await Promise.all(Array.from({length:3},worker));
   if(viejo)return {viejo:true,tiles:{},failed:[]};
+  if(stop)failed.splice(0,failed.length,...jobs.map(j=>j.key));   // no ha llegado nada: fallan los trozos enteros (la próxima vez se empieza otra vez por sus partes)
   return {tiles,failed,fetched:okN,total:jobs.length};
 }
 function parcelasDe(par){const out=[],vistos=new Set();for(const k in par.tiles||{})for(const p of par.tiles[k]){const key=p.ref||p.ring[0].join(',');if(vistos.has(key))continue;vistos.add(key);out.push(p);}return out;}
@@ -3104,16 +3143,17 @@ async function buildWorld(src){
   if(src.geo){
     const area=src.wM*src.hM/1e6;busy('Descargando la foto aérea y el mapa de OpenStreetMap…',0);
     const raw=src.raw||{};
-    if(raw.osm)repSet('osm','ok',`Guardado en este navegador (${fmt((raw.osm.elements||[]).length)} elementos): no se ha descargado nada.`);
-    const pO=raw.osm?Promise.resolve(raw.osm):fetchOSM(src.geo,area);
+    const osmEntero=raw.osm&&!raw.osm.incompleto;   // si quedó incompleto, se vuelve a pedir (y si no llega, vale lo guardado)
+    if(osmEntero)repSet('osm','ok',`Guardado en este navegador (${fmt((raw.osm.elements||[]).length)} elementos): no se ha descargado nada.`);
+    const pO=osmEntero?Promise.resolve(raw.osm):fetchOSM(src.geo,area).then(j=>j&&!(j.incompleto&&raw.osm&&raw.osm.elements.length>j.elements.length)?j:(raw.osm||j));
     const catOk=enEspana(src.geo)&&area<=CAT_MAX_KM2,catDone=raw.cat&&(!raw.cat.tiles||!(raw.cat.failed||[]).length);
     if(!enEspana(src.geo))repSet('cat','nada','Fuera de España no hay Catastro: las casas salen de OpenStreetMap.');
     else if(!catOk)repSet('cat','nada',`La zona mide ${fmt(area,1)} km² y el Catastro solo se pide hasta ${CAT_MAX_KM2} km²: las casas salen de OpenStreetMap.`);
     const pC=catDone?Promise.resolve({partes:raw.cat.partes||catPartes(raw.cat),fails:0,cached:true})
-      :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles,trozoDentro(src.poligono)).catch(e=>({err:e})):null;
+      :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles,trozoDentro(src.poligono),raw.cat&&raw.cat.failed).catch(e=>({err:e})):null;
     // parcelas: solo con Catastro; las que faltan (o todas, si catastro.php no sabía darlas) se vuelven a pedir
     const parDone=raw.par&&!raw.par.viejo&&!(raw.par.failed||[]).length;
-    const pP=catOk&&!parDone?fetchParcelas(src.geo,raw.par&&raw.par.tiles,trozoDentro(src.poligono)).catch(e=>({err:e})):null;
+    const pP=catOk&&!parDone?fetchParcelas(src.geo,raw.par&&raw.par.tiles,trozoDentro(src.poligono),raw.par&&raw.par.failed).catch(e=>({err:e})):null;
     fresh={sat:false,osm:null,cat:null,par:null};
     if(raw.sat&&raw.sat.blob){busy('Abriendo la foto aérea guardada…',null);sat=await satFromBlob(raw.sat);let n0=0,n=0;
       if(!sat)repLog('sat','La foto guardada no se ha podido leer: la vuelvo a descargar.');
@@ -3124,8 +3164,8 @@ async function buildWorld(src){
       if(sat){fresh.sat=true;repSet('sat',sat.failed.length?'aviso':'ok',sat.failed.length?`${cap1(sat.src)}, zoom ${sat.z}, pero faltan ${sat.failed.length} teselas: se ven lisas y se volverán a pedir.`:`${cap1(sat.src)}, zoom ${sat.z}: completa.`);}
       else repSet('sat','fallo','No ha llegado de ninguna fuente: el suelo se pinta a partir del mapa y del relieve.');}
     busy(raw.osm?'Leyendo el mapa guardado…':'Esperando el mapa de OpenStreetMap…',null);const osm=await pO;
-    fresh.osm=(!raw.osm&&osm)?osm:null;
-    if(!raw.osm)repSet('osm',osm?'ok':'fallo',osm?`Descargado: ${fmt(osm.elements.length)} elementos (agua, vegetación, calles${area>45?'':', edificios'} y nombres de lugares).`
+    fresh.osm=(osm&&osm!==raw.osm)?osm:null;
+    if(!osmEntero)repSet('osm',osm?'ok':'fallo',osm?`Descargado: ${fmt(osm.elements.length)} elementos (agua, vegetación, calles${area>45?'':', edificios'} y nombres de lugares).`
       :`Ninguno de los ${OVERPASS.length} servidores lo ha dado: el agua y la vegetación salen de la foto aérea y del relieve.`);
     if(osm)feats=osmToFeatures(osm,makeProj(T));
     if(pC){busy(raw.cat?'Leyendo las casas guardadas…':'Esperando las casas del Catastro…',null);const rc=await pC;
@@ -3705,7 +3745,7 @@ async function saveZone(src){
   const missing=[];
   if(rec.dem.incomplete)missing.push('alturas del IGN');
   if(!rec.sat)missing.push('foto aérea');else if(rec.sat.failed&&rec.sat.failed.length)missing.push(`${rec.sat.failed.length} trozos de la foto aérea`);
-  if(!rec.osm)missing.push('mapa de OpenStreetMap');
+  if(!rec.osm)missing.push('mapa de OpenStreetMap');else if(rec.osm.incompleto)missing.push('parte del mapa de OpenStreetMap');
   if(rec.cat&&rec.cat.failed&&rec.cat.failed.length)missing.push(`${rec.cat.failed.length} trozos del Catastro`);
   else if(!rec.cat&&T.catMissing===-1&&location.protocol!=='file:')missing.push('casas del Catastro');
   if(rec.par&&rec.par.failed&&rec.par.failed.length)missing.push(`${rec.par.failed.length} trozos de las parcelas`);
@@ -4159,7 +4199,7 @@ $('#zGo').addEventListener('click',()=>{if(!zmap)return;const g=frameGeo(),c=[(g
   if(ZD.on&&ZD.pts.length>=3)scanZone(g,nm,{force:true,poligono:ZD.pts.map(p=>[+p[0].toFixed(7),+p[1].toFixed(7)])});else scanZone(g,nm);});
 for(const b of document.querySelectorAll('#zForma button'))b.addEventListener('click',()=>dibujoModo(b.dataset.f==='dibujar'));
 $('#zUndo').addEventListener('click',()=>{ZD.pts.pop();dibujoPintar();updateFrame();});
-if(new URLSearchParams(location.search).has('prueba'))window.paseoPrueba={ZD,frameGeo,recortePoligono,trozoDentro,catTiles,leerGMLParcelas};   // solo para las pruebas automáticas
+if(new URLSearchParams(location.search).has('prueba'))window.paseoPrueba={ZD,frameGeo,recortePoligono,trozoDentro,catTiles,leerGMLParcelas,fetchCatastro,fetchParcelas,trozosPendientes,fetchOSM};   // solo para las pruebas automáticas
 $('#zClearP').addEventListener('click',()=>{ZD.pts=[];dibujoPintar();updateFrame();});
 $('#zBack').addEventListener('click',()=>{if(JUEGO.activo){location.href='carreras_huelva.html';return;}hideZona();});
 $('#zFile').addEventListener('click',()=>fileIn.click());

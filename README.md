@@ -48,6 +48,16 @@ Al abrir un lugar, el menú dice si le falta algo del Catastro y deja descargarl
 
 **⬇️ Descargar lo que falta** los pide, los mete en la zona, la guarda en este navegador y la vuelve a abrir. Huelva también: su versión completada se guarda y se usa en lugar de la incluida.
 
+### Trozos más pequeños cuando algo falla
+
+El Catastro se pide en trozos de 700 m. Si uno falla (el Catastro tarda demasiado con las zonas con muchas casas), **se vuelve a pedir partido en cuatro** de 350 m, y si alguna de esas partes también falla, otra vez en cuatro: 175 m y luego unos 90 m. Es igual en el Paseo y en **⬇️ Descargar lo que falta** del juego, para las casas y para las parcelas:
+
+- Al volver a descargar una zona, solo se piden los trozos que faltan, y **ya partidos**: lo que sí llegó no se vuelve a pedir.
+- Las partes de un trozo que falla se piden enseguida, así que si el Catastro está caído se nota a los pocos intentos y se deja de insistir (los trozos siguen apuntados como pendientes para la próxima vez).
+- Lo mismo con OpenStreetMap en el Paseo: si la consulta de toda la zona no llega, se pide por cuartos (y los cuartos que fallen, otra vez por cuartos; si los dos primeros tampoco llegan, el servidor no está y no se insiste), y si aun así falta un trozo el informe lo dice y se vuelve a pedir al preparar la zona otra vez.
+
+Al guardar la zona completada, el juego reaprovecha comprimido lo que no cambia, así que el zip sigue pesando lo mismo y se guarda en segundos.
+
 Los **colores y la textura de las fachadas** se piden solos **mientras conduces**: la casa del Catastro sin color más cercana (a menos de 90 m), de una en una o de dos en dos. Su foto de fachada se analiza igual que en el Paseo y la casa se repinta al momento. Los colores se guardan en este navegador por referencia catastral, así que la próxima vez ya están, en esa zona o en otra que tenga las mismas casas. Si `catastro.php` no contesta, deja de pedir.
 
 ### Si no llegan las casas del Catastro

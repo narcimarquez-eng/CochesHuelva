@@ -6581,7 +6581,7 @@ function actualizarHUD(ahora) {
 }
 
 // --- bucle principal ---
-let cuentaPintada = 0;
+let cuentaPintada = 0, guardandoZona = false;
 function bucle() {
   requestAnimationFrame(bucle);
   const dt = Math.min(0.05, reloj.getDelta());
@@ -6641,6 +6641,7 @@ function bucle() {
   Efectos.actualizar(dt, camara, renderer);
   Restos.actualizar(dt);
   cielo.position.copy(camara.position);
+  if (estado === 'menu' && guardandoZona) return;   // mientras se rehace el zip de la zona, el fondo del menú no se pinta (el móvil va más desahogado)
   renderer.render(scene, camara);
 }
 
@@ -6908,10 +6909,26 @@ const Catastro = (() => {
     catch (err) { return leerGMLCatastro(await pedirTexto(urlTrozo(srs, job.bb, 'building')), zona); }   // como el Paseo: si las partes fallan, los edificios
   }
   async function parcelasDeTrozo(srs, zona, job) { return leerGMLParcelas(await pedirTexto(urlTrozo(srs, job.bb, 'parcela')), zona); }
-  // Varias peticiones a la vez (de tres en tres); avisa del progreso
+  // Trozos que fallan: se vuelven a pedir partidos en cuatro (700 m → 350 → 175 → 88 m), con claves «trozo/cuadrante/…» (como el Paseo)
+  const TROZO_MIN = 100;
+  const hijosDeTrozo = j => { const [x0, y0, x1, y1] = j.bb, xm = (x0 + x1) / 2, ym = (y0 + y1) / 2; return [[x0, y0, xm, ym], [xm, y0, x1, ym], [x0, ym, xm, y1], [xm, ym, x1, y1]].map((bb, i) => ({ key: j.key + '/' + i, bb })); };
+  const partible = j => j.bb[2] - j.bb[0] > TROZO_MIN * 1.5;
+  const trozoDeClave = (key, padres) => { const [p, ...camino] = key.split('/'); let j = padres.get(p); if (!j) return null; for (const q of camino) { j = hijosDeTrozo(j)[+q]; if (!j) return null; } return j; };
+  // lo que queda por pedir: trozos sin nada guardado y, de los que fallaron, sus cuatro partes
+  function trozosPendientes(jobs, tiles, failed) {
+    const padres = new Map(jobs.map(j => [j.key, j])), claves = Object.keys(tiles || {}), out = [];
+    for (const j of jobs) {
+      if (tiles && tiles[j.key]) continue;
+      const fal = (failed || []).filter(f => f === j.key || f.startsWith(j.key + '/'));
+      if (fal.length) { for (const f of fal) { const t = trozoDeClave(f, padres); if (t) out.push(...(partible(t) ? hijosDeTrozo(t) : [t])); } }
+      else if (!claves.some(k => k.startsWith(j.key + '/'))) out.push(j);
+    }
+    return out;
+  }
+  // Varias peticiones a la vez (de tres en tres); avisa del progreso. Si fn devuelve una lista (las partes de un trozo que falló), se pide enseguida
   async function enParalelo(lista, fn, progreso) {
     let k = 0, hechos = 0;
-    const trabajo = async () => { while (k < lista.length) { const x = lista[k++]; await fn(x); hechos++; progreso(hechos, lista.length); } };
+    const trabajo = async () => { while (k < lista.length) { const x = lista[k++], mas = await fn(x); if (mas && mas.length) lista.splice(k, 0, ...mas); hechos++; progreso(hechos, lista.length); } };
     await Promise.all([0, 1, 2].map(trabajo));
   }
 
@@ -6952,7 +6969,7 @@ const Catastro = (() => {
         : { sin: true, porque: c.why, v: VERSION_COLOR, t: Date.now() };
     } finally { URL.revokeObjectURL(url); }
   }
-  return { URL_PHP, trozos, casasDeTrozo, parcelasDeTrozo, enParalelo, coloresGuardados, guardarColor, colorDeFachada, deUTM, VERSION_COLOR, zocaloFraccion };
+  return { URL_PHP, trozos, casasDeTrozo, parcelasDeTrozo, enParalelo, trozosPendientes, hijosDeTrozo, partible, coloresGuardados, guardarColor, colorDeFachada, deUTM, VERSION_COLOR, zocaloFraccion };
 })();
 
 // Qué le falta a la zona abierta: trozos de casas del Catastro que no llegaron, las parcelas y los colores de fachada
@@ -6987,30 +7004,35 @@ async function descargarLoQueFalta() {
     const { zona: huso, srs, jobs } = Catastro.trozos(d.meta);
     const cat = d.catastro.leer(), notas = [];
     cat.tiles = cat.tiles || {};
-    // 1) trozos de casas que fallaron
-    const fallados = jobs.filter(j => (cat.failed || []).includes(j.key)), nuevos = [];
-    if (fallados.length) {
-      const siguenMal = [];
-      await Catastro.enParalelo(fallados, async j => {
-        try { const partes = await Catastro.casasDeTrozo(srs, huso, j); cat.tiles[j.key] = partes; nuevos.push(...partes); }
-        catch (err) { siguenMal.push(j.key); notas.push(err.message); }
+    // 1) trozos de casas que fallaron: se piden ya partidos en cuatro y, si alguna parte vuelve a fallar, otra vez en cuatro (hasta ~90 m)
+    const nuevos = [];
+    if ((cat.failed || []).length) {
+      const pendientes = Catastro.trozosPendientes(jobs, cat.tiles, cat.failed), siguenMal = [];
+      let bien = 0;
+      await Catastro.enParalelo(pendientes, async j => {
+        if (!bien && siguenMal.length >= 3) { siguenMal.push(j.key); return; }   // el Catastro no contesta a nada: no se insiste
+        try { const partes = await Catastro.casasDeTrozo(srs, huso, j); cat.tiles[j.key] = partes; nuevos.push(...partes); bien++; }
+        catch (err) { if (Catastro.partible(j) && !(err instanceof TypeError)) return Catastro.hijosDeTrozo(j); siguenMal.push(j.key); notas.push(err.message); }
       }, (h, n) => avisar(`Descargando las casas que faltaban: ${h} de ${n} trozos…`));
-      cat.failed = (cat.failed || []).filter(k => !fallados.some(j => j.key === k) || siguenMal.includes(k));
+      if (bien) cat.failed = siguenMal;   // si no ha llegado nada, siguen faltando los mismos trozos que antes
     }
-    // 2) parcelas
+    // 2) parcelas, igual
     let par = d.parcelas || { tiles: {}, failed: [] }, viejo = false;
     if (f.parcelas) {
-      const pendientes = jobs.filter(j => !par.tiles[j.key]), mal = [];
+      const pendientes = Catastro.trozosPendientes(jobs, par.tiles, par.failed), mal = [];
+      let bien = 0;
       await Catastro.enParalelo(pendientes, async j => {
         if (viejo) return;
-        try { par.tiles[j.key] = await Catastro.parcelasDeTrozo(srs, huso, j); }
-        catch (err) { if (err.viejo) viejo = true; else { mal.push(j.key); notas.push(err.message); } }
+        if (!bien && mal.length >= 3) { mal.push(j.key); return; }
+        try { par.tiles[j.key] = await Catastro.parcelasDeTrozo(srs, huso, j); bien++; }
+        catch (err) { if (err.viejo) viejo = true; else if (Catastro.partible(j) && !(err instanceof TypeError)) return Catastro.hijosDeTrozo(j); else { mal.push(j.key); notas.push(err.message); } }
       }, (h, n) => avisar(`Descargando las parcelas del Catastro: ${h} de ${n} trozos…`));
-      par.failed = mal;
+      if (bien || !(par.failed || []).length) par.failed = bien ? mal : jobs.filter(j => !par.tiles[j.key] && !Object.keys(par.tiles).some(k => k.startsWith(j.key + '/'))).map(j => j.key);
       if (viejo) par = null;
     }
     // 3) se rehace el zip con lo nuevo
     avisar('Guardando la zona con lo descargado…');
+    guardandoZona = true;
     const zip = d.zip, r7 = v => Math.round(v * 1e7) / 1e7;
     if (nuevos.length) {
       const casas = JSON.parse(await zip.file('casas.geojson').async('string')), vistas = new Set(casas.features.map(ft => ft.geometry && JSON.stringify(ft.geometry.coordinates[0][0])));
@@ -7040,7 +7062,7 @@ async function descargarLoQueFalta() {
       meta.parcelas = 'datos/parcelas.json';
     }
     zip.file('zona.json', JSON.stringify(meta));
-    const blob = await zip.generateAsync({ type: 'blob' });
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }).finally(() => { guardandoZona = false; });   // comprimido: lo que no cambia se reaprovecha tal cual (sin comprimir sería 5 veces mayor y muchísimo más lento)
     const id = lugarActual || 'huelva';
     await Zonas.guardar({ id, nombre: meta.nombre || zona.nombre, geo: meta.geo, fecha: Date.now(), tam: blob.size, blob });
     await cargarZona(blob);
