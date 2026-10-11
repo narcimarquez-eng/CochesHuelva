@@ -984,9 +984,9 @@ function nuevoPeaton(G, rng, seg) {
   const t = prepararTramo(G.tramos[seg]);
   return { seg, fwd: rng() < 0.5, s: rng() * t.len, lado: rng() < 0.5 ? -1 : 1, v: 1.0 + rng() * 0.5, color: rng() };
 }
-function avanzaPeaton(G, p, dt) {
+function avanzaPeaton(G, p, dt, vel = p.v) {
   const t = G.tramos[p.seg];
-  p.s += p.v * dt;
+  p.s += vel * dt;
   if (p.s >= t.len) { p.s -= t.len; p.fwd = !p.fwd; }
 }
 // Posición y rumbo del peatón, en el centro de su acera
@@ -2426,6 +2426,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyC' && !e.repeat) { cambiarCamara(); return; }
   if (e.code === 'KeyN' && !e.repeat) { alternarSonido(); return; }
   if (e.code === 'KeyR' && !e.repeat) { pulsarSentido(); return; }
+  if (e.code === 'KeyH' && !e.repeat && coche) { claxonar(); return; }
   const c = TECLAS[e.code];
   if (c) { controles[c] = true; e.preventDefault(); }
 });
@@ -2536,6 +2537,7 @@ function colocarPeaton(p) {
   const candidatos = segmentosCerca(260, t => t.acera > 0 && t.ancho >= 4);
   if (!candidatos.length) return;
   Object.assign(p, nuevoPeaton(zona.G, rngTrafico, candidatos[Math.floor(rngTrafico() * candidatos.length)]), { ex: 0, ez: 0, evx: 0, evz: 0, susto: 0 });
+  reiniciarEstadoPeaton(p);
 }
 // Modelos de tráfico: los dos coches reales en versión ligera (un 10 % de los triángulos), cada uno unido en una sola geometría
 const ARCHIVOS_TRAFICO = [...GALERIA.map(g => g.archivo), 'modelos/trafico-concept.glb', 'modelos/trafico-toy.glb'];
@@ -2582,6 +2584,8 @@ function limpiarTrafico() {
   mallaTrafico = [];
   for (const im of mallaPeatones) scene.remove(im);
   mallaPeatones = [];
+  for (const q of proyectiles) scene.remove(q.malla);
+  proyectiles.length = 0;
   for (const im of [lucesTrafico, sombrasTrafico]) if (im) { scene.remove(im); im.geometry.dispose(); im.material.dispose(); }
   lucesTrafico = sombrasTrafico = null;
   trafico = []; peatones = [];
@@ -2636,10 +2640,11 @@ async function iniciarTrafico() {
     // sin modelos de peatones: un cilindro de color por peatón
     const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.24, 1.7, 6).translate(0, 0.85, 0), new THREE.MeshLambertMaterial({ color: 0xffffff }), Math.max(1, peatones.length));
     im.frustumCulled = false;
-    peatones.forEach((p, i) => { p.modelo = 0; p.idx = i; im.setColorAt(i, new THREE.Color().setHSL(p.color, 0.5, 0.45)); });
+    peatones.forEach((p, i) => { p.modelo = 0; p.idx = i; p.base = new THREE.Color().setHSL(p.color, 0.5, 0.45); im.setColorAt(i, p.base); });
     mallaPeatones = [im];
     scene.add(im);
   }
+  peatones.forEach(p => asignarPerfil(p, rngTrafico));
 }
 // Contacto de un círculo (x, z, R) con el tráfico: cada coche son dos círculos de 0,95 m (delante y detrás)
 function contactoTrafico(x, z, R) {
@@ -2713,13 +2718,126 @@ function actualizarTrafico(dt) {
   for (const im of [lucesTrafico, sombrasTrafico]) if (im) im.instanceMatrix.needsUpdate = true;
   if (luz) luz.needsUpdate = true;
 }
+// --- carácter de cada peatón: edad, personalidad y ocupación, y una ira de 0 a 100 que sube con lo que le hace el coche ---
+const PERSONALIDADES = ['timido', 'agresivo', 'pasivo', 'curioso', 'distraido', 'prisa', 'protector'];
+const OCUPACIONES = ['repartidor', 'turista', 'artista', 'vagabundo', 'obrero', 'manifestante', 'oficinista'];
+const TONO_GRITO = { nino: 1500, adolescente: 1250, joven: 950, adulto: 720, mediana: 600, anciano: 430 };
+const COLOR_IRA = new THREE.Color(), BLANCO = new THREE.Color(1, 1, 1);
+const proyectiles = [];   // objetos que lanzan los peatones (botellas, sombreros…)
+let geoProyectil = null, matProyectil = null, avisoPeatonHasta = 0;
+// Perfil de un peatón (una vez, con su modelo): el modelo da la edad del anciano y del agente; lo demás sale al azar
+function asignarPerfil(p, rng) {
+  const edad = p.modelo === 4 ? 'anciano' : ['nino', 'adolescente', 'joven', 'adulto', 'mediana'][Math.floor(rng() * 5)];
+  const ocup = p.modelo === 5 ? 'policia' : rng() < 0.35 ? OCUPACIONES[Math.floor(rng() * OCUPACIONES.length)] : null;
+  Object.assign(p, { edad, ocup, pers: PERSONALIDADES[Math.floor(rng() * PERSONALIDADES.length)], ira: ocup === 'manifestante' ? 20 : 0, escala: edad === 'nino' ? 0.62 : edad === 'adolescente' ? 0.85 : 1 });
+}
+// Lo que hace el peatón al cambiar de sitio o de tramo: su estado de partida (la ira y el perfil se quedan)
+function reiniciarEstadoPeaton(p) {
+  Object.assign(p, { estado: 'camina', tEst: 0, retraso: 0, activo: false, grito: 0, bloqueo: 0, cerca: false, golpea: 0, lanza: 0, bate: 0, foto: 0, mirar: false });
+}
+function subeIra(p, k) { p.ira = Math.min(100, Math.max(0, p.ira + k)); }
+// Mensaje en pantalla de lo que pasa alrededor (como mucho uno cada 8 s)
+function avisoPeaton(texto) {
+  const ahora = performance.now() / 1000;
+  if (ahora > avisoPeatonHasta) { mostrarAviso(texto, 2); avisoPeatonHasta = ahora + 8; }
+}
+// Claxon del jugador: los peatones a menos de 10 m se enfadan (más los adolescentes, agresivos y ancianos según la tabla)
+function claxonar() {
+  Sonido.bocina(4);
+  for (const p of peatones) {
+    const pos = posicionPeaton(zona.G, p);
+    if (Math.hypot(pos.x - coche.x, pos.z - coche.z) < 10) subeIra(p, p.pers === 'agresivo' ? 25 : p.edad === 'adolescente' ? 20 : p.edad === 'anciano' ? 10 : 15);
+  }
+}
+// Qué hace el peatón cuando algo le preocupa, según su carácter
+function reaccionPeaton(p) {
+  if (p.ocup === 'policia') return 'firme';
+  if (p.ocup === 'oficinista' && p.ira >= 70) return 'llama';
+  if (p.pers === 'prisa') return p.ira >= 60 ? 'enfrenta' : 'camina';
+  if (p.edad === 'adolescente') return 'graba';
+  if (p.pers === 'curioso' || p.ocup === 'turista') return 'mira';
+  if (p.edad === 'nino' || p.edad === 'anciano' || p.pers === 'timido') return 'huye';
+  if (p.pers === 'agresivo' || p.pers === 'protector' || p.pers === 'joven' || p.ocup === 'manifestante' || p.ocup === 'obrero' || p.ocup === 'repartidor') return 'enfrenta';
+  return 'para';   // pasivos, distraídos, adultos y de mediana edad: se quedan quietos
+}
+// Un objeto lanzado: parábola corta hacia donde estaba el coche; si pasa rozándolo, suena el golpe
+function lanzarProyectil(pos, dist) {
+  if (proyectiles.length >= 6) return;
+  if (!geoProyectil) { geoProyectil = new THREE.CylinderGeometry(0.07, 0.07, 0.3, 6); matProyectil = new THREE.MeshLambertMaterial({ color: 0x3a7d44 }); }
+  const T = Math.max(0.4, dist / 14), vy = 4.9 * T - 1.4 / T;   // sube y cae al suelo justo en T segundos
+  const malla = new THREE.Mesh(geoProyectil, matProyectil);
+  scene.add(malla);
+  proyectiles.push({ malla, x0: pos.x, z0: pos.z, vx: (coche.x - pos.x) / T, vz: (coche.z - pos.z) / T, vy, t: 0 });
+}
+function actualizarProyectiles(dt) {
+  for (let i = proyectiles.length - 1; i >= 0; i--) {
+    const q = proyectiles[i];
+    q.t += dt;
+    const x = q.x0 + q.vx * q.t, z = q.z0 + q.vz * q.t, y = 1.4 + q.vy * q.t - 4.9 * q.t * q.t;
+    const toca = y < 1.3 && (x - coche.x) ** 2 + (z - coche.z) ** 2 < 2.25;
+    if (y <= 0 || toca) {
+      if (toca) Sonido.golpe('farola', 3);
+      scene.remove(q.malla); proyectiles.splice(i, 1); continue;
+    }
+    q.malla.position.set(x, y, z); q.malla.rotation.x += dt * 8;
+  }
+}
+// Decide lo que hace el peatón en este instante. Devuelve su velocidad al andar y si mira hacia el coche
+function comportamientoPeaton(p, pos, dist, dt) {
+  const v = Math.abs(coche.v);
+  for (const k of ['grito', 'bloqueo', 'golpea', 'lanza', 'bate', 'foto', 'retraso', 'tEst']) p[k] = Math.max(0, p[k] - dt);
+  // sucesos: el coche se queda parado delante, o pasa rozándole
+  if (dist < 3.5 && v < 1 && p.bloqueo <= 0) { p.bloqueo = 3; subeIra(p, p.pers === 'prisa' ? 20 : p.pers === 'protector' ? 15 : 10); }
+  if (dist < 3 && v > 1.5 && !p.cerca) { p.cerca = true; subeIra(p, p.edad === 'nino' ? 30 : p.pers === 'timido' ? 15 : 25); }
+  if (dist > 5) p.cerca = false;
+  if (dist > 15) p.ira = Math.max(0, p.ira - 5 * dt);   // se calma cuando el coche se aleja
+  // se preocupa si está muy enfadado o si el coche va deprisa a su lado; la reacción tarda más si está distraído o es turista
+  const amenaza = p.ira >= 40 || (dist < 6 && v > 2);
+  if (amenaza) { if (!p.activo) { p.activo = true; p.retraso = p.pers === 'distraido' || p.ocup === 'turista' ? 1.2 : 0; } p.tEst = 2.5; }
+  else if (p.tEst <= 0) p.activo = false;
+  if (p.ira >= 40 && dist < 25 && p.grito <= 0) { Sonido.pitido(TONO_GRITO[p.edad], 0.2, 0.1); p.grito = 2.5 + Math.random() * 2.5; }   // grita
+  let vel = p.v, mirar = false;
+  p.estado = 'camina';
+  if (p.activo && p.retraso <= 0) {
+    p.estado = reaccionPeaton(p);
+    switch (p.estado) {
+      case 'huye': {   // se aleja del coche; si iba hacia él, da la vuelta
+        const dot = (pos.x - coche.x) * Math.sin(pos.h) + (pos.z - coche.z) * Math.cos(pos.h);
+        if (dot < 0) p.fwd = !p.fwd;
+        vel = p.edad === 'anciano' ? 0.9 : p.edad === 'nino' ? 3.4 : 2.8;   // el anciano no puede huir rápido
+        break;
+      }
+      case 'camina': vel = p.v * 1.6; break;   // con prisa: sigue, pero más deprisa
+      case 'enfrenta': vel = 0; mirar = true; break;
+      case 'mira': case 'graba': vel = dist < 12 ? 0 : p.v; mirar = dist < 12; if (p.foto <= 0 && dist < 12) { Sonido.clic(); p.foto = 4; } break;   // saca la foto o graba
+      case 'firme': vel = 0; mirar = true; if (p.ira >= 40) avisoPeaton('La policía te ha multado por conducción temeraria'); break;
+      case 'llama': vel = 0; if (p.ira >= 70) avisoPeaton('Un oficinista llama a la policía'); break;
+      default: vel = 0;   // 'para'
+    }
+  }
+  // golpes: con mucha ira, algunos le pegan al coche (y el anciano con el bastón)
+  if (p.ira >= 60 && dist < 3 && p.golpea <= 0) {
+    const baston = p.edad === 'anciano' && p.ira >= 80;
+    if (baston || p.edad === 'adolescente' || ['repartidor', 'obrero', 'manifestante'].includes(p.ocup)) {
+      Sonido.golpe(baston ? 'arbol' : 'farola', 8);
+      coche.sacudida = Math.max(coche.sacudida, 0.3);
+      p.golpea = 1.5; p.bate = 0.35; subeIra(p, -15);
+    }
+  }
+  // lanzamientos: con mucha ira, los de la calle tiran algo al coche
+  if (p.ira >= 75 && dist > 4 && dist < 14 && p.lanza <= 0 && ['artista', 'vagabundo', 'manifestante'].includes(p.ocup)) { lanzarProyectil(pos, dist); p.lanza = 5; avisoPeaton('Te han tirado algo'); }
+  return { vel, mirar };
+}
 function actualizarPeatones(dt) {
   if (!mallaPeatones.length) return;
-  const ahora = performance.now() / 1000, m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1);
+  const ahora = performance.now() / 1000, m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), escala = new THREE.Vector3();
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
   peatones.forEach((p, i) => {
-    if (!(p.susto > 0)) avanzaPeaton(zona.G, p, dt);
     let pos = posicionPeaton(zona.G, p);
+    const { vel, mirar } = comportamientoPeaton(p, pos, Math.hypot(pos.x - coche.x, pos.z - coche.z), dt);
+    p.mirar = mirar;
+    if (!(p.susto > 0)) avanzaPeaton(zona.G, p, dt, vel);
+    pos = posicionPeaton(zona.G, p);
     if (zona.enCalzadaAjena(pos.x, pos.z, p.seg) || Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = posicionPeaton(zona.G, p); }   // si su acera se corta en un cruce, busca otra
     // si el coche se le echa encima, se aparta de un salto hacia el lado contrario; luego vuelve despacio a su sitio
     const dx = pos.x + p.ex - coche.x, dz = pos.z + p.ez - coche.z;
@@ -2730,12 +2848,22 @@ function actualizarPeatones(dt) {
     let salto = 0;
     if (p.susto > 0) { p.susto -= dt; p.ex += p.evx * dt; p.ez += p.evz * dt; salto = Math.sin(Math.max(0, p.susto) / 0.45 * Math.PI) * 0.45; }
     else { const k = Math.exp(-0.6 * dt); p.ex *= k; p.ez *= k; }
+    salto = Math.max(salto, Math.sin(Math.max(0, p.bate) / 0.35 * Math.PI) * 0.4);   // el bote al recibir un golpe
     const bote = Math.abs(Math.sin(ahora * 6 + p.color * 6.28)) * 0.05;   // el paso se nota en el vaivén
-    m.compose(new THREE.Vector3(pos.x + p.ex, bote + salto, pos.z + p.ez), q.setFromAxisAngle(eje, pos.h), uno);
+    const h = p.mirar ? Math.atan2(coche.x - pos.x, coche.z - pos.z) : pos.h;   // los que se enfrentan miran al coche
+    const e = p.escala || 1;
+    m.compose(new THREE.Vector3(pos.x + p.ex, bote + salto, pos.z + p.ez), q.setFromAxisAngle(eje, h), escala.set(e, e, e));
     const im = mallaPeatones[p.modelo];
-    if (im) im.setMatrixAt(p.idx, m);
+    if (im) {
+      im.setMatrixAt(p.idx, m);
+      // se tiñe de rojo según la ira (sin ira, el color de siempre)
+      const a = Math.min(1, p.ira / 100);
+      COLOR_IRA.setRGB(1, 1 - 0.55 * a, 1 - 0.55 * a);
+      if (p.base) COLOR_IRA.multiply(p.base); else COLOR_IRA.multiply(BLANCO);
+      im.setColorAt(p.idx, COLOR_IRA);
+    }
   });
-  mallaPeatones.forEach(im => { im.instanceMatrix.needsUpdate = true; });
+  mallaPeatones.forEach(im => { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; });
 }
 // Flechas pintadas en la calzada: cada una apunta por donde hay que seguir. Un contorno oscuro debajo las separa del asfalto
 function mallaFlechas(flechas) {
@@ -3199,6 +3327,7 @@ function bucle() {
   if (coche) {
     actualizarTrafico(dt);
     actualizarPeatones(dt);
+    actualizarProyectiles(dt);
     actualizarArboles();
     actualizarFlechas(ahora);
     actualizarMalla(dt);

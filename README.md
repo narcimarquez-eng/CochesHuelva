@@ -25,7 +25,7 @@ Todo el sonido se sintetiza en el navegador (Web Audio, sin archivos): el motor 
 
 ### Controles
 
-Teclado: flechas o WASD. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro; la de dentro va a la altura de un asiento alto para ver bien la calle. `M` abre el menú.
+Teclado: flechas o WASD. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro; la de dentro va a la altura de un asiento alto para ver bien la calle. `H` toca el claxon (los peatones cercanos se enfadan). `M` abre el menú.
 
 En el móvil, abajo a la izquierda hay una **ruleta**: se gira con el dedo alrededor del centro (140° a cada lado es el giro completo), vibra a cada muesca, un arco ámbar marca cuánto giras y al soltarla vuelve sola al centro. A la derecha están los pedales **GAS** y **FRENO**, grandes y de colores, y el botón **D/R** de la marcha. Los límites de velocidad son solo informativos.
 
@@ -58,6 +58,8 @@ En el tráfico de la carrera circulan los coches de la galería y versiones lige
 ## Árboles y peatones
 
 Los árboles son modelos de Kenney Nature Kit (roble, álamo, pino y arbusto), con licencia CC0: están en `modelos/arboles/`. Los peatones son ocho figuras de Kenney Blocky Characters (CC0), en `modelos/peatones/`, de 1,75 m. Las licencias de cada paquete van junto a los modelos. Se dibujan solo los árboles cercanos al coche, para que el móvil no sufra.
+
+Cada peatón tiene edad, personalidad y, a veces, ocupación, y una ira de 0 a 100. El claxon (`H`), un coche parado a su lado o uno que pasa rozándole la suben; se calma cuando el coche se aleja. Según el carácter reacciona de una manera: el niño y el tímido huyen, el anciano huye despacio, el pasivo y el distraído se quedan quietos, el agresivo y el joven se enfrentan mirando al coche, el adolescente graba, el curioso saca una foto, y el agente de policía no se mueve y multa. Con ira alta gritan (con un tono según la edad), y algunos golpean el coche o le tiran objetos. Los peatones de la calle no tienen accesorios (móvil, cochecito, perro…) porque el juego no tiene esos modelos: su carácter se nota en el movimiento, el color y el sonido.
 
 ## Datos
 
