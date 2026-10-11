@@ -170,7 +170,7 @@ Todo esto choca con el coche como las farolas y los árboles.
 
 ## Detalles reales
 
-- **Calles sin aceras y de un sentido**: las calles de pueblo con la categoría «calle con aceras» llevan aceras aunque el Paseo no las haya medido, y las calles de servicio con fachadas a los dos lados también. Las que solo tienen sitio para un carril (menos de 7,5 m entre fachadas) se dibujan de un solo sentido, con una calzada de 3,3 m y aceras con lo que sobra.
+- **Aceras**: las calles de pueblo con la categoría «calle con aceras» llevan acera aunque el Paseo no las haya medido (de 1,5 a 2,2 m, según el tipo). Las aceras se cortan unos metros antes de cada cruce, con su rebaje, para que no entren en la encrucijada. Las calles de servicio y los aparcamientos no llevan aceras. Las calles que solo tienen sitio para un carril (menos de 7,5 m entre fachadas) se dibujan de un solo sentido, con una calzada de 3,3 m y aceras con lo que sobra.
 - **Carriles de verdad**: el número de carriles de cada calle sale de OpenStreetMap (unas mil calles lo tienen). Se pintan las líneas entre carriles (discontinuas) y la central (doble continua si hay dos o más carriles por sentido), y el tráfico circula por un carril concreto.
 - **Más vehículos en el tráfico**: furgonetas de reparto, camionetas, camiones de basura, ambulancias y camiones de bomberos, menos frecuentes que los turismos y con su largo real (de 5 a 6,5 m).
 - **Restos en los choques**: en un golpe fuerte salen volando parachoques, puertas, chapas, alerones, alguna rueda y tuercas; rebotan, se quedan en la calzada y desaparecen a los 40 s.

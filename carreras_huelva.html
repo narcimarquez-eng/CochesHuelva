@@ -269,10 +269,6 @@ function completarAceras(p, ancho, acera, unSentido, carriles) {
     const sw = (fach - 3.3) / 2;
     return { ancho: 3.3, acera: sw >= 0.7 ? Math.min(2, sw) : 0, unSentido: true, carriles: 1 };
   }
-  if (fach >= 8 && p.tipo === 'service') {   // calle de servicio con fachadas a los dos lados: calzada y, a cada lado, la acera que sobra
-    const cal = Math.min(ancho, unSentido ? 3.6 : 6), sw = (fach - cal) / 2;
-    return { ancho: cal, acera: sw >= 0.7 ? Math.min(2.5, sw) : 0, unSentido, carriles };
-  }
   if (p.dibujada_como === 'calle con aceras') return { ancho, acera: ACERA_POR_TIPO[tipoBase(p.tipo)] || 1.5, unSentido, carriles };
   return { ancho, acera, unSentido, carriles };
 }
@@ -3135,6 +3131,25 @@ function mallaCarreteras(tramos) {
     }
   };
   const enOtra = construirRejillaCalzadas(tramos);
+  // en cada extremo, hacia dónde sale cada calle: si otra calle llega en ángulo, es un cruce (la acera se corta antes, con su rebaje)
+  const clave = p => p[0].toFixed(2) + '|' + p[1].toFixed(2), salen = new Map();
+  const direccion = (t, alInicio) => {
+    const p = t.pts, a = alInicio ? p[0] : p[p.length - 1], b = alInicio ? p[1] : p[p.length - 2];
+    const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1;
+    return [dx / L, dz / L];
+  };
+  tramos.forEach((t, k) => {
+    if (t.pts.length < 2) return;
+    for (const alInicio of [true, false]) {
+      const c = clave(alInicio ? t.pts[0] : t.pts[t.pts.length - 1]);
+      if (!salen.has(c)) salen.set(c, []);
+      salen.get(c).push({ k, d: direccion(t, alInicio) });
+    }
+  });
+  const cruzaEn = (k, t, alInicio) => {
+    const d = direccion(t, alInicio), lista = salen.get(clave(alInicio ? t.pts[0] : t.pts[t.pts.length - 1])) || [];
+    return lista.some(e => e.k !== k && d[0] * e.d[0] + d[1] * e.d[1] > -0.85);   // distinta de la continuación recta (que sale en sentido contrario)
+  };
   for (let k = 0; k < tramos.length; k++) {
     const t = tramos[k];
     const h = t.ancho / 2;
@@ -3143,15 +3158,17 @@ function mallaCarreteras(tramos) {
     bandasH(calzada, t.pts, -h, h, 0.05, asfalto, TU_ASFALTO, TU_ASFALTO);
     if (t.acera > 0 && !tierra) {
       // aceras y bordillos solo donde no caen dentro de la calzada de otra calle (cruces y calzadas dobles)
-      const cum = acumulados(t.pts);
-      for (const [d0, d1] of trozosLibres(t, cum, h + t.acera / 2, (x, z) => enOtra(x, z, k))) {
+      const cum = acumulados(t.pts), L = cum[cum.length - 1], R = h + 4;
+      const ini = cruzaEn(k, t, true) ? R : 0, fin = cruzaEn(k, t, false) ? L - R : L;
+      const recorta = trozos => trozos.map(([a, b]) => [Math.max(a, ini), Math.min(b, fin)]).filter(([a, b]) => b - a >= 2);
+      for (const [d0, d1] of recorta(trozosLibres(t, cum, h + t.acera / 2, (x, z) => enOtra(x, z, k)))) {
         const p = subPolilinea(t.pts, cum, d0, d1);
         bandasH(aceras, p, h + 0.2, h + t.acera, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
         bandasH(aceras, p, h, h + 0.2, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);   // canto claro del bordillo
         caraV(bordillos, p, h, 0.05, 0.16, BORDILLO);
         bandasH(rigolas, p, h - 0.3, h, 0.055, RIGOLA, TU_ADOQUIN, TU_ADOQUIN);   // rigola de hormigón junto al bordillo
       }
-      for (const [d0, d1] of trozosLibres(t, cum, -(h + t.acera / 2), (x, z) => enOtra(x, z, k))) {
+      for (const [d0, d1] of recorta(trozosLibres(t, cum, -(h + t.acera / 2), (x, z) => enOtra(x, z, k)))) {
         const p = subPolilinea(t.pts, cum, d0, d1);
         bandasH(aceras, p, -h - t.acera, -h - 0.2, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
         bandasH(aceras, p, -h - 0.2, -h, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);
