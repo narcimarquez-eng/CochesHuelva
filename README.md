@@ -268,6 +268,20 @@ Todo el sonido se sintetiza en el navegador (Web Audio, sin archivos): el motor 
 
 Teclado: flechas o WASD. `H` toca el claxon. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro; la de dentro va a la altura de un asiento alto para ver bien la calle. `M` (o **Menú**) pausa la partida; **Continuar** vuelve a ella.
 
+**Mando** (Bluetooth o de cable: Xbox, PlayStation o cualquiera que el navegador reconozca, en el móvil y en el ordenador). Se conecta al teléfono u ordenador como siempre y el juego lo ve en cuanto se pulsa uno de sus botones (los navegadores no lo enseñan antes); sale el aviso «Mando conectado». Con él, la ruleta y los pedales de la pantalla se esconden (vuelven al tocar la pantalla).
+
+| En la partida | Botón |
+|---|---|
+| Acelerar (a medias con el gatillo) | gatillo derecho (RT / R2) o A (✕) |
+| Frenar y, parado, marcha atrás | gatillo izquierdo (LT / L2) o X (□) |
+| Girar (fino cerca del centro) | stick izquierdo o cruceta |
+| Claxon | B (○) o RB / R1 |
+| Cámara | Y (△) |
+| Marcha D/R | LB / L1 |
+| Menú (pausa) | Start / Options o Select / Share |
+
+En los menús, la cruceta o el stick van de botón en botón (el elegido se recuadra), **A** lo pulsa, **B** sigue la partida pausada y **Start** sigue o empieza una nueva. En los golpes el mando vibra, si el mando y el navegador lo permiten.
+
 El juego se abre a **pantalla completa** y en horizontal con el primer toque (los navegadores solo la dejan abrir tras tocar la pantalla). El botón ⛶ de arriba (o la tecla `F`) la quita o la vuelve a poner, y se recuerda. En el iPhone el navegador no deja ponerla; instalado en la pantalla de inicio, el juego se abre sin barras.
 
 El panel de arriba a la izquierda está pensado para el móvil: en una sola línea van la velocidad, la marcha con las revoluciones, la señal de límite (redonda, como las de verdad, parpadea si vas más deprisa) y el daño; debajo, en letra pequeña, el nombre de la calle.

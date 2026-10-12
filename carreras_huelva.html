@@ -100,6 +100,8 @@
   #btnClaxon.pulsado{background:var(--ambar)}
   #controles .derecha{display:flex;flex-direction:column;align-items:flex-end;gap:10px;pointer-events:none}
   #controles .derecha>*{pointer-events:auto}
+  body.conMando #controles{display:none}   /* jugando con mando: sin ruleta ni pedales en la pantalla */
+  body.focoMando #pantalla button:focus,body.focoMando #podioPanel button:focus{outline:3px solid #fff;outline-offset:3px;box-shadow:0 0 0 7px rgba(245,176,65,.55)}
   #fueraRuta{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:rgba(200,30,25,.9);color:#fff;font-weight:800;padding:7px 14px;border-radius:10px;font-size:15px;pointer-events:none;display:none;z-index:4;box-shadow:0 4px 14px rgba(0,0,0,.4);max-width:calc(100vw - 420px);min-width:180px;text-align:center}
   @media (max-width:640px){#fueraRuta{bottom:auto;top:40%;max-width:80vw}}
   body.fuera #fueraRuta{display:block}
@@ -196,7 +198,7 @@
   </div></div>
   <div id="coches"></div>
   <div id="botonesMenu"><button id="btnSeguir" style="display:none">Continuar</button><button id="btnNueva" disabled>Nueva partida</button></div>
-  <p class="teclas" style="font-size:13px;opacity:.75">Teclas: flechas o WASD. Parado, mantén ↓ para ir marcha atrás y ↑ para volver adelante (o R). H toca el claxon, C cambia de cámara, F pone o quita la pantalla completa, N quita el sonido y M abre el menú.</p>
+  <p class="teclas" style="font-size:13px;opacity:.75">Teclas: flechas o WASD. Parado, mantén ↓ para ir marcha atrás y ↑ para volver adelante (o R). H toca el claxon, C cambia de cámara, F pone o quita la pantalla completa, N quita el sonido y M abre el menú.<br>Mando: gatillo derecho o A acelera, gatillo izquierdo o X frena (y marcha atrás), stick izquierdo o cruceta para girar, B claxon, Y cámara, LB marcha, Start menú. En el menú, cruceta y A.</p>
   <p style="font-size:12px;opacity:.6">Datos: © colaboradores de OpenStreetMap (ODbL) · Dirección General del Catastro</p>
   <p style="font-size:12px;opacity:.6">Modelos: CarConcept © Eric Chadwick (Darmstadt Graphics Group), CC BY 4.0 · ToyCar © Guido Odendahl y Eric Chadwick, CC0 · Galería © Kenney (kenney.nl), CC0</p>
 </div>
@@ -2248,8 +2250,8 @@ function pasoMotor(c, acel, freno, dt) {
   cambioSentidoPedales(c, acel, freno, dt);
   const invertidos = c.marcha === 0 && c.atrasAuto;              // marcha atrás puesta con el freno: los pedales se cambian
   const pGas = invertidos ? freno : acel, pFreno = invertidos ? acel : freno;
-  c.gas += ((pGas ? 1 : 0) - c.gas) * Math.min(1, dt * 7);     // los pedales responden en unas décimas, no de golpe
-  c.freno += ((pFreno ? 1 : 0) - c.freno) * Math.min(1, dt * 9);
+  c.gas += (+pGas - c.gas) * Math.min(1, dt * 7);               // los pedales responden en unas décimas, no de golpe (de 0 a 1: el gatillo del mando, a medias)
+  c.freno += (+pFreno - c.freno) * Math.min(1, dt * 9);
   c.cambio = Math.max(0, c.cambio - dt);
   const rapidez = Math.abs(c.v);
   let fuerza = 0;                                               // N, positiva hacia delante
@@ -5718,12 +5720,99 @@ function pintarRuleta() {
   const p0 = [50 + R * Math.cos(a0), 50 + R * Math.sin(a0)], p1 = [50 + R * Math.cos(a1), 50 + R * Math.sin(a1)];
   $('ruletaArco').setAttribute('d', Math.abs(a) < 1 ? '' : `M${p0[0].toFixed(2)} ${p0[1].toFixed(2)} A${R} ${R} 0 ${Math.abs(a) > 180 ? 1 : 0} ${a > 0 ? 1 : 0} ${p1[0].toFixed(2)} ${p1[1].toFixed(2)}`);
 }
-// Giro que pide el conductor: +1 izquierda, -1 derecha. La ruleta si se está tocando (o aún vuelve al centro, si no hay tecla pulsada); si no, las flechas
+// Giro de las flechas o del mando: +1 izquierda, -1 derecha (con el stick, cualquier valor entre medias)
+const giroPedido = () => ((controles.izq ? 1 : 0) - (controles.der ? 1 : 0)) || -mando.giro;
+// Giro que pide el conductor: +1 izquierda, -1 derecha. La ruleta si se está tocando (o aún vuelve al centro, si no hay tecla pulsada); si no, las flechas o el mando
 function direccion() {
-  const teclas = (controles.izq ? 1 : 0) - (controles.der ? 1 : 0);
+  const teclas = giroPedido();
   if (volante.activo || (teclas === 0 && Math.abs(volante.ang) > 0.5)) return -Math.max(-1, Math.min(1, volante.ang / GIRO_RULETA));
   return teclas;
 }
+// --- mando (Bluetooth o de cable), con la API Gamepad del navegador: en la partida, el gatillo derecho o A (✕) acelera, el
+// izquierdo o X (□) frena y, parado, pone la marcha atrás (como ↓); el stick izquierdo o la cruceta giran. B (○) y RB tocan el
+// claxon, Y (△) cambia de cámara, LB cambia de marcha (D/R) y Start o Select abren el menú. En los menús, la cruceta o el stick
+// van de botón en botón, A lo pulsa y B sigue la partida. El navegador no ve el mando hasta que se pulsa uno de sus botones ---
+const mando = { gas: 0, freno: 0, giro: 0, indice: -1, antes: [], dir: '', tDir: 0 };
+const ZONA_MUERTA = 0.15;
+function leerMando(ahora) {
+  const lista = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null;
+  for (const g of lista || []) if (g && g.connected && (!gp || g.mapping === 'standard')) gp = g;   // el primero, mejor si es de los normales
+  if (!gp) { mando.gas = mando.freno = mando.giro = 0; mando.indice = -1; return; }
+  mando.indice = gp.index;
+  const pulsado = i => !!(gp.buttons[i] && gp.buttons[i].pressed), nuevo = i => pulsado(i) && !mando.antes[i];
+  const valor = i => (gp.buttons[i] ? Math.max(gp.buttons[i].value || 0, gp.buttons[i].pressed ? 1 : 0) : 0);
+  const eje = i => { const v = gp.axes[i] || 0; return Math.abs(v) < ZONA_MUERTA ? 0 : Math.sign(v) * (Math.abs(v) - ZONA_MUERTA) / (1 - ZONA_MUERTA); };
+  const algo = gp.buttons.some(b => b.pressed) || Math.abs(gp.axes[0] || 0) > 0.5 || Math.abs(gp.axes[1] || 0) > 0.5;
+  if (algo) document.body.classList.add('conMando');   // con el mando no hacen falta la ruleta ni los pedales de la pantalla
+  if (gp.buttons.some((b, i) => b.pressed && !mando.antes[i])) Sonido.iniciar();
+  const menu = botonesMenu();
+  if (menu) {
+    mando.gas = mando.freno = mando.giro = 0;
+    // la cruceta o el stick: un paso al pulsar y, si se mantiene, uno cada 0,18 s
+    const x = (pulsado(15) ? 1 : 0) - (pulsado(14) ? 1 : 0) || (Math.abs(gp.axes[0] || 0) > 0.6 ? Math.sign(gp.axes[0]) : 0);
+    const y = (pulsado(13) ? 1 : 0) - (pulsado(12) ? 1 : 0) || (Math.abs(gp.axes[1] || 0) > 0.6 ? Math.sign(gp.axes[1]) : 0);
+    const dir = x || y ? (y ? 'y' + y : 'x' + x) : '';
+    if (dir && (dir !== mando.dir || ahora > mando.tDir)) { moverFoco(menu, y ? 0 : x, y); mando.tDir = ahora + (dir !== mando.dir ? 0.4 : 0.18); }
+    mando.dir = dir;
+    const foco = menu.includes(document.activeElement) ? document.activeElement : null;
+    if (nuevo(0)) { if (foco) foco.click(); else enfocar(botonInicial(menu)); }
+    if ((nuevo(1) || nuevo(9)) && estadoPausado && $('btnSeguir').style.display !== 'none') $('btnSeguir').click();
+    else if (nuevo(9) && !$('btnNueva').disabled && menu.includes($('btnNueva'))) $('btnNueva').click();
+  } else {
+    mando.dir = '';
+    const corte = v => (v < 0.06 ? 0 : v);
+    mando.gas = corte(Math.max(valor(7), valor(0)));
+    mando.freno = corte(Math.max(valor(6), valor(2)));
+    const stick = eje(0), cruceta = (pulsado(15) ? 1 : 0) - (pulsado(14) ? 1 : 0);
+    mando.giro = cruceta || Math.sign(stick) * Math.pow(Math.abs(stick), 1.5);   // más fino cerca del centro
+    if (nuevo(1) || nuevo(5)) tocarClaxon();
+    if (nuevo(3)) cambiarCamara();
+    if (nuevo(4)) pulsarSentido();
+    if ((nuevo(9) || nuevo(8)) && estado !== 'menu') pausar(ahora, 'Pausa');
+  }
+  mando.antes = gp.buttons.map(b => b.pressed);
+}
+// Botones que se ven en el menú o en el panel del podio (null si no hay ninguno abierto)
+function botonesMenu() {
+  const panel = $('podioPanel').style.display === 'flex' ? $('podioPanel') : $('pantalla').style.display !== 'none' ? $('pantalla') : null;
+  return panel && [...panel.querySelectorAll('button')].filter(b => !b.disabled && b.offsetParent !== null);
+}
+function botonInicial(menu) {
+  return [$('btnSeguir'), $('btnNueva'), $('podioSeguir')].find(b => menu.includes(b)) || menu[0];
+}
+function enfocar(b) {
+  if (!b) return;
+  b.focus({ preventScroll: true });
+  b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  document.body.classList.add('focoMando');
+}
+// Al botón más cercano en la dirección (dx, dy) de la pantalla; si no hay ninguno con el foco, al de seguir o empezar
+function moverFoco(menu, dx, dy) {
+  const act = menu.includes(document.activeElement) ? document.activeElement : null;
+  if (!act) { enfocar(botonInicial(menu)); return; }
+  const r0 = act.getBoundingClientRect(), cx = r0.left + r0.width / 2, cy = r0.top + r0.height / 2;
+  let mejor = null, md = Infinity;
+  for (const b of menu) {
+    if (b === act) continue;
+    const r = b.getBoundingClientRect(), x = r.left + r.width / 2 - cx, y = r.top + r.height / 2 - cy;
+    const avance = x * dx + y * dy, lado = Math.abs(x * dy - y * dx);
+    if (avance <= 4) continue;
+    const d = avance + lado * 2.5;   // mejor en línea que en diagonal
+    if (d < md) { md = d; mejor = b; }
+  }
+  if (mejor) { enfocar(mejor); Sonido.clic(); }
+}
+// Vibración del mando en los golpes (si el mando y el navegador la tienen)
+function vibrarMando(fuerza, ms) {
+  const gp = mando.indice >= 0 && navigator.getGamepads ? navigator.getGamepads()[mando.indice] : null, v = gp && gp.vibrationActuator;
+  if (!v || !v.playEffect) return;
+  try { v.playEffect('dual-rumble', { startDelay: 0, duration: ms, weakMagnitude: Math.min(1, fuerza), strongMagnitude: Math.min(1, fuerza * 0.8) }).catch(() => {}); } catch (err) { /* sin vibración */ }
+}
+addEventListener('gamepadconnected', e => { mostrarAviso(`🎮 Mando conectado: gatillo derecho o A acelera, el izquierdo o X frena, el stick gira`, 3.5); });
+addEventListener('gamepaddisconnected', () => { mando.gas = mando.freno = mando.giro = 0; mostrarAviso('🎮 Mando desconectado', 2); });
+// al tocar la pantalla (o hacer clic) vuelven la ruleta y los pedales, y se quita el recuadro del foco del mando
+addEventListener('pointerdown', () => { document.body.classList.remove('focoMando', 'conMando'); }, true);
 function alternarSonido() {
   const activo = Sonido.alternar();
   $('btnSonido').textContent = activo ? '🔊' : '🔇';
@@ -7489,7 +7578,7 @@ function efectoGolpe(g) {
   const ahora = performance.now() / 1000;
   if (g.impacto < 1.2) return;
   coche.sacudida = Math.max(coche.sacudida, Math.min(1, g.impacto / 14));
-  if (ahora - coche.ultimoGolpe > 0.12) { Sonido.golpe(g.tipo, g.impacto); coche.ultimoGolpe = ahora; }
+  if (ahora - coche.ultimoGolpe > 0.12) { Sonido.golpe(g.tipo, g.impacto); coche.ultimoGolpe = ahora; vibrarMando(Math.min(1, g.impacto / 12), 120 + Math.min(300, g.impacto * 25)); }
   if (g.tipo === 'riel' || g.tipo === 'casa' || g.tipo === 'coche' || g.tipo === 'farola') Efectos.chispas(g.x, 0.5, g.z, Math.min(28, 4 + g.impacto * 1.5));
   if (g.impacto > 6) {
     const d = $('destello');
@@ -7525,7 +7614,7 @@ function fisica(dt, soloFrenar = false) {
   const objetivoDir = (soloFrenar ? 0 : direccion()) * (c.acera ? 0.6 : 1) + ef.tiron * Math.min(1, Math.abs(c.v) / 6);   // en la acera, el volante responde menos
   c.dir += (objetivoDir - c.dir) * Math.min(1, dt * 8);
   if (soloFrenar) pasoMotor(c, false, Math.abs(c.v) > 0.5, dt);   // tras la meta o destrozado: frena solo
-  else pasoMotor(c, controles.acel && !c.destrozado, controles.freno, dt);   // motor, caja automática y frenos
+  else pasoMotor(c, c.destrozado ? 0 : Math.max(controles.acel ? 1 : 0, mando.gas), Math.max(controles.freno ? 1 : 0, mando.freno), dt);   // motor, caja automática y frenos (el mando, a medias)
   if (c.acera && Math.abs(c.v) > 7) c.v -= Math.sign(c.v) * (Math.abs(c.v) - 7) * Math.min(1, dt * 2.5);   // en la acera, a 25 km/h como mucho
   if (Math.abs(c.v) > ef.velMax) c.v -= Math.sign(c.v) * (Math.abs(c.v) - ef.velMax) * Math.min(1, dt * 1.5);   // con daño no pasa de cierta velocidad
   const sentido = c.v >= 0 ? 1 : -1;
@@ -7594,7 +7683,7 @@ function actualizarMalla(dt) {
   cuerpoCoche.visible = sombraCoche.visible = modoVisto() !== 2;   // dentro del coche no se ve la carrocería (los faros sí alumbran)
   // luces: con la trasera o el morro muy tocados, se rompen (primero una y luego las dos)
   const d = coche.dano, rotasAtras = d.detras > 85 ? 2 : d.detras > 55 ? 1 : 0, rotasDelante = d.delante > 85 ? 2 : d.delante > 55 ? 1 : 0;
-  const frena = coche.freno > 0.2 || (coche.marcha === 0 && coche.atrasAuto && controles.acel), atras = coche.marcha === 0;
+  const frena = coche.freno > 0.2 || (coche.marcha === 0 && coche.atrasAuto && (controles.acel || mando.gas > 0.1)), atras = coche.marcha === 0;
   lucesCoche.frenos.forEach((f, i) => { const viva = i >= rotasAtras; f.material.opacity += ((frena && viva ? 0.95 : viva ? 0.12 : 0) - f.material.opacity) * Math.min(1, dt * 18); });
   lucesCoche.atras.forEach((a, i) => { a.material.opacity = atras && i >= rotasAtras ? 0.8 : 0; });
   const noche = uNoche.value, apagado = coche.destrozado;
@@ -7738,9 +7827,10 @@ function bucle() {
   materialAgua.uniforms.uTiempo.value = ahora % 1000;   // módulo: los móviles calculan peor con números grandes
   actualizarMobiliario(ahora);
   actualizarBloquesFarolas();
-  // la ruleta vuelve sola al centro; con las flechas, gira hacia donde se dirige el coche (así se ve el giro)
+  leerMando(ahora);
+  // la ruleta vuelve sola al centro; con las flechas o el mando, gira hacia donde se dirige el coche (así se ve el giro)
   if (!volante.activo) {
-    const teclas = (controles.izq ? 1 : 0) - (controles.der ? 1 : 0);
+    const teclas = giroPedido();
     if (teclas) volante.ang += (-teclas * GIRO_RULETA - volante.ang) * Math.min(1, dt * 10);
     else volante.ang *= Math.exp(-9 * dt);
   }
