@@ -3540,8 +3540,87 @@ function cabezaFarola(f) {
   return f.estilo === 'clasica' ? [f.x, ALTO_CLASICA, f.z] : [f.x + Math.cos(f.th) * 1.3, 5.6, f.z - Math.sin(f.th) * 1.3];
 }
 
+// --- suelo con detalle: la foto aérea, a unos 2 m por píxel, se ve borrosa de cerca. Donde parece césped, arena o tierra se le pone
+// encima su textura de detalle (texturas/cesped.jpg, arena.jpg y tierra.jpg, hechas con generar_suelos.py): de media son gris medio,
+// así que no cambian el color de la foto, solo le añaden las briznas, los granos, las ondas del viento, las piedras y las grietas ---
+const TEXTURAS_SUELO = { uCesped: 'texturas/cesped.jpg', uArena: 'texturas/arena.jpg', uTierra: 'texturas/tierra.jpg' };
+// Qué es cada punto lo dice su color (el de la foto o, sin foto, el del mapa):
+// - césped y matorral: manda el verde (también el verde oliva de las marismas);
+// - arena: tono cálido, claro y poco saturado; tierra: cálido y más oscuro (con hierba seca). No la teja ni lo gris (calles, plazas);
+// - las capas del mapa ayudan donde el color engaña: los parques y las praderas son césped aunque en verano estén secos (y no en lo
+//   gris: plazas, caminos), los cultivos son tierra y los arenales, arena.
+// De lejos las texturas se promedian en gris medio y no cambian nada
+const FRAGMENTO_SUELO = `
+  {
+    #ifdef USE_MAP
+      vec3 c = texelColor.rgb;
+    #else
+      vec3 c = diffuseColor.rgb;
+    #endif
+    float L = (c.r + c.g + c.b) / 3.0, mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b)), sat = (mx - mn) / max(mx, 0.01);
+    float cesped = smoothstep(-0.01, 0.04, c.g - c.r) * smoothstep(0.0, 0.05, c.g - c.b) * smoothstep(0.08, 0.2, L);
+    float calido = smoothstep(0.03, 0.09, c.r - c.b) * (1.0 - smoothstep(0.10, 0.16, c.r - c.g)) * smoothstep(0.06, 0.13, sat) * (1.0 - cesped);
+    float claro = smoothstep(0.58, 0.70, L), arena = calido * claro, tierra = calido * (1.0 - claro) * smoothstep(0.16, 0.26, L);
+    if (uCajaPistas.z > 0.0) {
+      vec3 p = texture2D(uPistas, (vSuelo - uCajaPistas.xy) * uCajaPistas.zw).rgb;   // r: arenal, g: parque o pradera, b: cultivo
+      float g = p.g * smoothstep(0.05, 0.1, sat) * smoothstep(0.1, 0.2, L);
+      cesped = max(cesped, g * 0.85); arena = max(arena * (1.0 - g), p.r); tierra = max(tierra * (1.0 - g), p.b * 0.9 * smoothstep(0.05, 0.1, sat));
+    }
+    float suma = cesped + arena + tierra;
+    if (suma > 0.01) {
+      if (suma > 1.0) { cesped /= suma; arena /= suma; tierra /= suma; }
+      vec2 u = vSuelo;
+      vec3 dc = texture2D(uCesped, u / 2.2).rgb, da = texture2D(uArena, u / 3.7).rgb, dt = texture2D(uTierra, u / 3.4).rgb;
+      #ifdef DETALLE_DOBLE   // una segunda escala, más grande y girada, para que no se note la repetición
+        dc = mix(dc, texture2D(uCesped, u.yx / 7.9 + 0.37).rgb, 0.35); da = mix(da, texture2D(uArena, u.yx / 11.3 + 0.61).rgb, 0.3); dt = mix(dt, texture2D(uTierra, u.yx / 9.7 + 0.19).rgb, 0.3);
+      #endif
+      diffuseColor.rgb *= 1.0 + (dc * 2.0 - 1.0) * cesped + (da * 2.0 - 1.0) * arena + (dt * 2.0 - 1.0) * tierra;
+    }
+  }`;
+// Pone el detalle a un material del suelo. pistas: { textura, caja: [x0, z0, x1, z1] } con las capas del mapa (o null)
+function conDetalleSuelo(mat, pistas) {
+  mat.onBeforeCompile = sh => {
+    for (const [u, archivo] of Object.entries(TEXTURAS_SUELO)) sh.uniforms[u] = { value: texturaImagen(archivo) };
+    const [x0, z0, x1, z1] = pistas ? pistas.caja : [0, 0, 0, 0];
+    sh.uniforms.uPistas = { value: pistas ? pistas.textura : null };
+    sh.uniforms.uCajaPistas = { value: new THREE.Vector4(x0, z0, pistas ? 1 / (x1 - x0) : 0, pistas ? 1 / (z1 - z0) : 0) };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vSuelo;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSuelo = (modelMatrix * vec4(transformed, 1.0)).xz;');
+    sh.fragmentShader = (sombras ? '#define DETALLE_DOBLE\n' : '') + sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vSuelo; uniform sampler2D uCesped, uArena, uTierra, uPistas; uniform vec4 uCajaPistas;')
+      .replace('#include <map_fragment>', '#include <map_fragment>' + FRAGMENTO_SUELO);
+  };
+  mat.customProgramCacheKey = () => 'suelo' + (pistas ? 1 : 0);
+  return mat;
+}
+// Las capas del mapa que dicen qué hay en el suelo, en una imagen sobre la caja de la zona (unos 4 m por píxel, difuminada):
+// rojo, arenal; verde, parque, jardín, pradera o bosque; azul, cultivo o huerta
+const PISTAS_SUELO = { arena: [255, 0, 0], 'parque o jardín': [0, 255, 0], pradera: [0, 255, 0], bosque: [0, 200, 0], 'bosque de frondosas': [0, 200, 0], matorral: [0, 150, 90], cultivo: [0, 0, 255], 'huerta o frutales': [0, 120, 150] };
+function pistasSuelo(caja, capas) {
+  const [x0, z0, x1, z1] = caja, W = x1 - x0, H = z1 - z0, esc = Math.min(0.25, 1024 / Math.max(W, H));
+  if (!capas.some(c => PISTAS_SUELO[c.capa] && c.anillo)) return null;
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(W * esc)); cv.height = Math.max(1, Math.round(H * esc));
+  const g = cv.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, cv.width, cv.height);
+  g.globalCompositeOperation = 'lighter';   // las capas que se pisan suman sus canales
+  g.filter = 'blur(1px)';
+  for (const c of capas) {
+    const col = PISTAS_SUELO[c.capa];
+    if (!col || !c.anillo) continue;
+    g.beginPath();
+    c.anillo.forEach(([x, z], i) => (i ? g.lineTo((x - x0) * esc, (z - z0) * esc) : g.moveTo((x - x0) * esc, (z - z0) * esc)));
+    g.closePath();
+    g.fillStyle = `rgb(${col.join(',')})`;
+    g.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.flipY = false;   // la v de la textura va con la z del mundo
+  return { textura: tex, caja };
+}
+
 // Ortofoto (PNOA) de la zona: una malla sobre el rectángulo que cubre la imagen; cada vértice lleva su punto exacto de la foto
-function mallaFoto(foto) {
+function mallaFoto(foto, pistas) {
   const { g, W, H } = foto;
   const esquinas = [[-0.5, -0.5], [W - 0.5, -0.5], [-0.5, H - 0.5], [W - 0.5, H - 0.5]]
     .map(([c, f]) => localDeMercator(g.A * c + g.B * f + g.C, g.D * c + g.E * f + g.F));
@@ -3563,7 +3642,7 @@ function mallaFoto(foto) {
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));   // suelo plano: normal hacia arriba
   geo.setIndex(idx);
   // Lambert para que reciba sombras; el gris compensa la luz del cielo y del sol, y la foto se ve con su brillo
-  const malla = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: foto.textura, side: THREE.DoubleSide, color: new THREE.Color(0.7, 0.7, 0.7) }));
+  const malla = new THREE.Mesh(geo, conDetalleSuelo(new THREE.MeshLambertMaterial({ map: foto.textura, side: THREE.DoubleSide, color: new THREE.Color(0.7, 0.7, 0.7) }), pistas));
   malla.receiveShadow = sombras;
   return malla;
 }
@@ -3575,15 +3654,16 @@ function construirTerreno(caja, capas, foto) {
     : new THREE.MeshLambertMaterial({ color: SUELO_BASE }));
   base.rotation.x = -Math.PI / 2;
   base.position.y = -1.2;
-  grupo.add(base, construirSuelo(caja, capas, foto ? foto.media : SUELO_BASE));
-  if (foto) grupo.add(mallaFoto(foto));
+  const pistas = pistasSuelo(caja, capas);
+  grupo.add(base, construirSuelo(caja, capas, foto ? foto.media : SUELO_BASE, pistas));
+  if (foto) grupo.add(mallaFoto(foto, pistas));
   return grupo;
 }
 
 // Suelo pintado con los usos del mapa (praderas, parques, cultivos, agua) sobre la caja de la zona.
 // La luz del juego lo deja muy claro: se oscurece un poco para que los cultivos no salgan blancos
 const LUZ_SUELO = 0.72;
-function construirSuelo(caja, capas, colorBase) {
+function construirSuelo(caja, capas, colorBase, pistas) {
   const [x0, z0, x1, z1] = caja;
   const W = x1 - x0, H = z1 - z0, esc = 2048 / Math.max(W, H);
   const cv = document.createElement('canvas');
@@ -3603,7 +3683,7 @@ function construirSuelo(caja, capas, colorBase) {
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.anisotropy = 4;
-  const suelo = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshLambertMaterial({ map: tex, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO) }));
+  const suelo = new THREE.Mesh(new THREE.PlaneGeometry(W, H), conDetalleSuelo(new THREE.MeshLambertMaterial({ map: tex, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO) }), pistas));
   suelo.rotation.x = -Math.PI / 2;
   suelo.position.set((x0 + x1) / 2, -0.6, (z0 + z1) / 2);
   suelo.receiveShadow = sombras;
@@ -4024,14 +4104,14 @@ function mallaJardines(parcelas) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x5f8a42, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+  const m = new THREE.Mesh(g, conDetalleSuelo(new THREE.MeshLambertMaterial({ color: 0x5f8a42, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), null));
   m.receiveShadow = sombras;
   return m;
 }
 // Rotondas: césped en el centro, bordillo alrededor; las que parecen fuentes en la foto llevan una fuente decorada
 function mallaIslas(islas) {
   const grupo = new THREE.Group();
-  const cesped = new THREE.MeshLambertMaterial({ color: 0x6fa35a }), bordillo = new THREE.MeshLambertMaterial({ color: 0xb8b5ad });
+  const cesped = conDetalleSuelo(new THREE.MeshLambertMaterial({ color: 0x6fa35a }), null), bordillo = new THREE.MeshLambertMaterial({ color: 0xb8b5ad });
   for (const i of islas) {
     if (i.fuente) { grupo.add(mallaFuente(i)); continue; }
     const disco = new THREE.Mesh(new THREE.CircleGeometry(i.ri, 28).rotateX(-Math.PI / 2), cesped);
