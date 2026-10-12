@@ -2854,7 +2854,7 @@ function roadMaterial(){
 const fotoSt0=()=>({red:0,db:0,ok:0,sin:0,err:0,errs:new Map(),col:0,desc:0,whys:new Map(),rest:0,last:''});
 const FOTO={ok:null,cache:new Map(),active:0,count:0,max:500,d0:1e12,d1:-1,st:fotoSt0(),off:new Set(),msg:''};
 const fotoURL=ref=>`${CATASTRO_URL}?foto=${encodeURIComponent(ref)}`;
-const COLV=5;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra; 4: y un parche de su textura; 5: la casa en tres bandas, alta, media y zócalo, con un parche cada una)
+const COLV=6;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra; 4: y un parche de su textura; 5: la casa en tres bandas, alta, media y zócalo, con un parche cada una; 6: la pared por grupos de tono y saturación, con balance de blancos y exposición: el ladrillo y el ocre ya no salen blancos ni rosa pálido)
 function imgDe(url){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error('la foto está dañada'));im.src=url;});}
 function colorsDe(im){let c;try{c=photoColors(im);}catch(err){c={why:'no se ha podido analizar la foto'};}c.v=COLV;return c;}
 function contarCol(col){const f=FOTO.st;if(col&&col.wall)f.col++;else{f.desc++;cuenta(f.whys,(col&&col.why)||'no se ha podido analizar la foto');}}
@@ -2903,7 +2903,7 @@ function photoColors(im){
   const c=document.createElement('canvas');c.width=W0;c.height=H0;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(im,0,0,W0,H0);
   const d=g.getImageData(0,0,W0,H0).data,R=new Float32Array(N),G=new Float32Array(N),B=new Float32Array(N),L=new Float32Array(N),SA=new Float32Array(N);
   for(let i=0;i<N;i++){const r=d[i*4],gg=d[i*4+1],b=d[i*4+2],mx=Math.max(r,gg,b),mn=Math.min(r,gg,b);R[i]=r;G[i]=gg;B[i]=b;L[i]=(r+gg+b)/3;SA[i]=mx?(mx-mn)/mx:0;}
-  const skyLike=i=>{const y=Math.floor(i/W0);return (B[i]>R[i]+18&&B[i]>=G[i]-8&&SA[i]>0.28)||(y<H0*0.4&&L[i]>170&&B[i]>R[i]+8&&SA[i]<0.3);};
+  const skyLike=i=>{const y=Math.floor(i/W0);return (B[i]>R[i]+18&&B[i]>=G[i]-8&&SA[i]>0.28)||(y<H0*0.4&&L[i]>170&&B[i]>R[i]+8&&SA[i]<0.3)||(y<H0*0.45&&L[i]>=244&&SA[i]<0.06);};   // también el cielo blanco quemado o nublado de arriba
   const sky=new Uint8Array(N),st=[];
   for(let x=0;x<W0;x++)if(skyLike(x)){sky[x]=1;st.push(x);}
   while(st.length){const i=st.pop(),x=i%W0,y=(i-x)/W0;
@@ -2914,43 +2914,72 @@ function photoColors(im){
   const cand=[];for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){const i=y*W0+x;if(!sky[i])cand.push(i);}
   const out={skyPct:0,conf:0};let sk=0;for(let i=0;i<N;i++)sk+=sky[i];out.skyPct=sk/N;
   if(cand.length<N*0.2){out.why='casi toda la foto es cielo';return out;}
+  // balance de blancos: lo más claro que no es cielo ni tiene color vivo debería ser blanco. Si sale azulado, la casa está a la sombra
+  // (la alumbra el cielo) y se le quita ese azul, como mucho un 15 %: así el ocre y el ladrillo a la sombra no salen grises. Al sol no se toca
+  let bb=[1,1,1];
+  {const cl=cand.filter(i=>SA[i]<0.25&&!green(i)).sort((a,b)=>L[b]-L[a]).slice(0,Math.max(20,Math.floor(cand.length*0.08)));
+    let r=0,g=0,b=0;for(const i of cl){r+=R[i];g+=G[i];b+=B[i];}
+    if(cl.length&&b>r){const m=(r+g+b)/3,k=bb=[clamp(m/r,1,1.15),clamp(m/g,0.92,1.08),clamp(m/b,0.87,1)];
+      for(let i=0;i<N;i++){R[i]*=k[0];G[i]*=k[1];B[i]*=k[2];const mx=Math.max(R[i],G[i],B[i]),mn=Math.min(R[i],G[i],B[i]);L[i]=(R[i]+G[i]+B[i])/3;SA[i]=mx?(mx-mn)/mx:0;}
+    }}
   // pared: se agrupa por tono (la proporción entre rojo, verde y azul), que casi no cambia entre la parte al sol y la parte a la sombra;
   // el brillo cuenta poco. Así un ladrillo a la sombra sigue siendo ladrillo, y no gana el blanco de los balcones ni el gris de la calle
   const wl=cand.filter(i=>L[i]>=30&&!strongBlue(i)&&!green(i)&&SA[i]<0.8&&!(L[i]<75&&SA[i]<0.15));
   if(wl.length<cand.length*0.18){out.why='no se distingue la pared (la foto es oscura, o la tapan árboles o coches)';return out;}
-  const FT=new Float32Array(N*3);for(const i of wl){const s=R[i]+G[i]+B[i]+1;FT[i*3]=300*R[i]/s;FT[i*3+1]=300*G[i]/s;FT[i*3+2]=22*Math.log(L[i]);}
-  const peso=i=>{const y=Math.floor(i/W0)/H0,x=(i%W0)/W0;return (y>0.15&&y<0.75?1:0.55)*(x>0.2&&x<0.8?1:0.6);};   // la casa de la parcela suele estar en el centro; abajo, la calle y los coches
-  const lab=new Int8Array(N).fill(-1),K=4;
-  let C=[];{const s=wl.slice().sort((a,b)=>(FT[a*3]-FT[a*3+1]*0.5)-(FT[b*3]-FT[b*3+1]*0.5));for(let j=0;j<K;j++){const i=s[Math.floor((j+0.5)/K*s.length)];C.push([FT[i*3],FT[i*3+1],FT[i*3+2]]);}}
-  let Wn=[];
-  for(let it=0;it<12;it++){const A=C.map(()=>[0,0,0,0]);
-    for(const i of wl){let bj=0,bd=1e9;for(let j=0;j<K;j++){const q=C[j],dd=(FT[i*3]-q[0])**2+(FT[i*3+1]-q[1])**2+(FT[i*3+2]-q[2])**2;if(dd<bd){bd=dd;bj=j;}}
-      lab[i]=bj;const a=A[bj],w=peso(i);a[0]+=FT[i*3]*w;a[1]+=FT[i*3+1]*w;a[2]+=FT[i*3+2]*w;a[3]+=w;}
-    C=A.map((a,j)=>a[3]?[a[0]/a[3],a[1]/a[3],a[2]/a[3]]:C[j]);Wn=A.map(a=>a[3]);}
-  // grupos con el mismo tono (la pared al sol y a la sombra) suman; los grises cuentan menos, porque gris es también la calle,
-  // los cristales, el cielo con calima y los remates blancos: solo ganan si de verdad dominan la foto
+  // exposición: muchas fotos se hacen contra el cielo y la casa sale oscura. Se aclara la foto entera por igual (hasta un 45 %)
+  // para que lo más claro que no es cielo llegue a 225: el ladrillo sigue más oscuro que el blanco, y no se aclara cada color por su cuenta
+  const Lw=wl.map(i=>L[i]).sort((a,b)=>a-b),gan=clamp(225/Math.max(1,Lw[Math.floor(Lw.length*0.95)]),1,1.45);
+  const FT=new Float32Array(N*3);for(const i of wl){const s=R[i]+G[i]+B[i]+1;FT[i*3]=300*R[i]/s;FT[i*3+1]=300*G[i]/s;FT[i*3+2]=12*Math.log(L[i]);}
+  // la casa de la parcela suele estar en el centro; abajo, la calle, la acera y los coches
+  const peso=i=>{const y=Math.floor(i/W0)/H0,x=(i%W0)/W0;return (y<0.12?0.5:y<0.68?1:y<0.78?0.5:0.15)*(x>0.2&&x<0.8?1:0.6);};
+  // ocho grupos (lo muy oscuro, ventanas y sombras hondas, no los ocupa): así el blanco, el crema, el ocre, el ladrillo y el gris de la calle no se mezclan
+  const lab=new Int8Array(N).fill(-1),K=8,wk=wl.filter(i=>L[i]>=55);
+  let C=[];{const s=(wk.length>K*20?wk:wl).slice().sort((a,b)=>(FT[a*3]-FT[a*3+1]*0.5)-(FT[b*3]-FT[b*3+1]*0.5));for(let j=0;j<K;j++){const i=s[Math.floor((j+0.5)/K*s.length)];C.push([FT[i*3],FT[i*3+1],FT[i*3+2]]);}}
+  const cerc=i=>{let bj=0,bd=1e9;for(let j=0;j<K;j++){const q=C[j],dd=(FT[i*3]-q[0])**2+(FT[i*3+1]-q[1])**2+(FT[i*3+2]-q[2])**2;if(dd<bd){bd=dd;bj=j;}}return bj;};
+  for(let it=0;it<14;it++){const A=C.map(()=>[0,0,0,0]);
+    for(const i of wk){const bj=cerc(i),a=A[bj],w=peso(i);a[0]+=FT[i*3]*w;a[1]+=FT[i*3+1]*w;a[2]+=FT[i*3+2]*w;a[3]+=w;}
+    C=A.map((a,j)=>a[3]?[a[0]/a[3],a[1]/a[3],a[2]/a[3]]:C[j]);}
+  const Wn=new Array(K).fill(0);for(const i of wl){lab[i]=cerc(i);Wn[lab[i]]+=peso(i);}
   const med3=C.map((_,j)=>{let r=0,g=0,b=0,n=0;for(const i of wl)if(lab[i]===j){r+=R[i];g+=G[i];b+=B[i];n++;}n=n||1;return [r/n,g/n,b/n];});
-  const tono=med3.map(m=>{const s=m[0]+m[1]+m[2]+1;return [m[0]/s,m[1]/s,m[2]/s];}),sat=med3.map(m=>{const a=Math.max(...m),b=Math.min(...m);return a?(a-b)/a:0;});
-  // matiz (en grados) de cada grupo: dos grupos con color y matiz parecido son la misma pared al sol y a la sombra
+  const tono=med3.map(m=>{const s=m[0]+m[1]+m[2]+1;return [300*m[0]/s,300*m[1]/s,300*m[2]/s];}),sat=med3.map(m=>{const a=Math.max(...m),b=Math.min(...m);return a?(a-b)/a:0;});
+  const Lm=med3.map(m=>(m[0]+m[1]+m[2])/3);
+  // la misma pared: el mismo tono. Con color, el mismo matiz y una saturación parecida (de 0,4 a 2,5 veces): la parte al sol y la
+  // parte a la sombra, aunque la sombra la apague un poco. Sin color (blanco, gris), muy cerca, perdonando a la parte más oscura un poco de azul
+  // (la sombra la alumbra el cielo). Antes bastaba con el mismo matiz, y el blanco cálido se juntaba con el ladrillo
+  const U=[-Math.SQRT1_2,0,Math.SQRT1_2],viveza=tono.map(t=>Math.hypot(t[0]-100,t[1]-100,t[2]-100));
   const matiz=med3.map(([r,g,b])=>{const a=Math.max(r,g,b),c=a-Math.min(r,g,b);if(!c)return 0;let h=a===r?((g-b)/c)%6:a===g?(b-r)/c+2:(r-g)/c+4;return (h*60+360)%360;});
-  // neutro: gris o blanco; también el blanco a la sombra, que sale azulado (lo alumbra el cielo, no el sol)
-  const azul=j=>matiz[j]>170&&matiz[j]<260,neutro=j=>sat[j]<0.12||(azul(j)&&sat[j]<0.3);
-  const cerca=(j,k)=>{if(neutro(j)||neutro(k))return neutro(j)&&neutro(k);
-    const d=Math.abs(matiz[j]-matiz[k]);return Math.min(d,360-d)<25;};
-  // los azules con color suelen ser cielo con calima o cristales, no pared
-  const brillo=j=>clamp(((med3[j][0]+med3[j][1]+med3[j][2])/3-40)/80,0.3,1);   // lo muy oscuro suele ser sombra, cristal o calle
-  let cw=0,best=-1;for(let j=0;j<K;j++){let g=0;for(let k=0;k<K;k++)if(cerca(j,k))g+=Wn[k]*brillo(k);const sc=g*(neutro(j)?0.5:azul(j)?0.4:1);if(sc>best){best=sc;cw=j;}}
-  const grupo=C.map((_,k)=>cerca(cw,k));
+  const azul=j=>matiz[j]>170&&matiz[j]<260,sinColor=j=>viveza[j]<9||(azul(j)&&sat[j]<0.22);   // blanco o gris (el blanco a la sombra sale azulado)
+  const misma=(j,k)=>{if(j===k)return true;const nj=sinColor(j),nk=sinColor(k);
+    const [cl,os]=Lm[k]<Lm[j]?[j,k]:[k,j];
+    if(!nj&&!nk){const dh=Math.abs(matiz[j]-matiz[k]),r=viveza[os]/viveza[cl];return Math.min(dh,360-dh)<22&&r>0.4&&r<2.5;}   // lo más oscuro suele salir más saturado
+    const d=tono[os].map((v,q)=>v-tono[cl][q]),s=Lm[os]<Lm[cl]*0.85?clamp(d[0]*U[0]+d[2]*U[2],0,14):0;return Math.hypot(d[0]-s*U[0],d[1],d[2]-s*U[2])<7.5;};
+  // lo muy oscuro suele ser sombra, cristal o calle; con color, menos: el ladrillo es oscuro aunque le dé el sol
+  const brillo=j=>sat[j]>0.15?clamp((Lm[j]*gan-20)/60,0.5,1):clamp((Lm[j]*gan-30)/75,0.35,1);
+  // cuánto vale una pared, por su parte al sol: lo gris oscuro o medio es la calle, los cristales o una sombra, y solo gana si de verdad
+  // domina la foto; lo blanco es cal; lo blanco azulado y muy claro es cielo con calima; lo azul con color, cielo, cristal o sombra
+  const valor=j=>{const l=Lm[j]*gan,s=sat[j];if(azul(j)&&s>0.1)return 0.3;
+    const gris=azul(j)&&l>200&&s>0.05?0.3:clamp((l-90)/110,0.3,0.9);return lerp(gris,1,clamp((s-0.08)/0.12,0,1));};
+  // cada pared empieza por su parte más clara (la del sol) y suma sus partes a la sombra: así un grupo oscuro no hace de puente entre
+  // dos paredes. Cada parte suma según lo que valga ella misma, sin pasar de lo que vale la del sol: en una pared blanca, la calzada
+  // gris o una sombra honda no suman como cal
+  let best=-1,grupo=null;
+  for(let j=0;j<K;j++){if(!Wn[j])continue;const g=[],vj=valor(j);let w=0;for(let k=0;k<K;k++)if(Lm[k]<=Lm[j]*1.08&&misma(j,k)){g.push(k);w+=Wn[k]*brillo(k)*Math.min(vj,Math.max(valor(k),0.5*vj));}
+    if(w>best){best=w;grupo=C.map((_,k)=>g.includes(k));}}
   const wp=wl.filter(i=>grupo[lab[i]]);let wT=0,wG=0;for(const i of wl){wT+=peso(i);if(grupo[lab[i]])wG+=peso(i);}
   out.conf=wG/wT;
   if(out.conf<0.2){out.why='la pared ocupa poco de la foto (seguramente la tapan otras cosas)';return out;}
-  // color: el tono medio de la pared con el brillo de su parte al sol (el percentil 75), no el de la media con la sombra
-  let cr=0,cg=0,cb=0;for(const i of wp){const s=R[i]+G[i]+B[i]+1;cr+=R[i]/s;cg+=G[i]/s;cb+=B[i]/s;}cr/=wp.length;cg/=wp.length;cb/=wp.length;
-  const Ls=wp.map(i=>L[i]).sort((a,b)=>a-b),Lp=Ls[Math.floor(Ls.length*0.75)];
+  // color: el tono mediano de toda la pared (ya sin el azul de la sombra), con la saturación de sus píxeles más puros (el percentil 65):
+  // en el ladrillo, las juntas y los marcos blancos se mezclan con él y saldría rosa grisáceo
+  const pc=(a,q)=>{const v=Float32Array.from(a).sort();return v[Math.floor(v.length*q)];},cro=wp.map(i=>{const s=R[i]+G[i]+B[i]+1;return [R[i]/s,G[i]/s,B[i]/s];});
+  let [cr,cg,cb]=[0,1,2].map(q=>pc(cro.map(c=>c[q]),0.5));{const s=cr+cg+cb;cr/=s;cg/=s;cb/=s;}
+  const dm=Math.hypot(cr-1/3,cg-1/3,cb-1/3),sp=pc(cro.map(c=>Math.hypot(c[0]-1/3,c[1]-1/3,c[2]-1/3)),0.65),ks=dm>0.02?clamp(sp/dm,1,1.6):1;
+  cr=1/3+(cr-1/3)*ks;cg=1/3+(cg-1/3)*ks;cb=1/3+(cb-1/3)*ks;
+  // el brillo, el de su parte al sol: el percentil 75 y, con color, el 80 de sus píxeles más puros (lo más claro de la pared son las juntas y los remates)
+  const dv=cro.map(c=>Math.hypot(c[0]-1/3,c[1]-1/3,c[2]-1/3)),dv50=pc(dv,0.5),Lp=dm*ks>0.035?pc(wp.filter((_,q)=>dv[q]>=dv50).map(i=>L[i]),0.8):pc(wp.map(i=>L[i]),0.75);
   const wc=[cr*3*Lp,cg*3*Lp,cb*3*Lp],mx=Math.max(...wc),mn=Math.min(...wc),sw=mx?(mx-mn)/mx:0;
   let w;
-  if(sw<0.13||neutro(cw)){const v=238,m=Math.max(1,Lp);w=wc.map(x=>lerp(v,x*v/m,0.3));}          // cal blanca, aunque esté a la sombra
-  else{const t=clamp(205/mx,1,1.45);w=wc.map(x=>x*t);}
+  if(sw<0.1||(cb>cr&&sw<0.2)){const v=238,m=Math.max(1,Lp);w=wc.map(x=>lerp(v,x*v/m,cb>cr?0.12:0.35));}   // cal blanca, aunque esté a la sombra (el azul de la sombra casi no se le deja)
+  else{const t=gan*clamp(150/(mx*gan),1,1.2);w=wc.map(x=>x*t);}   // con color: el de la foto con su exposición (y algo más si sale muy oscuro)
   out.wall=w.map(x=>clamp(x,0,250));
   const esPared=i=>lab[i]>=0&&grupo[lab[i]],dist=(i,q)=>Math.abs(R[i]-q[0])+Math.abs(G[i]-q[1])+Math.abs(B[i]-q[2]);
   // k-medias en color (para la carpintería)
@@ -2974,11 +3003,11 @@ function photoColors(im){
   else{const zc=med(runs.flat()),zl=(zc[0]+zc[1]+zc[2])/3,dw=Math.abs(zc[0]-wc[0])+Math.abs(zc[1]-wc[1])+Math.abs(zc[2]-wc[2]);
     const zs=(Math.max(...zc)-Math.min(...zc))/Math.max(1,Math.max(...zc));
     if(zs>0.75)out.zocWhy='la franja de abajo es de un color demasiado vivo (seguramente un coche)';
-    else if(dw>50&&zl>25&&!(zc[2]>zc[0]+35))out.zoc=zc;else out.zocWhy='la franja de abajo es del mismo color que la pared';}
+    else if(dw>50&&zl>25&&!(zc[2]>zc[0]+35))out.zoc=zc.map(v=>clamp(v*gan,0,250));else out.zocWhy='la franja de abajo es del mismo color que la pared';}
   // carpintería: puertas, ventanas y persianas con color, por encima de la base de la fachada
   const ybMed=ybs.length?ybs.slice().sort((p,q)=>p-q)[Math.floor(ybs.length/2)]:y1;
   const fac=cand.filter(i=>Math.floor(i/W0)<ybMed-1&&!esPared(i)&&dist(i,wc)>70&&L[i]>=22&&L[i]<=125&&SA[i]>0.28&&SA[i]<0.72&&!(green(i)&&L[i]>=95));
-  if(fac.length>=cand.length*0.01){const cc=km(fac,3).find(o=>o.n>=cand.length*0.008&&o.n<=cand.length*0.12);if(cc)out.carp=cc.c;}
+  if(fac.length>=cand.length*0.01){const cc=km(fac,3).find(o=>o.n>=cand.length*0.008&&o.n<=cand.length*0.12);if(cc)out.carp=cc.c.map(v=>clamp(v*gan,0,250));}
   // --- la casa en la foto y sus tres bandas: alta (cornisa, ático), media (la pared) y baja (el zócalo) ---
   // Arriba de la casa, en las columnas del centro: la primera fila de pared bajo el cielo; abajo, donde acaba la pared (ybMed)
   const tops=[];
@@ -2986,7 +3015,7 @@ function photoColors(im){
   const topMed=tops.length>=(cx1-cx0)*0.3?tops.slice().sort((p,q)=>p-q)[Math.floor(tops.length/2)]:-1,hF=ybMed-topMed;
   // ¿es una casa? Una pared que ocupa una buena parte de la foto entre su tejado y su base
   let enCasa=0,totCasa=0;if(topMed>=0)for(let y=topMed;y<ybMed;y++)for(let x=cx0;x<cx1;x++){totCasa++;if(esPared(y*W0+x))enCasa++;}
-  out.casa=topMed>=0&&hF>=H0*0.22&&enCasa>=totCasa*0.35;
+  out.casa=topMed>=0&&hF>=H0*0.22&&enCasa>=totCasa*0.28;
   if(!out.casa){out.parcheWhy='no se ve bien la casa (de su tejado a su base)';return out;}
   out.bandas={alto:topMed/H0,base:ybMed/H0};
   // Integrales para buscar rápido el cuadrado más uniforme de cada banda
@@ -3016,8 +3045,8 @@ function photoColors(im){
     if(cvar>maxVar)return null;
     g2.putImageData(id,0,0);return cv.toDataURL('image/jpeg',0.85);};
   const lado=Math.max(5,Math.round(W0*0.09)),medioA=Math.round(topMed+hF*0.2),medioB=Math.round(ybMed-hF*0.08);
-  // pared de referencia (cruda, tal como sale en la foto) para comparar la banda alta
-  let wr=[0,0,0],wn=0;for(const i of wp){wr[0]+=R[i];wr[1]+=G[i];wr[2]+=B[i];wn++;}wr=wr.map(v=>v/Math.max(1,wn));
+  // pared de referencia (cruda, tal como sale en la foto, sin el balance de blancos) para comparar la banda alta
+  let wr=[0,0,0],wn=0;for(const i of wp){wr[0]+=R[i];wr[1]+=G[i];wr[2]+=B[i];wn++;}wr=wr.map((v,q)=>v/Math.max(1,wn)/bb[q]);
   out.parche=parcheEntre(medioA,medioB,lado,0.93,null,0.1);
   out.parcheAlto=parcheEntre(topMed,medioA,lado,0.5,wr,0.16);
   // la banda baja: la franja del zócalo, si la hay; si no, el pie de la pared

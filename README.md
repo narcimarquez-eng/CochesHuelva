@@ -3,7 +3,7 @@ Carrera de coches por Huelva
 
 ## Prototipo
 
-`carreras_huelva.html` es un juego de conducción en 3D que corre en el navegador. Usa Three.js y JSZip desde cdnjs, así que necesita conexión. Las fachadas se dibujan con ventanas, puertas y zócalo a partir de los colores del Catastro; las casas sin foto usan colores de una paleta.
+`carreras_huelva.html` es un juego de conducción en 3D que corre en el navegador. Usa Three.js y JSZip desde cdnjs, así que necesita conexión. Las fachadas se dibujan con ventanas, puertas y zócalo a partir de los colores del Catastro; las casas sin foto toman el color de una vecina que ya lo tiene o, si no hay, de una paleta sacada de fotos de Huelva.
 
 1. Abre `carreras_huelva.html` en el navegador.
 2. La zona se carga sola desde `zona-huelva.zip`, que va junto al juego (es la zona exportada por «Paseo por el relieve»). Si abres el HTML desde el disco y no la encuentra, elige el zip con el selector.
@@ -58,7 +58,13 @@ El Catastro se pide en trozos de 700 m. Si uno falla (el Catastro tarda demasiad
 
 Al guardar la zona completada, el juego reaprovecha comprimido lo que no cambia, así que el zip sigue pesando lo mismo y se guarda en segundos.
 
-Los **colores y la textura de las fachadas** se piden solos **mientras conduces**: la casa del Catastro sin color más cercana (a menos de 90 m), de una en una o de dos en dos. Su foto de fachada se analiza igual que en el Paseo y la casa se repinta al momento. Los colores se guardan en este navegador por referencia catastral, así que la próxima vez ya están, en esa zona o en otra que tenga las mismas casas. Si `catastro.php` no contesta, deja de pedir.
+Los **colores y la textura de las fachadas** se piden solos **mientras conduces**, antes de llegar a cada casa, y se ponen sin que se note:
+
+- **Qué se pide**: las casas que vas a ver. Primero las del camino de delante, hasta 240 m y por orden de llegada: la vuelta del circuito, la ruta de la exploración (o la roja, si te has salido) y, siempre, lo que tienes delante del morro, por si no sigues la ruta; y las de alrededor del coche. Tres a la vez.
+- **Cuándo se pinta**: si la casa no está en pantalla (detrás, a un lado), al momento. Si se ve, el color de antes se funde poco a poco con el nuevo: en menos de un segundo si se ve pequeña, a lo lejos, y despacio (hasta 4 s) si se ve grande; un cambio así de lento no se nota. Si deja de verse a medio fundido, se termina de golpe. La textura de la foto también se funde, y solo se sube a la tarjeta gráfica el trozo de la malla de esa casa.
+- **Mientras no llega su foto**, la casa lleva el color de una vecina que ya lo tiene, a menos de 160 m (las de una manzana suelen ser de la misma época y estilo), mejor cuanto más cerca y si es de su misma altura (casa baja o bloque). Si hay pocas vecinas con color, a veces sale de la paleta, que ahora es la de 277 fotos de fachada de Huelva, distinta para casas bajas (más cal blanca y ocre) y bloques (más ladrillo). Así, cuando llega la foto, el cambio suele ser pequeño.
+
+Su foto de fachada se analiza igual que en el Paseo. Los colores se guardan en este navegador por referencia catastral, así que la próxima vez ya están, en esa zona o en otra que tenga las mismas casas. Si `catastro.php` no contesta, deja de pedir. Con el análisis nuevo (versión 6), las casas con colores del análisis anterior se vuelven a pedir al pasar por ellas y se repintan igual, sin que se note.
 
 ### Si no llegan las casas del Catastro
 
@@ -93,12 +99,16 @@ Las fachadas tienen ventanas con persianas y rejas, balcones, puertas, zócalo y
 
 ### Colores de la foto de fachada
 
-El análisis de la foto (en el Paseo) agrupa los píxeles por **tono**, la proporción entre rojo, verde y azul, que casi no cambia entre la parte de la pared al sol y la parte a la sombra:
+El análisis de la foto (en el Paseo y en el juego) agrupa los píxeles por **tono**, la proporción entre rojo, verde y azul, que casi no cambia entre la parte de la pared al sol y la parte a la sombra:
 
-- El brillo cuenta poco, y el color final es el tono medio de la pared con el brillo de su parte al sol. Así un ladrillo a la sombra sigue siendo ladrillo, y no gris.
-- La pared blanca a la sombra, que sale azulada, cuenta como blanca.
-- Lo gris pesa menos que lo que tiene color, porque gris son también la calle, los cristales y el cielo con calima. También cuentan menos lo muy oscuro, la parte de abajo de la foto (calle y coches) y los lados (la casa de la parcela suele estar en el centro).
+- **Balance de blancos**: lo más claro que no es cielo ni tiene color vivo debería ser blanco. Si sale azulado, la casa está a la sombra (la alumbra el cielo) y se le quita ese azul, como mucho un 15 %. Al sol no se toca.
+- **Exposición**: muchas fotos se hacen contra el cielo y la casa sale oscura. Se aclara la foto entera por igual (hasta un 45 %), no cada color por su cuenta: el ladrillo sigue siendo más oscuro que la cal.
+- **Ocho grupos** de tono, para que el blanco, el crema, el ocre, el ladrillo y el gris de la calle no se mezclen. Dos grupos son la misma pared (la parte al sol y la de sombra) si tienen el mismo matiz y una saturación parecida; los grises y blancos, si están muy cerca, perdonando a la parte más oscura un poco de azul. Antes bastaba con el mismo matiz, y el blanco cálido de los marcos se juntaba con el ladrillo: salía rosa pálido o blanco.
+- Cada pared empieza por su parte más clara y suma sus partes a la sombra. Lo gris pesa menos que lo que tiene color, porque gris son también la calle, los cristales y el cielo con calima; lo blanco azulado muy claro es cielo. También cuentan menos la parte de abajo de la foto (calle y coches) y los lados (la casa de la parcela suele estar en el centro). El ladrillo, aunque es oscuro, no se castiga por serlo. El cielo blanco quemado o nublado de arriba se quita como el azul.
+- **El color** es el tono mediano de toda la pared con la saturación de sus píxeles más puros (en el ladrillo, las juntas y los marcos blancos lo apagan), y el brillo de su parte al sol. La cal blanca sale blanca aunque esté a la sombra. El zócalo y la carpintería llevan la misma corrección de exposición.
 - Las hojas al sol, de verde amarillento, no cuentan como pared.
+
+Comparado con el análisis anterior en 277 fotos de Huelva: 32 casas que salían blancas o rosa pálido ahora salen de ladrillo, ocre, salmón o crema, como en la foto, y 12 que salían de color ahora salen blancas (casi siempre el color venía de los marcos o de la casa de al lado).
 
 **La casa en tres bandas**: en la foto se busca la casa. Arriba, la primera fila de pared bajo el cielo (el tejado o la cornisa); abajo, donde acaba la pared. Si entre las dos no hay suficiente pared, no se toma como casa: será cielo, árboles o un coche, y la casa se queda con su color. Entre esos dos bordes hay tres bandas:
 
@@ -106,11 +116,11 @@ El análisis de la foto (en el Paseo) agrupa los píxeles por **tono**, la propo
 - **media**: la pared;
 - **baja**: el zócalo, si lo hay.
 
-De cada banda sale su parche de textura, y en el juego se pone cada uno a su altura: el zócalo abajo, la pared en medio y la banda alta en el último quinto de la casa, con el pretil. El parche alto guarda además si esa banda es de otro color que la pared. En las casas bajas, el **alto del zócalo** sale también de la foto. En las 157 fotos de Huelva: 144 casas reconocidas, 82 parches de pared, 93 de banda alta y 14 de zócalo.
+De cada banda sale su parche de textura, y en el juego se pone cada uno a su altura: el zócalo abajo, la pared en medio y la banda alta en el último quinto de la casa, con el pretil. El parche alto guarda además si esa banda es de otro color que la pared. En las casas bajas, el **alto del zócalo** sale también de la foto. En las 157 fotos de Huelva (con el análisis de la versión 6): 147 casas reconocidas, 77 parches de pared, 96 de banda alta y 14 de zócalo.
 
-**Textura de la pared**: además de los colores, de cada foto se saca un **parche** de 64 × 64 de la pared real. Es el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible: sin ventanas, esquinas ni hojas. Si aun así varía demasiado, no se usa y la casa se queda con su color. El parche se guarda con la media de cada color en gris medio, así que solo lleva la textura (ladrillo, azulejo, enfoscado, piedra), y el color sigue siendo el de la pared. En el juego se repite por **todas las paredes de la casa**, cada 1,6 m y en espejo para que no se vean costuras, debajo de las ventanas y puertas dibujadas, y se difumina de lejos. En las 157 fotos de Huelva, 94 dan parche. Pesa poco más de 1 KB y va en `zona.json` con los colores; el juego los junta en una sola textura de 2048 × 2048, en casillas de 48 px (hasta 1.764 parches).
+**Textura de la pared**: además de los colores, de cada foto se saca un **parche** de 64 × 64 de la pared real. Es el cuadrado (un 9 % del ancho de la foto) que es casi todo pared, sin cielo y lo más uniforme posible: sin ventanas, esquinas ni hojas. Si aun así varía demasiado, no se usa y la casa se queda con su color. El parche se guarda con la media de cada color en gris medio, así que solo lleva la textura (ladrillo, azulejo, enfoscado, piedra), y el color sigue siendo el de la pared. En el juego se repite por **todas las paredes de la casa**, cada 1,6 m y en espejo para que no se vean costuras, debajo de las ventanas y puertas dibujadas, y se difumina de lejos. En las 157 fotos de Huelva, 77 dan parche de pared y 111 alguno de los tres. Pesa poco más de 1 KB y va en `zona.json` con los colores; el juego los junta en una sola textura de 2048 × 2048, en casillas de 48 px (hasta 1.764 parches).
 
-Antes solo se miraban los píxeles claros, así que el ladrillo y las paredes rojas en sombra quedaban fuera y salía blanco o gris. En las 157 fotos de la zona incluida se ha comprobado a ojo, y sus colores ya están rehechos. En el Paseo, los colores guardados con el análisis anterior se rehacen solos desde la foto guardada, sin descargar nada.
+Antes solo se miraban los píxeles claros, así que el ladrillo y las paredes rojas en sombra quedaban fuera y salía blanco o gris. En el Paseo, los colores guardados con un análisis anterior se rehacen solos desde la foto guardada, sin descargar nada; en el juego, se vuelven a pedir al pasar.
 
 ## Casas que cortan calles
 
