@@ -3153,8 +3153,283 @@ function bandasH(m, pts, s0, s1, y, c, tu = 1, tv = 1) {
   }
 }
 
-// Calzada, aceras, bordillos y arcenes de cada calle (anchos del zip). Caminos de tierra sin aceras.
-function mallaCarreteras(tramos) {
+// --- aceras: hasta la fachada y doblando la esquina en los cruces ---
+// Ancho de las aceras de cada calle, cada 3 m y a cada lado (+1: a la izquierda del sentido en que va dibujada; -1: a la derecha).
+// Se mide desde el bordillo hasta la fachada o la valla más cercana: si está a menos de 4 m más allá del ancho de la calle, la acera
+// llega hasta ella (así no queda una franja de tierra entre la acera y las casas), y si está más cerca, la acera no se mete en la casa.
+// Donde no hay nada cerca (un solar, una plaza), el ancho de la calle. Tampoco entra en la calzada de otra calle
+const PASO_ACERA = 3, MAS_ACERA = 4;
+// Distancia a lo largo del rayo (x0, z0) → (dx, dz) hasta la primera pared de una casa o una valla, hasta max (Infinity si no hay);
+// 0 si el punto de salida ya está dentro de una casa
+function rayoObstaculo(x0, z0, dx, dz, max, edif, rejilla, rejVallas) {
+  let mejor = Infinity;
+  const corta = (ax, az, bx, bz) => {
+    const ex = bx - ax, ez = bz - az, den = dx * ez - dz * ex;
+    if (Math.abs(den) < 1e-9) return;
+    const t = ((ax - x0) * ez - (az - z0) * ex) / den, u = ((ax - x0) * dz - (az - z0) * dx) / den;
+    if (t >= 0 && t < mejor && u >= 0 && u <= 1) mejor = t;
+  };
+  const x1 = x0 + dx * max, z1 = z0 + dz * max, bx0 = Math.min(x0, x1), bx1 = Math.max(x0, x1), bz0 = Math.min(z0, z1), bz1 = Math.max(z0, z1);
+  const vistas = new Set();
+  for (let cx = Math.floor(bx0 / TAM_CELDA); cx <= Math.floor(bx1 / TAM_CELDA); cx++)
+    for (let cz = Math.floor(bz0 / TAM_CELDA); cz <= Math.floor(bz1 / TAM_CELDA); cz++) {
+      for (const j of rejilla.get(cx + ',' + cz) || []) {
+        if (vistas.has(j)) continue;
+        vistas.add(j);
+        const e = edif[j], b = e.bbox;
+        if (b[2] < bx0 || b[0] > bx1 || b[3] < bz0 || b[1] > bz1) continue;
+        if (enPoligono(e.pts, x0, z0)) return 0;
+        const r = e.pts;
+        for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; corta(p[0], p[1], q[0], q[1]); }
+      }
+      const v = rejVallas && rejVallas.get(cx + ',' + cz);
+      if (v) for (let i = 0; i < v.length; i += 4) corta(v[i], v[i + 1], v[i + 2], v[i + 3]);
+    }
+  return mejor;
+}
+function medirAceras(tramos, edif, rejilla, rejVallas, enOtra) {
+  tramos.forEach((t, k) => {
+    t.anchos = null;
+    if (!(t.acera > 0) || /tierra|grava/.test(t.dib)) return;
+    const cum = acumulados(t.pts), L = cum[cum.length - 1], n = Math.max(1, Math.round(L / PASO_ACERA)), h = t.ancho / 2, max = t.acera + MAS_ACERA;
+    const lados = { 1: new Float32Array(n + 1), [-1]: new Float32Array(n + 1) };
+    for (let i = 0; i <= n; i++) {
+      const e = enPolilinea(t.pts, cum, L * i / n);
+      for (const sg of [1, -1]) {
+        const nx = -e.tz * sg, nz = e.tx * sg, x0 = e.x + nx * h, z0 = e.z + nz * h;
+        const d = rayoObstaculo(x0, z0, nx, nz, max, edif, rejilla, rejVallas);
+        let calzada = Infinity;   // hasta dónde no pisa otra calzada
+        for (let q = 0.5; q <= Math.min(d, max); q += 0.5) if (enOtra(x0 + nx * q, z0 + nz * q, k)) { calzada = q - 0.25; break; }
+        lados[sg][i] = d <= max && d <= calzada ? Math.max(0.3, d + 0.05) : Math.max(0.3, Math.min(t.acera, calzada));   // un poco bajo la pared: sin rendija
+      }
+    }
+    t.anchos = { paso: L / n, lados };
+  });
+}
+// Ancho de la acera del lado sg a s metros del inicio de la calle
+function anchoAcera(t, sg, s) {
+  const a = t.anchos;
+  if (!a) return t.acera;
+  const v = a.lados[sg], f = Math.max(0, Math.min(v.length - 1, s / a.paso)), i = Math.floor(f), j = Math.min(v.length - 1, i + 1);
+  return v[i] + (v[j] - v[i]) * (f - i);
+}
+// Puntos de una polilínea entre d0 y d1, como mucho cada «paso» metros y en cada vértice, con su normal (a la izquierda) y lo que hay
+// que alargarla en los vértices para que los dos lados casen (inglete)
+function muestrasPolilinea(pts, cum, d0, d1, paso) {
+  const out = [], nrm = k => { const dx = pts[k + 1][0] - pts[k][0], dz = pts[k + 1][1] - pts[k][1], l = Math.hypot(dx, dz) || 1; return [-dz / l, dx / l]; };
+  const punto = (d, k) => { const a = pts[k], b = pts[k + 1], l = cum[k + 1] - cum[k] || 1, u = Math.min(1, Math.max(0, (d - cum[k]) / l)), n = nrm(k);
+    out.push({ d, x: a[0] + (b[0] - a[0]) * u, z: a[1] + (b[1] - a[1]) * u, nx: n[0], nz: n[1], k: 1 }); };
+  let k = 0;
+  while (k < pts.length - 2 && cum[k + 1] <= d0) k++;
+  punto(d0, k);
+  for (; k < pts.length - 1; k++) {
+    const fin = Math.min(d1, cum[k + 1]), ini = Math.max(d0, cum[k]), m = Math.ceil((fin - ini) / paso);
+    for (let i = 1; i < m; i++) punto(ini + (fin - ini) * i / m, k);
+    if (cum[k + 1] >= d1 || k === pts.length - 2) break;
+    const n0 = nrm(k), n1 = nrm(k + 1), mx = n0[0] + n1[0], mz = n0[1] + n1[1], ml = Math.hypot(mx, mz);
+    if (ml < 1e-3) { punto(cum[k + 1], k); continue; }
+    out.push({ d: cum[k + 1], x: pts[k + 1][0], z: pts[k + 1][1], nx: mx / ml, nz: mz / ml, k: 1 / Math.max(0.5, (mx * n1[0] + mz * n1[1]) / ml), vertice: true });
+  }
+  punto(d1, Math.min(k, pts.length - 2));
+  return out;
+}
+// Franja horizontal entre los desplazamientos sA(d) y sB(d) (sA < sB), que cambian a lo largo de la polilínea, de d0 a d1.
+// Se mira cada metro y medio, pero solo se parte donde el ancho cambia (o en los vértices): así no se llena de triángulos
+function bandaVar(m, pts, cum, d0, d1, sA, sB, y, c, tu, tv) {
+  const todas = muestrasPolilinea(pts, cum, d0, d1, 1.5), q = [todas[0]];
+  for (let i = 1; i < todas.length - 1; i++) {
+    const a = q[q.length - 1], p = todas[i], b = todas[i + 1], f = (p.d - a.d) / ((b.d - a.d) || 1);
+    const recta = Math.abs(sA(p.d) - (sA(a.d) + (sA(b.d) - sA(a.d)) * f)) < 0.12 && Math.abs(sB(p.d) - (sB(a.d) + (sB(b.d) - sB(a.d)) * f)) < 0.12;
+    if (p.vertice || !recta) q.push(p);
+  }
+  if (todas.length > 1) q.push(todas[todas.length - 1]);
+  const V = (p, s) => m.v(p.x + p.nx * p.k * s, y, p.z + p.nz * p.k * s, c, p.d / tu, s / tv);
+  for (let i = 0; i < q.length - 1; i++) {
+    const a = q[i], b = q[i + 1], a0 = sA(a.d), a1 = sB(a.d), b0 = sA(b.d), b1 = sB(b.d);
+    V(a, a0); V(b, b1); V(b, b0);
+    V(a, a0); V(a, a1); V(b, b1);
+  }
+}
+// Triángulo con la cara de delante hacia la normal n (si no, la luz lo dejaría oscuro, como cara trasera)
+function triH(m, a, b, c, n, col, tu) {
+  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  if ((uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2] < 0) [b, c] = [c, b];
+  for (const p of [a, b, c]) m.v(p[0], p[1], p[2], col, p[0] / tu, p[2] / tu, n[0], n[1], n[2]);
+}
+// Polígono horizontal (en el suelo, a la altura y)
+function poligonoH(m, poli, y, c, tu) {
+  if (poli.length < 3) return;
+  let tris;
+  try { tris = THREE.ShapeUtils.triangulateShape(poli.map(p => new THREE.Vector2(p[0], p[1])), []); } catch (err) { return; }
+  for (const [i, j, k] of tris) triH(m, [poli[i][0], y, poli[i][1]], [poli[j][0], y, poli[j][1]], [poli[k][0], y, poli[k][1]], ARRIBA, c, tu);
+}
+// Anillo (o trozo de anillo) horizontal alrededor de (cx, cz), por los ángulos «angs», entre los radios r0(t) y r1(t) (t de 0 a 1)
+function anilloH(m, cx, cz, angs, r0, r1, y, c, tu) {
+  const n = angs.length - 1, P = (a, r) => [cx + Math.cos(a) * r, y, cz + Math.sin(a) * r];
+  for (let i = 0; i < n; i++) {
+    const ta = i / n, tb = (i + 1) / n, a = angs[i], b = angs[i + 1];
+    const A0 = P(a, r0(ta)), A1 = P(a, r1(ta)), B0 = P(b, r0(tb)), B1 = P(b, r1(tb));
+    triH(m, A0, A1, B1, ARRIBA, c, tu); triH(m, A0, B1, B0, ARRIBA, c, tu);
+  }
+}
+// Cara vertical del bordillo por un arco (radio r(t)), de y0 a y1, mirando hacia fuera del centro (fuera = 1) o hacia él (−1)
+function caraArco(m, cx, cz, angs, r, y0, y1, fuera, c) {
+  const n = angs.length - 1;
+  for (let i = 0; i < n; i++) {
+    const a = angs[i], b = angs[i + 1], ra = r(i / n), rb = r((i + 1) / n), am = (a + b) / 2, nr = [Math.cos(am) * fuera, 0, Math.sin(am) * fuera];
+    const A0 = [cx + Math.cos(a) * ra, y0, cz + Math.sin(a) * ra], A1 = [A0[0], y1, A0[2]], B0 = [cx + Math.cos(b) * rb, y0, cz + Math.sin(b) * rb], B1 = [B0[0], y1, B0[2]];
+    triH(m, A0, A1, B1, nr, c, 1); triH(m, A0, B1, B0, nr, c, 1);
+  }
+}
+// Ángulos de a0 a a0 + giro: un paso por cada metro y medio de arco de radio r (de 2 a 8 pasos)
+const angulosArco = (a0, giro, r) => { const n = Math.min(8, Math.max(2, Math.ceil(Math.abs(giro) * r / 1.5))); return Array.from({ length: n + 1 }, (_, i) => a0 + giro * i / n); };
+
+// Esquinas de los cruces. En cada punto que comparten dos o más calles (sus extremos o un vértice en mitad de una de ellas), cada calle
+// sale en una dirección (un «brazo»), y entre cada dos brazos seguidos hay una esquina:
+// - cóncava (menos de 171°): la de una manzana. La acera dobla la esquina con el bordillo redondeado (radio de 2,5 a 5 m, menor si la
+//   acera es estrecha, para que no se salga de la manzana), y la curva del bordillo se rellena de asfalto. Las aceras de las dos calles
+//   acaban donde empieza la curva.
+// - convexa (más de 189°): la parte de fuera de una curva o de una calle en «L». La calzada y la acera siguen alrededor del cruce sin hueco.
+// Devuelve las esquinas y, por cada calle y lado («k|sg»), los trozos [d0, d1] donde no va su acera recta
+function esquinasCruces(tramos) {
+  const clave = p => p[0].toFixed(2) + '|' + p[1].toFixed(2), nodos = new Map(), cortes = new Map(), esquinas = [];
+  const cums = tramos.map(t => acumulados(t.pts));
+  tramos.forEach((t, k) => t.pts.forEach((p, i) => {
+    const c = clave(p);
+    if (!nodos.has(c)) nodos.set(c, { p, de: [] });
+    nodos.get(c).de.push([k, i]);
+  }));
+  const cortar = (k, sg, a, b) => { const c = k + '|' + sg; if (!cortes.has(c)) cortes.set(c, []); cortes.get(c).push([a, b]); };
+  const conAcera = t => t.acera > 0 && !/tierra|grava/.test(t.dib);
+  for (const { p: O, de } of nodos.values()) {
+    if (new Set(de.map(([k]) => k)).size < 2) continue;
+    const brazos = [];
+    for (const [k, i] of de) {
+      const t = tramos[k], cum = cums[k], L = cum[cum.length - 1], s = cum[i];
+      for (const fwd of [true, false]) {
+        if (fwd ? i >= t.pts.length - 1 : i <= 0) continue;
+        const libre = fwd ? L - s : s, e = enPolilinea(t.pts, cum, fwd ? s + Math.min(4, libre) : s - Math.min(4, libre));
+        const dx = e.x - O[0], dz = e.z - O[1], l = Math.hypot(dx, dz);
+        if (l < 0.05) continue;
+        brazos.push({ k, t, s, fwd, libre, d: [dx / l, dz / l], ang: Math.atan2(dz, dx), h: t.ancho / 2, acera: conAcera(t) });
+      }
+    }
+    if (brazos.length < 2) continue;
+    brazos.sort((a, b) => a.ang - b.ang);
+    for (let i = 0; i < brazos.length; i++) {
+      const A = brazos[i], B = brazos[(i + 1) % brazos.length];
+      if (A.k === B.k) continue;   // los dos brazos de una misma calle: ya casan solos
+      let phi = B.ang - A.ang;
+      if (phi <= 0) phi += 2 * Math.PI;
+      const sA = A.fwd ? 1 : -1, sB = B.fwd ? -1 : 1;   // el lado de cada calle que da a la esquina
+      const nA = [-A.d[1], A.d[0]], nB = [B.d[1], -B.d[0]];
+      const hasta = (b, l) => cortar(b.k, b === A ? sA : sB, b.fwd ? b.s : b.s - l, b.fwd ? b.s + l : b.s);
+      const colorDe = t => (/adoqu/.test(t.dib) ? [0.52, 0.5, 0.47] : COLOR_CALZADA(t));
+      if (phi > Math.PI + 0.15) {   // convexa: alrededor del cruce
+        esquinas.push({ tipo: 'convexa', O, a0: A.ang + Math.PI / 2, giro: phi - Math.PI, hA: A.h, hB: B.h,
+          wA: A.acera && B.acera ? anchoAcera(A.t, sA, A.s) : 0, wB: A.acera && B.acera ? anchoAcera(B.t, sB, B.s) : 0, color: colorDe(A.t) });
+        continue;
+      }
+      if (phi > Math.PI - 0.15 || phi < 0.3) continue;   // casi en línea (o casi encima): nada que hacer
+      // cóncava: C, donde se cortan los dos bordillos (a u metros por A y v por B)
+      const rx = nB[0] * B.h - nA[0] * A.h, rz = nB[1] * B.h - nA[1] * A.h, det = -(A.d[0] * B.d[1] - A.d[1] * B.d[0]);
+      const u = (-rx * B.d[1] + B.d[0] * rz) / det, v = (A.d[0] * rz - A.d[1] * rx) / det;
+      if (!(u > 0.05 && v > 0.05)) continue;
+      const C = [O[0] + A.d[0] * u + nA[0] * A.h, O[1] + A.d[1] * u + nA[1] * A.h];
+      if (!(A.acera && B.acera)) {   // solo una tiene acera: llega hasta el borde de la otra calzada
+        if (A.acera) hasta(A, Math.min(u + 0.3, A.libre)); else if (B.acera) hasta(B, Math.min(v + 0.3, B.libre));
+        continue;
+      }
+      const sm = Math.sin(phi / 2), tg = Math.tan(phi / 2);
+      const wA = anchoAcera(A.t, sA, A.fwd ? A.s + u + 3 : A.s - u - 3), wB = anchoAcera(B.t, sB, B.fwd ? B.s + v + 3 : B.s - v - 3);
+      let r = Math.min(5, Math.max(2.5, 1.5 + 0.25 * (A.h + B.h)));
+      if (sm < 0.999) r = Math.min(r, (Math.min(wA, wB) - 0.5 * sm) / (1 - sm));   // que la curva no se salga por fuera de la acera
+      r = Math.min(r, Math.max(0, Math.min(A.libre * 0.45 - u, B.libre * 0.45 - v, 10)) * tg);   // ni se coma toda la calle
+      if (r < 0.45) { hasta(A, Math.min(u + 0.3, A.libre)); hasta(B, Math.min(v + 0.3, B.libre)); continue; }
+      const tl = r / tg, bis = [A.d[0] + B.d[0], A.d[1] + B.d[1]], bl = Math.hypot(bis[0], bis[1]) || 1, qd = r / sm;
+      const TA = [C[0] + A.d[0] * tl, C[1] + A.d[1] * tl], TB = [C[0] + B.d[0] * tl, C[1] + B.d[1] * tl], Q = [C[0] + bis[0] / bl * qd, C[1] + bis[1] / bl * qd];
+      // F: donde se cortan los bordes de fuera de las dos aceras (la esquina de la manzana)
+      const fx = nB[0] * (B.h + wB) - nA[0] * (A.h + wA), fz = nB[1] * (B.h + wB) - nA[1] * (A.h + wA), uf = (-fx * B.d[1] + B.d[0] * fz) / det;
+      const F = [O[0] + A.d[0] * uf + nA[0] * (A.h + wA), O[1] + A.d[1] * uf + nA[1] * (A.h + wA)];
+      let a0 = Math.atan2(TA[1] - Q[1], TA[0] - Q[0]), giro = Math.atan2(TB[1] - Q[1], TB[0] - Q[0]) - a0;
+      while (giro > Math.PI) giro -= 2 * Math.PI;
+      while (giro < -Math.PI) giro += 2 * Math.PI;
+      esquinas.push({ tipo: 'concava', C, Q, r, TA, TB, nA, nB, wA, wB, F, a0, giro, color: colorDe(A.t) });
+      hasta(A, u + tl); hasta(B, v + tl);
+    }
+  }
+  return { esquinas, cortes };
+}
+// Quita de los trozos [a, b] los de «fuera»
+function restarTrozos(trozos, fuera) {
+  let out = trozos;
+  for (const [x0, x1] of fuera) out = out.flatMap(([a, b]) => (x1 <= a || x0 >= b ? [[a, b]] : [[a, Math.min(b, x0)], [Math.max(a, x1), b]].filter(([p, q]) => q - p > 0.05)));
+  return out;
+}
+// Aceras que doblan la esquina (con su bordillo, canto y rigola) y el asfalto de la curva del bordillo; en las convexas, la calzada
+// y la acera alrededor del cruce
+function pintarEsquinas(esquinas, m, colores) {
+  const { calzada, aceras, bordillos, rigolas } = m, { ACERA, CANTO, BORDILLO, RIGOLA } = colores;
+  for (const e of esquinas) {
+    if (e.tipo === 'concava') {
+      const angs = angulosArco(e.a0, e.giro, e.r), arco = r => angs.map(a => [e.Q[0] + Math.cos(a) * r, e.Q[1] + Math.sin(a) * r]);
+      poligonoH(calzada, [e.C, ...arco(e.r)], 0.05, e.color, TU_ASFALTO);
+      const ta = [e.TA[0] + e.nA[0] * 0.2, e.TA[1] + e.nA[1] * 0.2], tb = [e.TB[0] + e.nB[0] * 0.2, e.TB[1] + e.nB[1] * 0.2];
+      poligonoH(aceras, [ta, ...arco(e.r - 0.2).slice(1, -1), tb, [e.TB[0] + e.nB[0] * e.wB, e.TB[1] + e.nB[1] * e.wB], e.F, [e.TA[0] + e.nA[0] * e.wA, e.TA[1] + e.nA[1] * e.wA]], 0.15, ACERA, TU_ADOQUIN);
+      anilloH(aceras, e.Q[0], e.Q[1], angs, () => e.r - 0.2, () => e.r, 0.16, CANTO, TU_ADOQUIN);
+      caraArco(bordillos, e.Q[0], e.Q[1], angs, () => e.r, 0.05, 0.16, 1, BORDILLO);   // sin rigola en la curva: el asfalto llega al bordillo
+    } else {
+      const angs = angulosArco(e.a0, e.giro, Math.max(e.hA, e.hB) + 1), h = t => e.hA + (e.hB - e.hA) * t, w = t => e.wA + (e.wB - e.wA) * t;
+      anilloH(calzada, e.O[0], e.O[1], angs, () => 0, h, 0.05, e.color, TU_ASFALTO);
+      if (e.wA > 0 && e.wB > 0) {
+        anilloH(aceras, e.O[0], e.O[1], angs, h, t => h(t) + 0.2, 0.16, CANTO, TU_ADOQUIN);
+        anilloH(aceras, e.O[0], e.O[1], angs, t => h(t) + 0.2, t => h(t) + Math.max(0.25, w(t)), 0.15, ACERA, TU_ADOQUIN);
+        caraArco(bordillos, e.O[0], e.O[1], angs, h, 0.05, 0.16, -1, BORDILLO);
+        anilloH(rigolas, e.O[0], e.O[1], angs, t => h(t) - 0.3, h, 0.055, RIGOLA, TU_ADOQUIN);
+      }
+    }
+  }
+}
+// Para la física: en qué esquina está (x, z): { acera: true, nx, nz } en la acera de una esquina (n: hacia la acera), { acera: false }
+// en el asfalto de la curva del bordillo, o null si no está en ninguna
+function rejillaEsquinas(esquinas) {
+  const celdas = new Map(), C = 25;
+  for (const e of esquinas) {
+    const pts = e.tipo === 'concava' ? [e.C, e.F, e.TA, e.TB] : [[e.O[0] - e.hA - e.wA - 1, e.O[1] - e.hA - e.wA - 1], [e.O[0] + e.hA + e.wA + 1, e.O[1] + e.hA + e.wA + 1]];
+    const xs = pts.map(p => p[0]), zs = pts.map(p => p[1]);
+    for (let cx = Math.floor(Math.min(...xs) / C); cx <= Math.floor(Math.max(...xs) / C); cx++)
+      for (let cz = Math.floor(Math.min(...zs) / C); cz <= Math.floor(Math.max(...zs) / C); cz++) {
+        const k = cx + ',' + cz;
+        if (!celdas.has(k)) celdas.set(k, []);
+        celdas.get(k).push(e);
+      }
+  }
+  return (x, z) => {
+    for (const e of celdas.get(Math.floor(x / C) + ',' + Math.floor(z / C)) || []) {
+      if (e.tipo === 'concava') {
+        const dq = Math.hypot(x - e.Q[0], z - e.Q[1]);
+        // dentro del triángulo C-TA-TB y fuera del círculo del bordillo: asfalto; dentro del círculo y de la acera de la esquina: acera
+        const lado = (a, b) => (b[0] - a[0]) * (z - a[1]) - (b[1] - a[1]) * (x - a[0]);
+        const s1 = lado(e.C, e.TA), s2 = lado(e.TA, e.TB), s3 = lado(e.TB, e.C);
+        if (((s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0)) && dq > e.r) return { acera: false };
+        const poli = [e.TA, e.C, e.TB, [e.TB[0] + e.nB[0] * e.wB, e.TB[1] + e.nB[1] * e.wB], e.F, [e.TA[0] + e.nA[0] * e.wA, e.TA[1] + e.nA[1] * e.wA]];
+        if (enPoligono(poli, x, z)) return { acera: true, nx: (e.Q[0] - x) / (dq || 1), nz: (e.Q[1] - z) / (dq || 1) };
+      } else if (e.wA > 0 && e.wB > 0) {
+        const dx = x - e.O[0], dz = z - e.O[1], d = Math.hypot(dx, dz);
+        let a = Math.atan2(dz, dx) - e.a0;
+        while (a < 0) a += 2 * Math.PI;
+        if (a > e.giro) continue;
+        const t = a / e.giro, h = e.hA + (e.hB - e.hA) * t, w = e.wA + (e.wB - e.wA) * t;
+        if (d > h + 0.15 && d < h + w + 0.4) return { acera: true, nx: dx / (d || 1), nz: dz / (d || 1) };
+      }
+    }
+    return null;
+  };
+}
+
+// Calzada, aceras, bordillos y arcenes de cada calle (anchos del zip; las aceras, medidas hasta las fachadas). Caminos de tierra sin aceras.
+// En los cruces, las aceras doblan la esquina (esquinasCruces)
+function mallaCarreteras(tramos, esq) {
   const calzada = nuevaMalla(), aceras = nuevaMalla(), bordillos = nuevaMalla(), rigolas = nuevaMalla();
   const ACERA = [0.5, 0.48, 0.45], CANTO = [0.7, 0.68, 0.64], BORDILLO = [0.56, 0.54, 0.51], ARCEN = [0.42, 0.41, 0.39], RIGOLA = [0.6, 0.59, 0.56];
   // cara vertical (bordillo) en el desplazamiento s, de y0 a y1; mira hacia el centro de la calle
@@ -3172,25 +3447,6 @@ function mallaCarreteras(tramos) {
     }
   };
   const enOtra = construirRejillaCalzadas(tramos);
-  // en cada extremo, hacia dónde sale cada calle: si otra calle llega en ángulo, es un cruce (la acera se corta antes, con su rebaje)
-  const clave = p => p[0].toFixed(2) + '|' + p[1].toFixed(2), salen = new Map();
-  const direccion = (t, alInicio) => {
-    const p = t.pts, a = alInicio ? p[0] : p[p.length - 1], b = alInicio ? p[1] : p[p.length - 2];
-    const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1;
-    return [dx / L, dz / L];
-  };
-  tramos.forEach((t, k) => {
-    if (t.pts.length < 2) return;
-    for (const alInicio of [true, false]) {
-      const c = clave(alInicio ? t.pts[0] : t.pts[t.pts.length - 1]);
-      if (!salen.has(c)) salen.set(c, []);
-      salen.get(c).push({ k, d: direccion(t, alInicio) });
-    }
-  });
-  const cruzaEn = (k, t, alInicio) => {
-    const d = direccion(t, alInicio), lista = salen.get(clave(alInicio ? t.pts[0] : t.pts[t.pts.length - 1])) || [];
-    return lista.some(e => e.k !== k && d[0] * e.d[0] + d[1] * e.d[1] > -0.85);   // distinta de la continuación recta (que sale en sentido contrario)
-  };
   for (let k = 0; k < tramos.length; k++) {
     const t = tramos[k];
     const h = t.ancho / 2;
@@ -3198,29 +3454,27 @@ function mallaCarreteras(tramos) {
     const asfalto = tierra ? [0.5, 0.42, 0.3] : adoquin ? [0.52, 0.5, 0.47] : COLOR_CALZADA(t);
     bandasH(calzada, t.pts, -h, h, 0.05, asfalto, TU_ASFALTO, TU_ASFALTO);
     if (t.acera > 0 && !tierra) {
-      // aceras y bordillos solo donde no caen dentro de la calzada de otra calle (cruces y calzadas dobles)
-      const cum = acumulados(t.pts), L = cum[cum.length - 1], R = h + 4;
-      const ini = cruzaEn(k, t, true) ? R : 0, fin = cruzaEn(k, t, false) ? L - R : L;
-      const recorta = trozos => trozos.map(([a, b]) => [Math.max(a, ini), Math.min(b, fin)]).filter(([a, b]) => b - a >= 2);
-      for (const [d0, d1] of recorta(trozosLibres(t, cum, h + t.acera / 2, (x, z) => enOtra(x, z, k)))) {
-        const p = subPolilinea(t.pts, cum, d0, d1);
-        bandasH(aceras, p, h + 0.2, h + t.acera, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
-        bandasH(aceras, p, h, h + 0.2, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);   // canto claro del bordillo
-        caraV(bordillos, p, h, 0.05, 0.16, BORDILLO);
-        bandasH(rigolas, p, h - 0.3, h, 0.055, RIGOLA, TU_ADOQUIN, TU_ADOQUIN);   // rigola de hormigón junto al bordillo
-      }
-      for (const [d0, d1] of recorta(trozosLibres(t, cum, -(h + t.acera / 2), (x, z) => enOtra(x, z, k)))) {
-        const p = subPolilinea(t.pts, cum, d0, d1);
-        bandasH(aceras, p, -h - t.acera, -h - 0.2, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
-        bandasH(aceras, p, -h - 0.2, -h, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);
-        caraV(bordillos, p, -h, 0.05, 0.16, BORDILLO);
-        bandasH(rigolas, p, -h, -h + 0.3, 0.055, RIGOLA, TU_ADOQUIN, TU_ADOQUIN);
+      // aceras y bordillos solo donde no caen dentro de la calzada de otra calle (calzadas dobles, calles que se cruzan sin juntarse)
+      // ni donde empieza la esquina de un cruce; cada acera, con el ancho medido en cada punto
+      const cum = acumulados(t.pts);
+      for (const sg of [1, -1]) {
+        const trozos = restarTrozos(trozosLibres(t, cum, sg * (h + t.acera / 2), (x, z) => enOtra(x, z, k)), (esq && esq.cortes.get(k + '|' + sg)) || []);
+        for (const [d0, d1] of trozos) {
+          if (d1 - d0 < 0.5) continue;
+          const p = subPolilinea(t.pts, cum, d0, d1);
+          if (sg > 0) bandaVar(aceras, t.pts, cum, d0, d1, () => h + 0.2, d => h + Math.max(0.25, anchoAcera(t, 1, d)), 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
+          else bandaVar(aceras, t.pts, cum, d0, d1, d => -h - Math.max(0.25, anchoAcera(t, -1, d)), () => -h - 0.2, 0.15, ACERA, TU_ADOQUIN, TU_ADOQUIN);
+          bandasH(aceras, p, sg > 0 ? h : -h - 0.2, sg > 0 ? h + 0.2 : -h, 0.16, CANTO, TU_ADOQUIN, TU_ADOQUIN);   // canto claro del bordillo
+          caraV(bordillos, p, sg * h, 0.05, 0.16, BORDILLO);
+          bandasH(rigolas, p, sg > 0 ? h - 0.3 : -h, sg > 0 ? h : -h + 0.3, 0.055, RIGOLA, TU_ADOQUIN, TU_ADOQUIN);   // rigola de hormigón junto al bordillo
+        }
       }
     } else if (/con arcén/.test(t.dib)) {   // arcén: franja junto a la calzada, sin acera
       bandasH(calzada, t.pts, h, h + 1.2, 0.045, ARCEN, TU_ASFALTO, TU_ASFALTO);
       bandasH(calzada, t.pts, -h - 1.2, -h, 0.045, ARCEN, TU_ASFALTO, TU_ASFALTO);
     }
   }
+  if (esq) pintarEsquinas(esq.esquinas, { calzada, aceras, bordillos, rigolas }, { ACERA, CANTO, BORDILLO, RIGOLA });
   const grupo = new THREE.Group();
   const matCalzada = new THREE.MeshLambertMaterial({ map: texturaAsfalto(), vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   const matAceras = new THREE.MeshLambertMaterial({ map: texturaAdoquin(), vertexColors: true, side: THREE.DoubleSide });
@@ -4644,7 +4898,7 @@ function construirMallaZona() {
   matsNoche = []; fuentes = []; bloquesFarolas = [];
   mallaZona = new THREE.Group();
   const m = zona.mundo;
-  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif));
+  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos, zona.esq), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif));
   mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaLucesFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas),
     mallaQuioscos(m.quioscos), mallaTermometros(m.termometros), mallaVallas(m.vallas), mallaJuegos(m.juegos || []));
   if (!zona.foto && m.jardines.length) mallaZona.add(mallaJardines(m.jardines));
@@ -4806,6 +5060,9 @@ async function cargarZona(archivo) {
   zona.parcelas = parcelasGeo ? parsearParcelas(parcelasGeo) : [];
   const altura = await leerAlturas(zip);
   zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas, pixelesFoto(foto), altura);
+  medirAceras(tramos, edif, zona.rejilla, zona.mundo.rejVallas, zona.enCalzadaAjena);   // hasta las fachadas y las vallas
+  zona.esq = esquinasCruces(tramos);
+  zona.enEsquina = rejillaEsquinas(zona.esq.esquinas);
   zona.caja = calcularCaja(tramos, edif);
   zona.foto = foto;
   zona.nFuentes = detectarFuentes(zona.mundo, zona.foto);
@@ -6656,9 +6913,13 @@ function bordillos(c, x0, z0) {
   const r = calleMasCercana(zona.rejSeg, zona.tramos, c.x, c.z, 25);
   tramoActual = r ? r.t : null; tramoIdx = r ? r.i : -1; dTramo2 = r ? r.d * r.d : Infinity;
   let enAcera = false;
-  if (r) {
-    const t = r.t, mitad = t.ancho / 2;
-    enAcera = t.acera > 0 && !/tierra|grava/.test(t.dib) && r.d > mitad + 0.15 && r.d < mitad + t.acera + 0.4 && !zona.enCalzadaAjena(c.x, c.z, r.i);
+  const esquina = zona.enEsquina && zona.enEsquina(c.x, c.z);   // en la esquina de un cruce: su acera o el asfalto de la curva del bordillo
+  if (esquina) {
+    enAcera = esquina.acera && !!r;
+    if (enAcera) { r.nx = esquina.nx; r.nz = esquina.nz; }
+  } else if (r) {
+    const t = r.t, mitad = t.ancho / 2, e = enPolilinea(t.pts, t.cum, r.s), lado = r.nx * -e.tz + r.nz * e.tx >= 0 ? 1 : -1;
+    enAcera = t.acera > 0 && !/tierra|grava/.test(t.dib) && r.d > mitad + 0.15 && r.d < mitad + anchoAcera(t, lado, r.s) + 0.4 && !zona.enCalzadaAjena(c.x, c.z, r.i);
   }
   if (enAcera && !c.acera) {
     const fx = Math.sin(c.h), fz = Math.cos(c.h), Vx = fx * c.v + c.sx, Vz = fz * c.v + c.sz;
