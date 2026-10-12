@@ -469,6 +469,7 @@ function parsearCasas(geo) {
     const g = f.geometry;
     if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;   // los edificios de OpenStreetMap pueden venir en varias piezas
     const p = f.properties || {};
+    if (tipoSinPlantas(p)) continue;   // porches y patios: no son casas (van aparte, con parsearSinPlantas)
     let h = Number(p.altura_aprox_m);
     if (!(h > 0)) h = (Number(p.plantas) || 2) * 3;
     for (const poli of g.type === 'Polygon' ? [g.coordinates] : g.coordinates) {
@@ -486,6 +487,103 @@ function parsearCasas(geo) {
     }
   }
   return edif;
+}
+
+// --- porches y patios del Catastro: las partes sin plantas sobre rasante. Sin sótano debajo, un porche, un cobertizo o una marquesina
+// (cubierto y sin paredes); con sótano, un patio (o una rampa) encima de él. Las zonas de antes no las traen ---
+function tipoSinPlantas(p) {
+  if (p.tipo === 'porche' || p.tipo === 'patio') return p.tipo;
+  return p.fuente === 'Catastro' && p.plantas === 0 ? (Number(p.plantas_bajo_rasante) > 0 ? 'patio' : 'porche') : null;
+}
+function parsearSinPlantas(geo) {
+  const out = [];
+  for (const f of geo.features || []) {
+    const g = f.geometry, p = f.properties || {}, tipo = tipoSinPlantas(p);
+    if (!tipo || !g || g.type !== 'Polygon') continue;
+    const pts = quitarCierre(g.coordinates[0].map(c => proyectar(c[0], c[1])));
+    if (pts.length < 3 || Math.abs(areaAnillo(pts)) < 2) continue;
+    if (areaAnillo(pts) < 0) pts.reverse();
+    const huecos = g.coordinates.slice(1).map(r => quitarCierre(r.map(c => proyectar(c[0], c[1])))).filter(r => r.length >= 3 && Math.abs(areaAnillo(r)) >= 2);
+    out.push({ pts, huecos, tipo, ref: typeof p.referencia_catastral === 'string' ? p.referencia_catastral.slice(0, 14).toUpperCase() : null });
+  }
+  return out;
+}
+
+// Porches: cuáles se cubren, a qué casa van pegados y dónde van sus pilares. El Catastro da también sin plantas explanadas, pistas
+// y solares de varias hectáreas: se cubren los de hasta 400 m² y, más grandes, los alargados (marquesinas, galerías), de hasta 12 m
+// de ancho y 4.000 m². Los que pisan una calzada no se ponen. Cada uno: { pts, huecos, A, casa (la casa a la que va pegado, o null),
+// apoyo (el lado pegado a ella: de él baja el tejado), pilares [[x, z]], lado (de los pilares), grande, bbox }
+function prepararPorches(lista, edif, rejilla, tramos) {
+  const out = [], nadie = new Set(), cortan = casasQueCortanCalles(lista, construirRejilla(lista), tramos).quitar;
+  lista.forEach((p, idx) => {
+    if (cortan.has(idx)) return;
+    const r = p.pts, n = r.length, A = areaAnillo(r);
+    let per = 0;
+    for (let i = 0; i < n; i++) per += Math.hypot(r[(i + 1) % n][0] - r[i][0], r[(i + 1) % n][1] - r[i][1]);
+    if (A > 4000 || (A > 400 && A / (per / 2) > 12)) return;
+    // lados pegados a una casa: a 30 cm por fuera del porche hay casa
+    const lados = [], pegadas = new Map();
+    for (let i = 0; i < n; i++) {
+      const a = r[i], b = r[(i + 1) % n], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz);
+      let nx = l ? dz / l : 0, nz = l ? -dx / l : 0;
+      if (enPoligono(r, (a[0] + b[0]) / 2 + nx * 0.05, (a[1] + b[1]) / 2 + nz * 0.05)) { nx = -nx; nz = -nz; }   // hacia fuera
+      let dentro = 0, casa = -1;
+      if (l >= 0.4) for (const fr of [0.2, 0.5, 0.8]) {
+        const j = cualCasa(edif, rejilla, a[0] + dx * fr + nx * 0.3, a[1] + dz * fr + nz * 0.3, nadie);
+        if (j >= 0) { dentro++; casa = j; }
+      }
+      const pegado = dentro >= 2;
+      if (pegado) pegadas.set(casa, (pegadas.get(casa) || 0) + l);
+      lados.push({ a, b, l, nx, nz, pegado });
+    }
+    let casa = -1, mejor = 0;
+    for (const [j, l] of pegadas) if (l > mejor) { mejor = l; casa = j; }
+    let apoyo = -1;
+    lados.forEach((sd, i) => { if (sd.pegado && (apoyo < 0 || sd.l > lados[apoyo].l)) apoyo = i; });
+    const grande = A > 150 && casa < 0, lado = grande ? 0.4 : 0.26, paso = grande ? 5 : 3.3;
+    // pilares: por los lados libres (no pegados a una casa), en las esquinas y repartidos entre ellas (a 3,3 m como mucho;
+    // 5 m en las marquesinas grandes); ninguno junto a una pared, que ahí el tejado apoya en ella
+    const ri = anilloDentro(r, lado / 2 + 0.04), libre = lados.map(sd => !sd.pegado), pilares = [];
+    const poner = (x, z) => {
+      if (casaCerca(edif, rejilla, x, z, 0.35, nadie) || pilares.some(q => Math.hypot(q[0] - x, q[1] - z) < 0.8)) return;
+      pilares.push([x, z]);
+    };
+    const cadenas = [];
+    if (libre.every(Boolean)) cadenas.push([0, n]);
+    else for (let i = 0; i < n; i++) if (libre[i] && !libre[(i - 1 + n) % n]) { let m = 0; while (m < n && libre[(i + m) % n]) m++; cadenas.push([i, m]); }
+    for (const [ini, m] of cadenas) {
+      const vs = [];
+      for (let k = 0; k <= m; k++) vs.push(ri[(ini + k) % n]);
+      const esq = [0];
+      for (let k = 1; k < m; k++) {   // esquinas: donde el borde gira más de 35°
+        const a = vs[k - 1], b = vs[k], c = vs[k + 1];
+        const g = Math.abs(Math.atan2((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]), (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1])));
+        if (g > 0.6) esq.push(k);
+      }
+      esq.push(m);
+      for (let k = 0; k < esq.length - 1; k++) {
+        const sub = vs.slice(esq[k], esq[k + 1] + 1), cum = acumulados(sub), L = cum[cum.length - 1], nn = Math.max(1, Math.ceil(L / paso - 0.15));
+        for (let q = 0; q <= nn; q++) { const pt = enPolilinea(sub, cum, L * q / nn); poner(pt.x, pt.z); }
+      }
+    }
+    out.push({ pts: r, huecos: p.huecos, ref: p.ref, A, casa: casa >= 0 ? edif[casa] : null, apoyo: apoyo >= 0 ? lados[apoyo] : null, pegados: lados.map(sd => sd.pegado), pilares, lado, grande, bbox: p.bbox });
+  });
+  return out;
+}
+// Alturas del tejado del porche (se miran al hacer la malla: la casa puede cambiar de teja a azotea con la foto aérea).
+// Pegado a una casa de teja: a un agua, de 2,45 m por fuera a lo que dé su pendiente junto a la pared (sin pasar del alero);
+// pegado a una de azotea: losa plana a 2,9 m. Suelto: losa a 2,7 m, y las marquesinas grandes a 4,2 m.
+// Devuelve { teja, y(x, z) (cara de arriba), k (pendiente), sx, sz (hacia donde baja), ux, uz (a lo largo de la pared) }
+function tejadoPorche(p) {
+  const e = p.casa, s = p.apoyo;
+  if (!e || !s) { const y0 = p.grande ? 4.2 : 2.7; return { teja: false, y: () => y0, k: 0, sx: 0, sz: 1, ux: 1, uz: 0 }; }
+  const ux = (s.b[0] - s.a[0]) / s.l, uz = (s.b[1] - s.a[1]) / s.l, sx = -s.nx, sz = -s.nz;   // s: de la pared hacia fuera del porche
+  const t = (x, z) => (x - s.a[0]) * sx + (z - s.a[1]) * sz;
+  if (!e.teja) { const y0 = Math.min(2.9, e.h - 0.5); return { teja: false, y: () => y0, k: 0, sx, sz, ux, uz, t }; }
+  let tmax = 0.5;
+  for (const q of p.pts) tmax = Math.max(tmax, t(q[0], q[1]));
+  const yl = 2.45, yh = Math.max(yl + 0.25, Math.min(yl + 0.32 * tmax, e.h <= 4.5 ? e.h - 0.3 : yl + 1)), k = (yh - yl) / tmax;
+  return { teja: true, y: (x, z) => yh - k * Math.max(0, Math.min(tmax, t(x, z))), k, sx, sz, ux, uz, t };
 }
 
 // --- fachadas: tipo de cada pared, puerta y colores (misma lógica que el paseo) ---
@@ -1872,11 +1970,19 @@ function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng, solares = [], r
     farolas, rejFarolas: construirRejillaPuntos(farolas.map(f => [f.x, f.z])), marcas,
   };
 }
+// Los pilares de los porches chocan; y ningún árbol se queda debajo de un porche (su copa saldría por el tejado)
+function ponerPilares(m, porches) {
+  if (!porches || !porches.length) return;
+  m.rejPilares = construirRejillaPuntos(porches.flatMap(p => p.pilares));
+  const rej = construirRejilla(porches), antes = m.arboles.length;
+  m.arboles = m.arboles.filter(([x, z]) => !casaCerca(porches, rej, x, z, 0.5, new Set()));
+  if (m.arboles.length !== antes) m.rejArboles = construirRejillaPuntos(m.arboles);
+}
 // ¿Choca un coche de radio R con algo que no sea una casa? (agua, quitamiedos, vallas, árboles, farolas, isletas).
 // Sobre una calle no cuenta el agua: ahí hay puentes.
 function chocaMundo(m, x, z, R) {
   return (!cercaDeCalle(m.rejCalles, x, z, 6) && choca(m.aguas, m.rejAguas, x, z, R)) || cercaDeCalle(m.rejRieles, x, z, R) || (m.rejVallas && cercaDeCalle(m.rejVallas, x, z, R + 0.15)) ||
-    chocaPuntos(m.rejArboles, x, z, R + 0.3) || chocaPuntos(m.rejFarolas, x, z, R + 0.15) || chocaIslas(m.islas, x, z, R) ||
+    chocaPuntos(m.rejArboles, x, z, R + 0.3) || chocaPuntos(m.rejFarolas, x, z, R + 0.15) || chocaIslas(m.islas, x, z, R) || (m.rejPilares && chocaPuntos(m.rejPilares, x, z, R + 0.2)) ||
     (m.rejMobiliario && chocaPuntos(m.rejMobiliario, x, z, R + 1.35));
 }
 // Caja de la zona (para pintar el suelo), con margen
@@ -2206,6 +2312,7 @@ function contactoMundo(m, x, z, R) {
   if (m.rejVallas) c = masHondo(c, conTipo(contactoSegmentos(m.rejVallas, x, z, R + 0.15), 'valla'));   // vallas de los chalets (con su grosor)
   c = masHondo(c, conTipo(contactoPuntos(m.rejArboles, x, z, R + 0.3), 'arbol'));
   c = masHondo(c, conTipo(contactoPuntos(m.rejFarolas, x, z, R + 0.15), 'farola'));
+  if (m.rejPilares) c = masHondo(c, conTipo(contactoPuntos(m.rejPilares, x, z, R + 0.2), 'casa'));   // pilares de los porches: de obra, como una pared
   for (const i of m.islas) c = masHondo(c, conTipo(contactoDesde(x, z, i.cx, i.cz, R + i.ri, false), 'isla'));
   if (m.rejMobiliario) c = masHondo(c, contactoPuntosR(m.rejMobiliario, x, z, R));
   return c;
@@ -4108,6 +4215,118 @@ function mallaJardines(parcelas) {
   m.receiveShadow = sombras;
   return m;
 }
+// --- solería de los patios: baldosas sobre la foto aérea (que da el color de verdad, borroso) donde no es césped ---
+// Se enlosan los patios del Catastro (sobre un sótano), los de dentro de las casas, el suelo de los porches y, con parcelas y foto,
+// lo que queda sin construir de las parcelas con casa (de hasta 2.000 m² y con al menos un 40 % construido: los patios de las
+// casas y los de los bloques; los jardines de los chalets, no). Cada patio, su solería: barro, terrazo, losa clara,
+// mármol blanco o hidráulica en damero, alineada con su lado más largo
+const SOLERIAS = [   // [color, color del damero, lado de la baldosa (m), damero]
+  ['#b9704f', null, 0.3, 0], ['#c98d68', null, 0.3, 0], ['#cbbb9b', null, 0.4, 0], ['#aaa59b', null, 0.4, 0], ['#e1dcd2', null, 0.4, 0], ['#ddd6c8', '#77695c', 0.22, 1],
+];
+function patiosParaSoleria(z) {
+  const polis = [], conFoto = !!z.foto, vistos = [];
+  if (conFoto && z.parcelas && z.parcelas.length) {
+    const construido = new Map();
+    for (const e of z.edif) if (e.ref && !e.simulada) construido.set(e.ref, (construido.get(e.ref) || 0) + Math.abs(areaAnillo(e.pts)));
+    for (const pa of z.parcelas) {
+      const A = areaAnillo(pa.pts), c = pa.ref && construido.get(pa.ref);
+      if (!c || A > 2000 || c / A < 0.4) continue;
+      polis.push({ pts: pa.pts, huecos: [] });
+      vistos.push(pa.pts);
+    }
+  }
+  const enlosadas = vistos.map(pts => ({ pts })), rej = construirRejilla(enlosadas), nadie = new Set();
+  const yaEnlosado = pts => {   // dentro de una parcela ya enlosada (si no, dos solerías se pisarían)
+    let x = 0, zz = 0;
+    for (const q of pts) { x += q[0]; zz += q[1]; }
+    return cualCasa(enlosadas, rej, x / pts.length, zz / pts.length, nadie) >= 0;
+  };
+  for (const pa of z.patios || []) if (!yaEnlosado(pa.pts)) polis.push({ pts: pa.pts, huecos: pa.huecos });
+  for (const pr of z.porches || []) if (!yaEnlosado(pr.pts)) polis.push({ pts: pr.pts, huecos: [] });
+  for (const e of z.edif) for (const h of e.huecos || []) if (!yaEnlosado(h)) polis.push({ pts: h.slice().reverse(), huecos: [] });
+  return polis;
+}
+function mallaSolerias(z) {
+  const polis = patiosParaSoleria(z), foto = z.foto, grupo = new THREE.Group();
+  if (!polis.length) return grupo;
+  const bloques = new Map();
+  polis.forEach((pp, i) => {
+    let x = 0, zz = 0;
+    for (const q of pp.pts) { x += q[0]; zz += q[1]; }
+    const clave = Math.floor(x / pp.pts.length / BLOQUE_EDIFICIOS) + ',' + Math.floor(zz / pp.pts.length / BLOQUE_EDIFICIOS);
+    if (!bloques.has(clave)) bloques.set(clave, []);
+    bloques.get(clave).push(i);
+  });
+  const mat = materialSoleria(foto);
+  for (const lista of bloques.values()) {
+    const pos = [], uv = [], bal = [], est = [], est2 = [], idx = [];
+    for (const i of lista) {
+      const { pts, huecos } = polis[i];
+      if (areaAnillo(pts) <= 0) pts.reverse();
+      let tri;
+      try { tri = THREE.ShapeUtils.triangulateShape(pts.map(q => new THREE.Vector2(q[0], q[1])), huecos.map(h => h.map(q => new THREE.Vector2(q[0], q[1])))); } catch (err) { continue; }
+      // las baldosas, alineadas con el lado más largo del patio
+      let L = 0, ux = 1, uz = 0;
+      for (let k = 0; k < pts.length; k++) {
+        const a = pts[k], b = pts[(k + 1) % pts.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (l > L) { L = l; ux = (b[0] - a[0]) / l; uz = (b[1] - a[1]) / l; }
+      }
+      const so = SOLERIAS[Math.floor(hash2(Math.round(pts[0][0] * 10), Math.round(pts[0][1] * 10), 61) * SOLERIAS.length)];
+      const c1 = hexA01(so[0]), c2 = hexA01(so[1] || so[0]), s0 = pos.length / 3;
+      for (const r of [pts, ...huecos]) for (const q of r) {
+        pos.push(q[0], 0.012, q[1]);
+        const t = foto ? uvOrtofoto(...mercatorDeLocal(q[0], q[1]), foto.g, foto.W, foto.H) : [0, 0];
+        uv.push(t[0], t[1]);
+        bal.push((q[0] * ux + q[1] * uz) / so[2], (q[1] * ux - q[0] * uz) / so[2]);
+        est.push(...c1); est2.push(so[3] ? c2[0] : -1, c2[1], c2[2]);
+      }
+      for (const t of tri) idx.push(s0 + t[0], s0 + t[1], s0 + t[2]);
+    }
+    if (!idx.length) continue;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(pos.map((_, k) => (k % 3 === 1 ? 1 : 0)), 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setAttribute('aBal', new THREE.Float32BufferAttribute(bal, 2));
+    g.setAttribute('aEst', new THREE.Float32BufferAttribute(est, 3));     // el color de la baldosa
+    g.setAttribute('aEst2', new THREE.Float32BufferAttribute(est2, 3));   // el de la otra del damero (-1: sin damero)
+    g.setIndex(idx);
+    g.computeBoundingSphere();
+    const m = new THREE.Mesh(g, mat);
+    m.receiveShadow = sombras;
+    grupo.add(m);
+  }
+  return grupo;
+}
+// Material de la solería: la foto aérea (como el suelo) mezclada con el color de la baldosa, con sus juntas y algo de variación
+// de una baldosa a otra; donde la foto es césped no se pinta (se ve el suelo, con su textura de hierba)
+function materialSoleria(foto) {
+  const m = new THREE.MeshLambertMaterial({ map: foto ? foto.textura : null, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  m.onBeforeCompile = sh => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 aBal; attribute vec3 aEst, aEst2; varying vec2 vBal; varying vec3 vEst, vEst2;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBal = aBal; vEst = aEst; vEst2 = aEst2;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec2 vBal; varying vec3 vEst, vEst2;\nfloat hb(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233)))*43758.5453);}')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    #ifdef USE_MAP
+      vec3 c = texelColor.rgb;
+      float L = (c.r + c.g + c.b) / 3.0;
+      if (smoothstep(-0.02, 0.03, c.g - c.r) * smoothstep(-0.02, 0.04, c.g - c.b) > 0.5) discard;   // césped, árboles: jardín, no patio
+      float luz = clamp(L / 0.42, 0.72, 1.12);   // la foto solo da luces y sombras (borrosa, mezcla el patio con los tejados de al lado)
+    #else
+      float luz = 1.0;
+    #endif
+    vec2 id = floor(vBal), f = fract(vBal), fw = fwidth(vBal);
+    float aa = clamp(1.0 - max(fw.x, fw.y) * 1.5, 0.0, 1.0);
+    vec3 tono = (vEst2.r >= 0.0 && mod(id.x + id.y, 2.0) > 0.5 && aa > 0.3) ? vEst2 : vEst;
+    diffuseColor.rgb = tono * 0.92 * luz;
+    float jx = smoothstep(0.0, 0.05, f.x) * smoothstep(0.0, 0.05, 1.0 - f.x), jz = smoothstep(0.0, 0.05, f.y) * smoothstep(0.0, 0.05, 1.0 - f.y);
+    diffuseColor.rgb *= mix(1.0, (0.92 + 0.14 * hb(id)) * mix(0.72, 1.0, jx * jz), aa);
+  }`);
+  };
+  m.customProgramCacheKey = () => 'soleria' + (foto ? 1 : 0);
+  return m;
+}
 // Rotondas: césped en el centro, bordillo alrededor; las que parecen fuentes en la foto llevan una fuente decorada
 function mallaIslas(islas) {
   const grupo = new THREE.Group();
@@ -4581,7 +4800,7 @@ function pixelesFoto(foto) {
 function tejadosDeFoto(edif, foto) {
   const px = pixelesFoto(foto);
   edif.forEach((e, idx) => {
-    e.rc = null;
+    e.rc = null; e.idx = idx;
     if (px && !e.simulada) {
       const [x0, z0, x1, z1] = e.bbox, A = Math.abs(areaAnillo(e.pts)), st = Math.max(px.paso, 0.7, Math.sqrt(A / 40));
       let r = 0, g = 0, b = 0, n = 0;
@@ -4593,14 +4812,66 @@ function tejadosDeFoto(edif, foto) {
       if (n) e.rc = [r / n, g / n, b / n];
     }
     const A = Math.abs(areaAnillo(e.pts));
-    if (!e.tejado) {   // sin dato: grandes y altas, azotea; si no, lo que diga la foto (o dos de cada tres, teja)
+    if (!e.tejado && !e.porModelo) {   // sin dato (casas de OpenStreetMap): grandes y altas, azotea; si no, lo que diga la foto (o dos de cada tres, teja)
       if (e.h > 12 || A > 700) e.teja = false;
       else if (e.rc) { const [r, g, b] = e.rc, Lm = (r + g + b) / 3; e.teja = r - b > 24 && r > g * 1.06 && Lm > 50 && Lm < 215; }
       else e.teja = hash2(idx, 6, 31) < 0.66;
     }
-    const pal = hexA01(e.teja ? PAL_FACHADA.teja[Math.floor(hash2(idx, 2, 31) * 4) % 4] : PAL_FACHADA.azotea[Math.floor(hash2(idx, 3, 31) * 3) % 3]);
-    e.colTecho = e.rc ? aHex(e.rc.map((v, k) => v / 255 + (pal[k] - v / 255) * (e.teja ? 0.4 : 0.5))) : aHex(pal);
+    e.colTecho = colorTecho(e);
   });
+}
+// Color del tejado: el de la foto aérea, acercado al de la teja o al de la azotea de la paleta
+function colorTecho(e) {
+  const idx = e.idx || 0, pal = hexA01(e.teja ? PAL_FACHADA.teja[Math.floor(hash2(idx, 2, 31) * 4) % 4] : PAL_FACHADA.azotea[Math.floor(hash2(idx, 3, 31) * 3) % 3]);
+  return e.rc ? aHex(e.rc.map((v, k) => v / 255 + (pal[k] - v / 255) * (e.teja ? 0.4 : 0.5))) : aHex(pal);
+}
+// --- ¿teja o azotea? ---
+// El color de la foto aérea (unos 2 m por píxel) casi no lo dice: con él acertaba 6 de cada 10 casas bajas de Huelva, lo mismo que
+// decir siempre azotea. Mirando 214 casas de una y dos plantas con su foto de fachada, lo que sí lo dice es:
+// - la parcela: las casas con patio o jardín (menos construido) suelen ser de teja; las que la llenan, de azotea; y las muy largas
+//   (naves, bloques, comercios), de azotea. Con eso se acierta 7 de cada 10 (6 de cada 10 sin parcelas, solo con el largo).
+// - la foto de fachada, si ya se ha mirado: la franja de arriba de la casa, bajo el cielo, más oscura que la pared, con sombra de
+//   alero y rojiza, es teja; el borde contra el cielo con antenas, barandas y depósitos, azotea. Con la parcela, 8 de cada 10.
+// Son regresiones logísticas ajustadas con esas casas (validación cruzada). Las de cuatro plantas o más, y las enormes, azotea.
+const MODELOS_TEJADO = {
+  fotoYParcela: { b: 1.4803, dL: -0.02799, sombra: 1.76946, rug: -0.4325, terra: 1.72459, ocup: -2.7604, largo: -0.03915 },
+  fotoYLargo: { b: -0.5618, dL: -0.02866, sombra: 1.55372, rug: -0.54248, terra: 1.71752, largo: -0.0303 },
+  parcela: { b: 3.1903, ocup: -3.14921, largo: -0.05802 },
+  largo: { b: 0.5974, largo: -0.04583 },
+};
+function probabilidadTeja(rasgos, foto) {
+  const r = { largo: Math.min(rasgos.largo, 120), ocup: rasgos.ocup == null ? null : Math.min(rasgos.ocup, 1.5) };
+  const m = foto ? (r.ocup != null ? MODELOS_TEJADO.fotoYParcela : MODELOS_TEJADO.fotoYLargo) : (r.ocup != null ? MODELOS_TEJADO.parcela : MODELOS_TEJADO.largo);
+  let z = m.b;
+  for (const k in m) if (k !== 'b') z += m[k] * (k in r ? r[k] : foto[k]);
+  return 1 / (1 + Math.exp(-z));
+}
+// Largo de cada casa (con todas sus partes) y cuánto ocupa de su parcela, por referencia catastral
+function rasgosParcelas(edif, parcelas) {
+  const porRef = new Map(), out = new Map(), areaParcela = new Map();
+  for (const e of edif) if (e.ref && !e.simulada) { if (!porRef.has(e.ref)) porRef.set(e.ref, []); porRef.get(e.ref).push(e); }
+  for (const p of parcelas || []) if (p.ref) areaParcela.set(p.ref, (areaParcela.get(p.ref) || 0) + Math.abs(areaAnillo(p.pts)));
+  for (const [ref, lista] of porRef) {
+    let A = 0;
+    for (const e of lista) A += Math.abs(areaAnillo(e.pts));
+    const r = rectanguloMinimo(lista.flatMap(e => e.pts)), P = areaParcela.get(ref);
+    out.set(ref, { largo: r ? 2 * Math.max(r.a, r.b) : 0, ocup: P ? A / P : null });
+  }
+  return out;
+}
+// Decide teja o azotea en las casas del Catastro (las de OpenStreetMap siguen con su dato o con el color de la foto aérea)
+function tejaPorModelo(e) {
+  if (e.h > 12 || Math.abs(areaAnillo(e.pts)) > 700) return false;
+  return probabilidadTeja(e.rasgosTejado, e.fotoTejado) > 0.5;
+}
+function decidirTejados(edif, parcelas) {
+  const rs = rasgosParcelas(edif, parcelas);
+  for (const e of edif) {
+    if (!e.ref || e.simulada || !rs.has(e.ref)) continue;
+    e.rasgosTejado = rs.get(e.ref);
+    e.teja = tejaPorModelo(e);
+    e.porModelo = true;
+  }
 }
 // Búfer que crece según hace falta, con los datos de fachada para el sombreado
 function nuevoBufer(n) {
@@ -4632,8 +4903,8 @@ function nuevoBufer(n) {
 }
 const SIN_FACHADA = [0, -1e4, 0, 0], ARRIBA = [0, 1, 0], ABAJO = [0, -1, 0];
 const a255 = c => c.map(v => Math.round(Math.min(1, Math.max(0, v)) * 255));
-function mallaEdificios(edif, foto) {
-  const G = nuevoBufer(Math.max(4096, edif.length * 60));
+function mallaEdificios(edif, foto, porches = []) {
+  const G = nuevoBufer(Math.max(4096, edif.length * 60 + porches.length * 120));
   const uvFoto = (x, z) => {   // dónde cae el punto en la foto aérea (para pintar los tejados con ella)
     if (!foto) return [-1, -1];
     const [X, Y] = mercatorDeLocal(x, z);
@@ -4776,6 +5047,7 @@ function mallaEdificios(edif, foto) {
       }
     }
   }
+  porchesEnBufer(G, porches, foto, uvFoto);
   const nV = G.n, geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(G.P.slice(0, nV * 3), 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(G.N.slice(0, nV * 3), 3));
@@ -4828,17 +5100,108 @@ function subirTocadas(tocadas) {
 // Coche básico: carrocería con capó y maletero, cabina con cristales, faros, pilotos y ruedas con llanta
 // Edificios por bloques de 300 m: así la cámara (y la de las sombras) solo dibuja los bloques que ve
 const BLOQUE_EDIFICIOS = 300;
-function mallaEdificiosPorBloques(edif) {
+// Cada casa apunta a su bloque (e.bloque): el de una casa cuyo tejado cambia al llegar su foto se rehace entero
+let grupoCasas = null;
+function mallaEdificiosPorBloques(edif, porches = []) {
   const bloques = new Map(), grupo = new THREE.Group();
-  for (const e of edif) {
-    const b = e.bbox, clave = Math.floor((b[0] + b[2]) / 2 / BLOQUE_EDIFICIOS) + ',' + Math.floor((b[1] + b[3]) / 2 / BLOQUE_EDIFICIOS);
-    if (!bloques.has(clave)) bloques.set(clave, []);
-    bloques.get(clave).push(e);
-  }
+  const bloque = b => { const clave = Math.floor((b[0] + b[2]) / 2 / BLOQUE_EDIFICIOS) + ',' + Math.floor((b[1] + b[3]) / 2 / BLOQUE_EDIFICIOS); if (!bloques.has(clave)) bloques.set(clave, { casas: [], porches: [] }); return bloques.get(clave); };
+  for (const e of edif) { const b = bloque(e.bbox); b.casas.push(e); e.bloque = b; }
+  for (const p of porches) bloque(p.bbox).porches.push(p);   // los porches, en el bloque de su casa (o en el suyo)
   tejadosDeFoto(edif, zona && zona.foto);
   uFotoTejados.value = zona && zona.foto ? zona.foto.textura : null; uConFoto.value = zona && zona.foto ? 1 : 0;
-  for (const lista of bloques.values()) grupo.add(mallaEdificios(lista, zona && zona.foto));
+  for (const b of bloques.values()) grupo.add(b.malla = mallaEdificios(b.casas, zona && zona.foto, b.porches));
+  grupoCasas = grupo; Tejados.pendientes.clear();
   return grupo;
+}
+// --- tejados que cambian con la foto de fachada: la casa pasa a teja o a azotea y su bloque se rehace cuando no se nota:
+// con la casa fuera de la vista o pequeña, a lo lejos, sin fundidos de color a medias en el bloque y un bloque por segundo como mucho ---
+const Tejados = { pendientes: new Set(), tUltimo: 0, cambiados: 0 };
+function tejadoDeFoto(ref, rasgos) {
+  for (const e of (zona && zona.porRef && zona.porRef.get(ref)) || []) {
+    e.fotoTejado = rasgos;
+    if (!e.porModelo) continue;
+    const teja = tejaPorModelo(e);
+    if (teja === e.teja) continue;
+    e.teja = teja; e.colTecho = colorTecho(e);
+    if (e.bloque) Tejados.pendientes.add(e);
+  }
+}
+// Tamaño de la casa en pantalla (lo que mide entre su distancia a la cámara); 0 si no se ve. Hay que poner antes el frustum de vistaFachadas
+function tamEnPantalla(e) {
+  const { frustum, caja } = vistaFachadas, b = e.bbox;
+  caja.min.set(b[0], 0, b[1]); caja.max.set(b[2], e.h + 3, b[3]);
+  if (!frustum.intersectsBox(caja)) return 0;
+  const d = Math.max(1, Math.hypot(Math.max(b[0] - camara.position.x, 0, camara.position.x - b[2]), Math.max(b[1] - camara.position.z, 0, camara.position.z - b[3])));
+  return Math.max(b[2] - b[0], b[3] - b[1], e.h) / d;
+}
+function rehacerTejados(ahora) {
+  if (!Tejados.pendientes.size || !camara || !zona || ahora - Tejados.tUltimo < 1) return;
+  const { frustum, m } = vistaFachadas;
+  m.multiplyMatrices(camara.projectionMatrix, camara.matrixWorldInverse);
+  frustum.setFromProjectionMatrix(m);
+  const conFundido = new Set();
+  for (const q of Fachadas.pendientes) for (const { e } of q.partes) conFundido.add(e.bloque);
+  for (const e of Tejados.pendientes) {
+    const b = e.bloque;
+    if (conFundido.has(b)) continue;
+    const suyas = [...Tejados.pendientes].filter(o => o.bloque === b);
+    if (suyas.some(o => tamEnPantalla(o) >= 0.08)) continue;   // se ve grande: espera a que deje de verse
+    const nueva = mallaEdificios(b.casas, zona.foto, b.porches);
+    grupoCasas.remove(b.malla); b.malla.geometry.dispose();
+    grupoCasas.add(b.malla = nueva);
+    for (const o of suyas) Tejados.pendientes.delete(o);
+    Tejados.cambiados += suyas.length;
+    Tejados.tUltimo = ahora;
+    return;
+  }
+}
+// Porches en el búfer de las casas de su bloque (mismo material): el tejado (de teja a un agua o losa), con la viga por los lados libres,
+// el techo por debajo y los pilares, del color de las paredes de la casa y con un zócalo bajo
+function porchesEnBufer(G, porches, foto, uvFoto) {
+  const plano = [0, 0, 0.3], blanco = a255(hexA01('#ebe7df'));
+  G.casillas = [-1, -1, -1, 1];
+  for (const p of porches) {
+    const e = p.casa, tj = tejadoPorche(p), conFoto = !!foto;
+    const roofC = a255(hexA01(e ? e.colTecho : '#bdb8ae')), pared = e ? hexA01(e.colPared) : hexA01('#ece8e0');
+    const wc = a255(pared), zb = a255([...hexA01(e ? e.colZoc : '#8b867c'), 0.35 / 4]), kb = a255([...hexA01(e ? e.colCarp : '#5b3b26'), 0]);
+    const nl = Math.hypot(tj.k, 1), nr = tj.teja ? [tj.sx * tj.k / nl, 1 / nl, tj.sz * tj.k / nl] : ARRIBA, GROSOR = 0.32;
+    const uvTeja = q => tj.teja ? [q[0] * tj.ux + q[1] * tj.uz, Math.max(0, tj.t(q[0], q[1]))] : [q[0], q[1]];
+    // tejado: arriba (teja o plano, con la foto aérea encima) y el techo por debajo, 16 cm más abajo
+    let tri;
+    try { tri = THREE.ShapeUtils.triangulateShape(p.pts.map(q => new THREE.Vector2(q[0], q[1])), p.huecos.map(h => h.map(q => new THREE.Vector2(q[0], q[1])))); } catch (err) { continue; }
+    const anillos = [p.pts, ...p.huecos];
+    for (const [arriba, dy] of [[true, 0], [false, -0.16]]) {
+      const s0 = G.n;
+      for (const rr of anillos) for (const q of rr) {
+        const y = tj.y(q[0], q[1]) + dy, uv = arriba && conFoto ? uvFoto(q[0], q[1]) : [-1, -1], [a, b] = uvTeja(q);
+        if (arriba) G.v(q[0], y, q[1], nr, roofC, a, b, tj.teja ? -1 : -2, zb, kb, SIN_FACHADA, uv[0], uv[1]);
+        else G.v(q[0], y, q[1], ABAJO, blanco, 0, 0, 0.3, zb, kb, SIN_FACHADA, -1, -1);
+      }
+      for (const t of tri) G.tri(s0 + t[0], s0 + t[1], s0 + t[2], arriba ? nr : ABAJO);
+    }
+    // la viga: el canto del tejado por los lados que no apoyan en una pared (y por los huecos)
+    const quad = (pts, n, col, ws) => { const v = pts.map((q, i) => G.v(q[0], q[1], q[2], n, col, ws[i][0], ws[i][1], ws[i][2], zb, kb, SIN_FACHADA, -1, -1)); G.tri(v[0], v[1], v[2], n); G.tri(v[0], v[2], v[3], n); };
+    anillos.forEach((rr, h) => {
+      for (let i = 0; i < rr.length; i++) {
+        if (h === 0 && p.pegados[i]) continue;   // apoya en la pared de la casa
+        const a = rr[i], b = rr[(i + 1) % rr.length], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz);
+        if (l < 0.05) continue;
+        let nx = dz / l, nz = -dx / l;
+        if (enPoligono(rr, (a[0] + b[0]) / 2 + nx * 0.05, (a[1] + b[1]) / 2 + nz * 0.05) === (h === 0)) { nx = -nx; nz = -nz; }   // hacia fuera del tejado
+        const ya = tj.y(a[0], a[1]), yb = tj.y(b[0], b[1]);
+        quad([[a[0], ya - GROSOR, a[1]], [b[0], yb - GROSOR, b[1]], [b[0], yb + 0.03, b[1]], [a[0], ya + 0.03, a[1]]], [nx, 0, nz], wc, [plano, plano, plano, plano]);
+      }
+    });
+    // pilares: de sección cuadrada, del suelo a la viga, con la textura de la pared y un zócalo de 35 cm
+    const m = p.lado / 2;
+    for (const [x, z] of p.pilares) {
+      const H = tj.y(x, z) - GROSOR + 0.02, c = [[x - m, z - m], [x + m, z - m], [x + m, z + m], [x - m, z + m]];
+      for (let i = 0; i < 4; i++) {
+        const a = c[i], b = c[(i + 1) % 4], n = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]][i], u0 = i * p.lado, u1 = u0 + p.lado;
+        quad([[a[0], -0.3, a[1]], [b[0], -0.3, b[1]], [b[0], H, b[1]], [a[0], H, a[1]]], n, wc, [[u0, -0.3, H], [u1, -0.3, H], [u1, H, H], [u0, H, H]]);
+      }
+    }
+  }
 }
 function construirCoche(color) {
   const g = new THREE.Group();
@@ -4978,10 +5341,11 @@ function construirMallaZona() {
   matsNoche = []; fuentes = []; bloquesFarolas = [];
   mallaZona = new THREE.Group();
   const m = zona.mundo;
-  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos, zona.esq), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif));
+  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos, zona.esq), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif, zona.porches || []));
   mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaLucesFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas),
     mallaQuioscos(m.quioscos), mallaTermometros(m.termometros), mallaVallas(m.vallas), mallaJuegos(m.juegos || []));
   if (!zona.foto && m.jardines.length) mallaZona.add(mallaJardines(m.jardines));
+  mallaZona.add(mallaSolerias(zona));
   scene.add(mallaZona);
   aplicarHora(horaElegida);   // ventanas, farolas y quioscos encendidos según la hora
   if (!cocheMesh) {
@@ -5092,6 +5456,7 @@ async function cargarZona(archivo) {
     const de = c && c.v >= (z && z.v || 0) ? c : z;   // la más nueva de las dos
     e.parche = (de && de.parche) || null; e.parcheAlto = (de && de.parcheAlto) || null; e.parcheZocalo = (de && de.parcheZocalo) || null;
     e.zocaloFr = de ? (de.zocaloFr || Catastro.zocaloFraccion(de)) : null;
+    e.fotoTejado = (de && de.tejado) || null;   // rasgos del tejado en su foto (desde la versión 7 del análisis)
     e.foto4 = !!((c && (c.v >= Catastro.VERSION_COLOR || (c.sin && !c.porque))) || (z && z.v >= Catastro.VERSION_COLOR));   // sin foto en el Catastro: no hace falta volver a pedirla
   }
   Parches.empezar();
@@ -5101,7 +5466,7 @@ async function cargarZona(archivo) {
     const txt = await zip.file(meta.catastro).async('string'), i = txt.lastIndexOf('"failed"');
     let failed = [];
     try { if (i >= 0) failed = JSON.parse(txt.slice(txt.indexOf('[', i), txt.indexOf(']', i) + 1)); } catch (err) { failed = []; }
-    catastro = { failed, leer: () => JSON.parse(txt) };
+    catastro = { failed, porches: txt.lastIndexOf('"porches":true') >= 0, leer: () => JSON.parse(txt) };   // las zonas de antes no traen los porches ni los patios
   }
   if (meta && meta.parcelas && zip.file(meta.parcelas)) parcelasDatos = await leer(meta.parcelas);
   const parcelasGeo = await opcional('parcelas.geojson', null);
@@ -5134,12 +5499,18 @@ async function cargarZona(archivo) {
   zona.porRef = new Map();
   for (const e of edif) if (e.ref) { if (!zona.porRef.has(e.ref)) zona.porRef.set(e.ref, []); zona.porRef.get(e.ref).push(e); }
   prepararCasas(edif, zona.rejilla, tramos);
+  // porches (tejadillo sobre pilares) y patios, de las partes del Catastro sin plantas
+  const sinPlantas = parsearSinPlantas(casas);
+  zona.porches = prepararPorches(sinPlantas.filter(p => p.tipo === 'porche'), edif, zona.rejilla, tramos);
+  zona.patios = sinPlantas.filter(p => p.tipo === 'patio');
   $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas, vallas de los chalets)…';
   await new Promise(r => setTimeout(r, 0));
   const osm = await opcional('datos/osm.json', { elements: [] });
   zona.parcelas = parcelasGeo ? parsearParcelas(parcelasGeo) : [];
+  decidirTejados(edif, zona.parcelas);   // teja o azotea: por la parcela y, si ya se miró, por la foto de fachada
   const altura = await leerAlturas(zip);
   zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas, pixelesFoto(foto), altura);
+  ponerPilares(zona.mundo, zona.porches);
   medirAceras(tramos, edif, zona.rejilla, zona.mundo.rejVallas, zona.enCalzadaAjena);   // hasta las fachadas y las vallas
   zona.esq = esquinasCruces(tramos);
   zona.enEsquina = rejillaEsquinas(zona.esq.esquinas);
@@ -7334,9 +7705,11 @@ function bucle() {
 }
 
 // Carga la zona que va junto a la página; si no está (p. ej. abriendo el HTML desde el disco), pide el zip.
+// La versión de zona-huelva.zip: una Huelva completada en el juego sobre una zona incluida anterior no se usa (la nueva ya lo trae todo)
+const HUELVA_INCLUIDA = 2;   // 2: con los porches y los patios del Catastro
 async function cargarZonaIncluida() {
   const guardada = await Zonas.leer('huelva');   // si se le descargó algo en el juego (parcelas, casas que faltaban), esa
-  if (guardada && guardada.blob) {
+  if (guardada && guardada.blob && (guardada.base || 1) >= HUELVA_INCLUIDA) {
     try { await cargarZona(guardada.blob); return; } catch (err) { /* si falla, la del servidor */ }
   }
   if (location.protocol === 'file:') { mostrarMenu('Carga el zip de la zona para empezar.'); return; }
@@ -7413,7 +7786,8 @@ const Catastro = (() => {
     for(const f of feats){
       const fl=f.getElementsByTagNameNS('*','numberOfFloorsAboveGround')[0];
       const plantas=fl&&fl.textContent.trim()!==''?parseInt(fl.textContent,10):NaN;
-      if(plantas===0)continue;
+      // sin plantas sobre rasante: sin sótano, un porche o cobertizo; con sótano, un patio (o una rampa) encima de él (como el Paseo)
+      const fb=plantas===0?f.getElementsByTagNameNS('*','numberOfFloorsBelowGround')[0]:null,bajo=fb?parseInt(fb.textContent,10)||0:0;
       const exter=f.getElementsByTagNameNS('*','exterior')[0]||f;
       const pl=exter.getElementsByTagNameNS('*','posList')[0];
       let nums=[];
@@ -7426,7 +7800,8 @@ const Catastro = (() => {
         const h=[];for(let k=0;k+1<ns.length;k+=2)h.push(deUTM(ns[k],ns[k+1],zona));holes.push(h);}
       const id=f.getAttributeNS('http://www.opengis.net/gml/3.2','id')||f.getAttribute('gml:id')||'';
       const m=/BU\.([0-9A-Z]{14})/i.exec(id);
-      out.push({ring,holes,plantas,id,ref:m?m[1].toUpperCase():null});
+      const p={ring,holes,plantas,id,ref:m?m[1].toUpperCase():null};if(plantas===0)p.bajo=bajo;
+      out.push(p);
     }
     return out;
   }
@@ -7449,6 +7824,52 @@ const Catastro = (() => {
       out.push({ring,ref:rc?rc.textContent.trim().toUpperCase():m?m[1].toUpperCase():null});
     }
     return out;
+  }
+  // Rasgos del tejado en la foto de fachada: la franja de arriba de la casa (bajo el cielo) frente a la pared de debajo.
+  // Con teja, esa franja es más oscura que la pared (las tejas y la sombra del alero) y a menudo rojiza; con azotea, el pretil
+  // es de la pared, y por encima asoman antenas, barandas y depósitos (el borde contra el cielo es más irregular).
+  // Devuelve { dL, sombra, rug, terra } o null si no se ve bien el borde de la casa contra el cielo
+  function rasgosTejado(im){
+    const iw=im.naturalWidth||im.width,ih=im.naturalHeight||im.height,W=320,H=Math.max(120,Math.min(400,Math.round(W*ih/iw))),N=W*H;
+    const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(im,0,0,W,H);
+    const d=g.getImageData(0,0,W,H).data,R=new Float32Array(N),G=new Float32Array(N),B=new Float32Array(N),L=new Float32Array(N),S=new Float32Array(N);
+    for(let i=0;i<N;i++){const r=d[i*4],gg=d[i*4+1],b=d[i*4+2],mx=Math.max(r,gg,b),mn=Math.min(r,gg,b);R[i]=r;G[i]=gg;B[i]=b;L[i]=(r+gg+b)/3;S[i]=mx>0?(mx-mn)/Math.max(mx,1):0;}
+    // cielo: azul, o claro y casi gris en la parte de arriba, unido al borde de arriba de la foto
+    const skyl=new Uint8Array(N);
+    for(let i=0;i<N;i++){const y=Math.floor(i/W);skyl[i]=((B[i]>R[i]+12&&B[i]>=G[i]-12&&S[i]>0.12)||(y<H*0.65&&L[i]>175&&S[i]<0.18&&B[i]>=R[i]-10))?1:0;}
+    const sky=new Uint8Array(N),st=[];
+    for(let x=0;x<W;x++)if(skyl[x]){sky[x]=1;st.push(x);}
+    while(st.length){const i=st.pop(),x=i%W,y=(i-x)/W;
+      for(const j of [x>0?i-1:-1,x<W-1?i+1:-1,y>0?i-W:-1,y<H-1?i+W:-1])if(j>=0&&!sky[j]&&skyl[j]){sky[j]=1;st.push(j);}}
+    const verde=i=>G[i]>R[i]+6&&G[i]>B[i]+4&&S[i]>0.1;
+    const h1=Math.max(3,Math.round(0.04*H)),h2=Math.max(4,Math.round(0.07*H)),cols=[];
+    for(let x=Math.floor(W*0.08);x<Math.floor(W*0.92);x++){
+      if(!sky[x])continue;
+      let y=0;while(y<H&&sky[y*W+x])y++;
+      if(y>=H||y<2||y>H*0.8||y+h1+2+h2>=H)continue;
+      let mal=false;for(let k=0;k<6&&!mal;k++)if(sky[(y+k)*W+x])mal=true;
+      if(mal)continue;
+      let v=0;for(let k=0;k<h1+h2;k++)if(verde((y+k)*W+x))v++;
+      if(v/(h1+h2)>0.2)continue;
+      cols.push([x,y]);}
+    if(cols.length<12)return null;
+    const med=a=>{const s=Float64Array.from(a).sort(),n=s.length;return n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2;};
+    const media=(x,y0,n,A)=>{let s=0;for(let k=0;k<n;k++)s+=A[(y0+k)*W+x];return s/n;};
+    // lo irregular del borde contra el cielo: lo que se aparta de su mediana móvil (31 columnas)
+    const ys=cols.map(c=>c[1]),n=ys.length,k2=Math.floor(Math.min(31,Math.floor(n/2)*2-1)/2);
+    let rug=0;for(let i=0;i<n;i++){const w=[];for(let j=i-k2;j<=i+k2;j++)w.push(ys[Math.min(n-1,Math.max(0,j))]);rug+=Math.abs(Math.max(-6,Math.min(6,ys[i]-med(w))));}
+    rug/=n;
+    // la franja de arriba (4 % del alto) y la pared de debajo (7 %)
+    const lb=cols.map(([x,y])=>media(x,y,h1,L)),lw=cols.map(([x,y])=>media(x,y+h1+2,h2,L));
+    const dL=med(lb.map((v,i)=>v-lw[i])),Lw=med(lw);
+    // la sombra del alero: la fila más oscura en el 10 % de debajo del borde, frente a la pared
+    const hs=Math.round(0.1*H);let minProf=Infinity;
+    for(let k=0;k<hs;k++)minProf=Math.min(minProf,med(cols.map(([x,y])=>L[(y+k)*W+x])));
+    const sombra=(Lw-minProf)/Math.max(30,Lw);
+    // color de teja en la franja de arriba
+    let terra=0;for(const [x,y] of cols){let t=0;for(let k=0;k<h1;k++){const i=(y+k)*W+x;if(R[i]-B[i]>18&&R[i]>=G[i]-2&&S[i]>0.14)t++;}terra+=t/h1;}
+    terra/=cols.length;
+    return {dL,sombra,rug,terra};
   }
   function photoColors(im){
     const iw=im.naturalWidth||im.width||128,ih=im.naturalHeight||im.height||96;
@@ -7625,6 +8046,7 @@ const Catastro = (() => {
     try { return leerGMLCatastro(await pedirTexto(urlTrozo(srs, job.bb, '')), zona); }
     catch (err) { return leerGMLCatastro(await pedirTexto(urlTrozo(srs, job.bb, 'building')), zona); }   // como el Paseo: si las partes fallan, los edificios
   }
+  async function partesDeTrozo(srs, zona, job) { return leerGMLCatastro(await pedirTexto(urlTrozo(srs, job.bb, '')), zona); }   // solo las partes (los porches y patios no vienen en los edificios)
   async function parcelasDeTrozo(srs, zona, job) { return leerGMLParcelas(await pedirTexto(urlTrozo(srs, job.bb, 'parcela')), zona); }
   // Trozos que fallan: se vuelven a pedir partidos en cuatro (700 m → 350 → 175 → 88 m), con claves «trozo/cuadrante/…» (como el Paseo)
   const TROZO_MIN = 100;
@@ -7650,7 +8072,7 @@ const Catastro = (() => {
   }
 
   // --- colores de las fachadas: guardados en este navegador por referencia catastral (valen para cualquier zona) ---
-  const VERSION_COLOR = 6;   // 5: con parches de textura de las tres bandas de la casa (alta, media y zócalo); 6: la pared por grupos de tono y saturación, con balance de blancos y exposición
+  const VERSION_COLOR = 7;   // 5: con parches de textura de las tres bandas de la casa (alta, media y zócalo); 6: la pared por grupos de tono y saturación, con balance de blancos y exposición; 7: y los rasgos de su tejado (teja o azotea)
   const abrirDB = () => new Promise((res, rej) => {
     const rq = indexedDB.open('carreras-fachadas', 1);
     rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains('colores')) rq.result.createObjectStore('colores'); };
@@ -7682,11 +8104,13 @@ const Catastro = (() => {
       im.src = url;
       await im.decode();
       const c = photoColors(im);
-      return c.wall ? { pared: hex(c.wall), zocalo: hex(c.zoc), carpinteria: hex(c.carp), parche: c.parche || null, parcheAlto: c.parcheAlto || null, parcheZocalo: c.parcheZocalo || null, zocaloFr: zocaloFraccion(c), v: VERSION_COLOR, t: Date.now() }
+      let tejado = null;
+      if (c.wall) try { tejado = rasgosTejado(im); } catch (err) { tejado = null; }
+      return c.wall ? { pared: hex(c.wall), zocalo: hex(c.zoc), carpinteria: hex(c.carp), parche: c.parche || null, parcheAlto: c.parcheAlto || null, parcheZocalo: c.parcheZocalo || null, zocaloFr: zocaloFraccion(c), tejado, v: VERSION_COLOR, t: Date.now() }
         : { sin: true, porque: c.why, v: VERSION_COLOR, t: Date.now() };
     } finally { URL.revokeObjectURL(url); }
   }
-  return { URL_PHP, trozos, casasDeTrozo, parcelasDeTrozo, enParalelo, trozosPendientes, hijosDeTrozo, partible, coloresGuardados, guardarColor, colorDeFachada, deUTM, VERSION_COLOR, zocaloFraccion };
+  return { URL_PHP, trozos, casasDeTrozo, partesDeTrozo, parcelasDeTrozo, enParalelo, trozosPendientes, hijosDeTrozo, partible, trozoDeClave, coloresGuardados, guardarColor, colorDeFachada, deUTM, VERSION_COLOR, zocaloFraccion };
 })();
 
 // Qué le falta a la zona abierta: trozos de casas del Catastro que no llegaron, las parcelas y los colores de fachada
@@ -7694,17 +8118,18 @@ function enEspana(g) { const la = (g.n + g.s) / 2, lo = (g.e + g.w) / 2; return 
 function calcularFaltan() {
   const d = zona && zona.datos;
   if (!d || !d.meta || !d.meta.geo || !enEspana(d.meta.geo) || !d.catastro) return null;   // sin Catastro (fuera de España o zona enorme) no hay nada que pedir
-  const f = { trozos: (d.catastro.failed || []).slice(), parcelas: !d.parcelas || (d.parcelas.failed || []).length > 0, colores: 0 };
+  const f = { trozos: (d.catastro.failed || []).slice(), parcelas: !d.parcelas || (d.parcelas.failed || []).length > 0, porches: !d.catastro.porches, colores: 0 };
   for (const e of zona.edif) if (e.ref && !e.pared && !e.simulada) f.colores++;
   return f;
 }
 function pintarFaltan() {
   const caja = $('faltan'), f = zona && zona.faltan;
-  if (!f || (!f.trozos.length && !f.parcelas && !f.colores)) { caja.hidden = true; return; }
+  if (!f || (!f.trozos.length && !f.parcelas && !f.porches && !f.colores)) { caja.hidden = true; return; }
   const partes = [];
   if (f.trozos.length) partes.push(`${f.trozos.length} ${f.trozos.length === 1 ? 'trozo' : 'trozos'} de casas del Catastro`);
   if (f.parcelas) partes.push('las parcelas (para que las vallas de los chalets vayan por su linde)');
-  const descargable = f.trozos.length || f.parcelas;
+  if (f.porches) partes.push('los porches y patios de las casas (la zona se preparó antes de que el juego los usara: se vuelven a pedir todas sus casas al Catastro, unos minutos)');
+  const descargable = f.trozos.length || f.parcelas || f.porches;
   $('faltanTexto').textContent = (partes.length ? 'Falta: ' + partes.join(' y ') + '. ' : '') +
     (f.colores ? `${f.colores.toLocaleString('es')} casas aún sin el color de su fachada: se piden solas mientras conduces.` : '');
   $('btnFaltan').hidden = !descargable;
@@ -7733,6 +8158,29 @@ async function descargarLoQueFalta() {
       }, (h, n) => avisar(`Descargando las casas que faltaban: ${h} de ${n} trozos…`));
       if (bien) cat.failed = siguenMal;   // si no ha llegado nada, siguen faltando los mismos trozos que antes
     }
+    // 1b) porches y patios (las partes sin plantas), si la zona se preparó sin ellos: se vuelven a pedir los trozos que ya tiene
+    // y de cada uno se añaden solo esas partes (las casas siguen igual). Un trozo que falla se pide partido en cuatro
+    let nPorches = 0, nPatios = 0;
+    if (f.porches) {
+      const padres = new Map(jobs.map(j => [j.key, j])), claves = (cat.sinPorches && cat.sinPorches.length) ? cat.sinPorches : Object.keys(cat.tiles).filter(k => cat.tiles[k].length);
+      const lista = claves.map(k => { const j = Catastro.trozoDeClave(k, padres); return j && { key: k, bb: j.bb, padre: k }; }).filter(Boolean), mal = [];
+      let bien = 0;
+      await Catastro.enParalelo(lista, async j => {
+        if (!bien && mal.length >= 3) { mal.push(j.padre); return; }
+        try {
+          // (por su forma: el Catastro numera las partes de cada respuesta a su manera)
+          const clave = p => p.ring.length + ':' + p.ring[0][0].toFixed(7) + ',' + p.ring[0][1].toFixed(7);
+          const partes = await Catastro.partesDeTrozo(srs, huso, j), tile = cat.tiles[j.padre] || (cat.tiles[j.padre] = []), ya = new Set(tile.map(clave));
+          for (const p of partes) if (p.plantas === 0 && !ya.has(clave(p))) { tile.push(p); ya.add(clave(p)); nuevos.push(p); if (p.bajo > 0) nPatios++; else nPorches++; }
+          bien++;
+        } catch (err) {
+          if (Catastro.partible(j) && !(err instanceof TypeError)) return Catastro.hijosDeTrozo(j).map(h => ({ ...h, padre: j.padre }));
+          if (!mal.includes(j.padre)) mal.push(j.padre);
+          notas.push(err.message);
+        }
+      }, (h, n) => avisar(`Descargando los porches y patios del Catastro: ${h} de ${n} trozos…`));
+      if (bien) { cat.sinPorches = mal; cat.porches = !mal.length; }
+    }
     // 2) parcelas, igual
     let par = d.parcelas || { tiles: {}, failed: [] }, viejo = false;
     if (f.parcelas) {
@@ -7752,13 +8200,16 @@ async function descargarLoQueFalta() {
     guardandoZona = true;
     const zip = d.zip, r7 = v => Math.round(v * 1e7) / 1e7;
     if (nuevos.length) {
-      const casas = JSON.parse(await zip.file('casas.geojson').async('string')), vistas = new Set(casas.features.map(ft => ft.geometry && JSON.stringify(ft.geometry.coordinates[0][0])));
+      const casas = JSON.parse(await zip.file('casas.geojson').async('string')), vistas = new Set(casas.features.map(ft => ft.geometry && ft.geometry.coordinates[0].length + JSON.stringify(ft.geometry.coordinates[0][0])));   // por su forma (un porche empieza a veces donde su casa)
       for (const p of nuevos) {
         const ring = p.ring.map(([la, lo]) => [r7(lo), r7(la)]);
-        if (ring.length < 3 || vistas.has(JSON.stringify(ring[0]))) continue;
-        ring.push(ring[0]);
-        casas.features.push({ type: 'Feature', properties: { referencia_catastral: p.ref, plantas: isNaN(p.plantas) ? null : p.plantas, altura_aprox_m: isNaN(p.plantas) ? null : +(p.plantas * 3.1 + 0.7).toFixed(1), fuente: 'Catastro' },
-          geometry: { type: 'Polygon', coordinates: [ring, ...p.holes.map(h => { const r = h.map(([la, lo]) => [r7(lo), r7(la)]); r.push(r[0]); return r; })] } });
+        if (ring.length < 3) continue;
+        if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]) ring.push(ring[0]);
+        if (vistas.has(ring.length + JSON.stringify(ring[0]))) continue;
+        vistas.add(ring.length + JSON.stringify(ring[0]));
+        const sin = p.plantas === 0;   // porche o patio, como los da el Paseo
+        casas.features.push({ type: 'Feature', properties: { referencia_catastral: p.ref, plantas: isNaN(p.plantas) ? null : p.plantas, altura_aprox_m: isNaN(p.plantas) || sin ? null : +(p.plantas * 3.1 + 0.7).toFixed(1), fuente: 'Catastro', ...(sin ? { tipo: p.bajo > 0 ? 'patio' : 'porche', plantas_bajo_rasante: p.bajo || 0 } : {}) },
+          geometry: { type: 'Polygon', coordinates: [ring, ...p.holes.map(h => { const r = h.map(([la, lo]) => [r7(lo), r7(la)]); if (r[0][0] !== r[r.length - 1][0] || r[0][1] !== r[r.length - 1][1]) r.push(r[0]); return r; })] } });
       }
       zip.file('casas.geojson', JSON.stringify(casas));
     }
@@ -7781,15 +8232,17 @@ async function descargarLoQueFalta() {
     zip.file('zona.json', JSON.stringify(meta));
     const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }).finally(() => { guardandoZona = false; });   // comprimido: lo que no cambia se reaprovecha tal cual (sin comprimir sería 5 veces mayor y muchísimo más lento)
     const id = lugarActual || 'huelva';
-    await Zonas.guardar({ id, nombre: meta.nombre || zona.nombre, geo: meta.geo, fecha: Date.now(), tam: blob.size, blob });
+    await Zonas.guardar({ id, nombre: meta.nombre || zona.nombre, geo: meta.geo, fecha: Date.now(), tam: blob.size, blob, ...(id === 'huelva' ? { base: HUELVA_INCLUIDA } : {}) });
     await cargarZona(blob);
     const quedan = calcularFaltan();
     const resumen = [];
-    if (nuevos.length) resumen.push(`${nuevos.length} partes de casa nuevas`);
+    if (nuevos.length - nPorches - nPatios) resumen.push(`${nuevos.length - nPorches - nPatios} partes de casa nuevas`);
+    if (f.porches && cat.porches) resumen.push(`${nPorches.toLocaleString('es')} porches y ${nPatios.toLocaleString('es')} patios`);
     if (par) resumen.push(`${nParcelas.toLocaleString('es')} parcelas`);
     let txt = resumen.length ? 'Descargado: ' + resumen.join(' y ') + '.' : '';
     if (viejo) txt += ' catastro.php es el antiguo y no da parcelas: sube el nuevo (está en la carpeta servidor/ del repositorio) para tenerlas.';
     if (quedan && quedan.trozos.length) txt += ` Siguen faltando ${quedan.trozos.length} trozos (${notas[0] || 'el Catastro no ha contestado'}).`;
+    else if (quedan && quedan.porches && f.porches) txt += ` Faltan los porches y patios de ${(cat.sinPorches || []).length || 'algunos'} trozos (${notas[0] || 'el Catastro no ha contestado'}); se pueden volver a pedir.`;
     avisar(($('estado').textContent + ' ' + txt).trim());
   } catch (err) {
     avisar('No he podido descargar lo que falta: ' + (err.message || err) + '. Comprueba la conexión y vuelve a probar.');
@@ -7874,6 +8327,7 @@ const sinColorTodavia = e => e.ref && !e.foto4 && !e.simulada && !Fachadas.inten
 function actualizarFachadas(ahora) {
   if (!zona || !coche) return;
   pintarPendientes(ahora);
+  rehacerTejados(ahora);
   if (Fachadas.parado || Fachadas.activas >= 3 || ahora - Fachadas.tUltima < 0.25) return;
   Fachadas.tUltima = ahora;
   // cada casa, con lo que falta para llegar a ella: los metros de camino hasta el punto más cercano y lo que se aparta de él
@@ -7904,6 +8358,7 @@ function actualizarFachadas(ahora) {
     if (zona !== z0) return;   // mientras tanto se ha abierto otra zona
     for (const e of (zona.porRef && zona.porRef.get(ref)) || []) e.foto4 = true;
     if (!c.sin) { ponerColoresFachada(ref, c); Fachadas.hechas++; }
+    if (c.tejado) tejadoDeFoto(ref, c.tejado);   // y lo que dice del tejado
   }).catch(() => { if (++Fachadas.fallos >= 4) Fachadas.parado = true; })   // sin conexión con catastro.php: se deja de pedir
     .finally(() => { Fachadas.activas--; });
 }
@@ -7933,7 +8388,7 @@ function pintarPendientes(ahora) {
   if (!P.length || !camara) return;
   if (ahora - Fachadas.tPintado < 1 / 15) return;   // quince veces por segundo basta para un fundido
   Fachadas.tPintado = ahora;
-  const { frustum, m, caja } = vistaFachadas;
+  const { frustum, m } = vistaFachadas;
   m.multiplyMatrices(camara.projectionMatrix, camara.matrixWorldInverse);
   frustum.setFromProjectionMatrix(m);
   const tocadas = new Map();
@@ -7942,13 +8397,7 @@ function pintarPendientes(ahora) {
     const q = P[i];
     // ¿se ve?, ¿y cómo de grande? (su tamaño entre la distancia a la cámara)
     let tam = 0;
-    for (const { e } of q.partes) {
-      const b = e.bbox;
-      caja.min.set(b[0], 0, b[1]); caja.max.set(b[2], e.h + 3, b[3]);
-      if (!frustum.intersectsBox(caja)) continue;
-      const d = Math.max(1, Math.hypot(Math.max(b[0] - camara.position.x, 0, camara.position.x - b[2]), Math.max(b[1] - camara.position.z, 0, camara.position.z - b[3])));
-      tam = Math.max(tam, Math.max(b[2] - b[0], b[3] - b[1], e.h) / d);
-    }
+    for (const { e } of q.partes) tam = Math.max(tam, tamEnPantalla(e));
     const dt = ahora - (q.tUlt ?? ahora);
     q.tUlt = ahora;
     let p;

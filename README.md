@@ -45,8 +45,9 @@ Al abrir un lugar, el menú dice si le falta algo del Catastro y deja descargarl
 
 - **Trozos de casas** que no llegaron cuando se preparó la zona.
 - **Parcelas** (con el `catastro.php` nuevo).
+- **Porches y patios** (ver [Porches y patios](#porches-y-patios)), en las zonas preparadas antes de que el juego los usara. Hay que volver a pedir al Catastro todos los trozos de la zona (unos minutos); de cada uno solo se añaden las partes sin plantas, y las casas quedan igual. Si alguno falla, se pide partido en cuatro, y los que sigan sin llegar se pueden volver a pedir.
 
-**⬇️ Descargar lo que falta** los pide, los mete en la zona, la guarda en este navegador y la vuelve a abrir. Huelva también: su versión completada se guarda y se usa en lugar de la incluida.
+**⬇️ Descargar lo que falta** los pide, los mete en la zona, la guarda en este navegador y la vuelve a abrir. Huelva también: su versión completada se guarda y se usa en lugar de la incluida (salvo si es de una versión anterior de la zona incluida: la nueva ya trae los porches y los patios).
 
 ### Trozos más pequeños cuando algo falla
 
@@ -93,7 +94,8 @@ Las casas se construyen igual que en el Paseo por el relieve:
 - **Teja árabe**: tejado a dos aguas en la crujía de la fachada principal (toda la casa si tiene menos de 11 m de fondo; si no, 6,2 m y el resto plano). Lleva alero en la fachada, y atrás si la casa es poco honda, y las hileras de tejas dibujadas.
 - **Azotea**: pretil de casi un metro con albardilla y, en algunas casas medianas, el torreón de la escalera.
 - **Patios**: los de dentro de la casa (huecos en el Catastro) tienen sus paredes con ventanas y no los tapa el tejado.
-- **Tejado de la foto**: el color de cada tejado se saca de la foto aérea, y la foto se ve encima con las tejas. Si los datos no dicen si es de teja o azotea, lo dice la foto: rojizo y de brillo medio es teja.
+- **Tejado de la foto**: el color de cada tejado se saca de la foto aérea, y la foto se ve encima con las tejas.
+- **¿Teja o azotea?**: lo decide un modelo hecho con casas de Huelva de verdad (ver [Teja o azotea](#teja-o-azotea)).
 
 Las fachadas tienen ventanas con persianas y rejas, balcones, puertas, zócalo y recercados de albero. Sus colores salen de la foto de fachada del Catastro, analizada en el Paseo.
 
@@ -122,9 +124,46 @@ De cada banda sale su parche de textura, y en el juego se pone cada uno a su alt
 
 Antes solo se miraban los píxeles claros, así que el ladrillo y las paredes rojas en sombra quedaban fuera y salía blanco o gris. En el Paseo, los colores guardados con un análisis anterior se rehacen solos desde la foto guardada, sin descargar nada; en el juego, se vuelven a pedir al pasar.
 
+### Teja o azotea
+
+Antes lo decía el color de la foto aérea: rojizo y de brillo medio era teja. Para ver si funcionaba se han mirado a mano **214 casas de una y dos plantas de Huelva** con su foto de fachada del Catastro (en ella se ve si arriba hay una fila de tejas o un pretil): acertaba el 58 %, lo mismo que decir siempre azotea, y sobre todo ponía teja en azoteas con pretil. La foto aérea tiene unos 2 m por píxel, así que en una casa de 6 m apenas hay tres píxeles, mezclados con la calle y con el tejado de al lado.
+
+Lo que sí distingue una cosa de otra, con esas casas:
+
+- **La parcela**: las casas con patio o jardín (las que dejan sin construir buena parte de su parcela) suelen ser de teja, y las que la llenan, de azotea (con menos del 75 % construido, 6 de cada 10 son de teja; con más, 1 de cada 4). Las muy largas (naves, comercios, bloques en hilera) suelen ser de azotea.
+- **La foto de fachada**, si ya se ha mirado: la franja de arriba de la casa, justo bajo el cielo, es más oscura que la pared cuando hay teja (las tejas y la sombra del alero, aunque estén encaladas), con una línea oscura debajo y a menudo rojiza; con azotea, el pretil es de la pared, y por encima asoman antenas, barandas y depósitos, así que el borde contra el cielo es más irregular.
+
+Con eso se han ajustado regresiones logísticas (con validación cruzada: cada casa se prueba con un modelo hecho sin ella):
+
+| Con qué se decide | Acierto |
+|---|---|
+| El color de la foto aérea (antes) | 58 % |
+| Solo lo larga que es la casa (zonas sin parcelas) | 62 % |
+| La parcela y lo larga que es | 72 % |
+| La foto de fachada, la parcela y lo larga que es | 78 % |
+
+Antes de usarlos se probaron en otras 101 casas que no se habían usado para elegirlos: con la parcela, 71 % (el color de la foto aérea, 59 %). Las casas de cuatro plantas o más y las de más de 700 m² siguen siendo de azotea, y las de OpenStreetMap siguen con su dato o con el color de la foto.
+
+- **Al abrir la zona**, cada casa del Catastro sale con lo que dicen su parcela y su largo (o su foto, si ya se miró antes en este navegador o en el Paseo). En Huelva quedan de teja un 35 % de las casas bajas (en las fotos eran un 46 %: el modelo, cuando duda, prefiere azotea).
+- **Mientras conduces**, cuando llega la foto de fachada de una casa (las que se piden para el color), también se miran esos rasgos del tejado. Si con ellos cambia de teja a azotea o al revés, su bloque de casas se rehace con el tejado nuevo cuando no se nota: con la casa fuera de la vista o pequeña, a lo lejos, sin fundidos de color a medias en el bloque y un bloque por segundo como mucho (rehacer uno de 190 casas lleva unos 40 ms). Los rasgos se guardan con los colores, así que la próxima vez ya sale bien. Por eso el análisis de la foto pasa a la versión 7: las casas con colores de la versión 6 se vuelven a pedir al pasar por ellas.
+- El Paseo decide igual, y su análisis de la foto guarda también los rasgos del tejado (van en `zona.json` con los colores).
+
+## Porches y patios
+
+El Catastro da cada casa en **partes**, cada una con sus plantas sobre y bajo rasante. Las que no tienen ninguna planta sobre rasante el Paseo y el juego las tiraban; ahora se guardan (en `casas.geojson`, con `plantas: 0` y `tipo`) y se dibujan:
+
+- **Porche** (`tipo: porche`, sin sótano): son porches, cobertizos, galerías y marquesinas, cubiertos y sin paredes (están dentro del contorno del edificio). Llevan un **tejadillo sobre pilares**: si van pegados a una casa de teja, de teja a un agua, de 2,45 m por fuera a lo que dé la pendiente junto a la pared, sin pasar del alero; pegados a una casa de azotea, una losa plana a 2,9 m; sueltos, una losa a 2,7 m, y las marquesinas grandes a 4,2 m. Por los lados que no apoyan en una pared van la viga y los **pilares**, en las esquinas y repartidos entre ellas (a 3,3 m como mucho; 5 m en las marquesinas), del color de la casa y con zócalo. Los pilares chocan como una pared; debajo del tejadillo el coche pasa. El Catastro también da sin plantas explanadas, pistas y solares de varias hectáreas: se cubren las de hasta 400 m² y, más grandes, las alargadas (como las marquesinas de los andenes de la estación), de hasta 12 m de ancho y 4.000 m²; las demás se quedan como suelo, y las que pisan una calzada no se ponen.
+- **Patio** (`tipo: patio`, con sótano debajo): son sobre todo los patios de luces de los bloques, encima del garaje, alguna rampa y alguna plaza sobre un aparcamiento. Quedan abiertos, con las paredes de la casa alrededor.
+
+En Huelva son 135 porches (78 cubiertos, con 1.035 pilares) y 1.810 patios.
+
+**Solería**: los patios llevan baldosas: los del Catastro, los de dentro de las casas, el suelo de los porches y, con parcelas y foto aérea, lo que queda sin construir de las parcelas con casa de hasta 2.000 m² y con al menos un 40 % construido (los patios de las casas y de los bloques; los jardines de los chalets, no). Cada patio, su solería, alineada con su lado más largo: barro, terrazo, losa clara, mármol blanco o hidráulica en damero. La foto aérea, que es borrosa, solo le da luces y sombras, y donde la foto es verde (césped, árboles) no se enlosa: se ve el suelo con su hierba.
+
+El Catastro numera las partes de cada respuesta a su manera (la «part4» de un trozo no es la de otro), así que al juntar los trozos las partes se reconocen ahora por su forma y no por su número. En la zona incluida había 472 casas repetidas (la misma pieza con dos números) que se dibujaban dos veces; ya no están.
+
 ## Casas que cortan calles
 
-Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 100 de 32 382.
+Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 97 de 31 910.
 
 ## Vallas de las casas
 

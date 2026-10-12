@@ -1438,7 +1438,8 @@ function leerGMLCatastro(txt,zona){
   for(const f of feats){
     const fl=f.getElementsByTagNameNS('*','numberOfFloorsAboveGround')[0];
     const plantas=fl&&fl.textContent.trim()!==''?parseInt(fl.textContent,10):NaN;
-    if(plantas===0)continue;
+    // sin plantas sobre rasante: sin sótano, un porche o cobertizo (cubierto y sin paredes); con sótano, un patio (o una rampa) encima de él
+    const fb=plantas===0?f.getElementsByTagNameNS('*','numberOfFloorsBelowGround')[0]:null,bajo=fb?parseInt(fb.textContent,10)||0:0;
     const exter=f.getElementsByTagNameNS('*','exterior')[0]||f;
     const pl=exter.getElementsByTagNameNS('*','posList')[0];
     let nums=[];
@@ -1451,11 +1452,18 @@ function leerGMLCatastro(txt,zona){
       const h=[];for(let k=0;k+1<ns.length;k+=2)h.push(deUTM(ns[k],ns[k+1],zona));holes.push(h);}
     const id=f.getAttributeNS('http://www.opengis.net/gml/3.2','id')||f.getAttribute('gml:id')||'';
     const m=/BU\.([0-9A-Z]{14})/i.exec(id);
-    out.push({ring,holes,plantas,id,ref:m?m[1].toUpperCase():null});
+    const p={ring,holes,plantas,id,ref:m?m[1].toUpperCase():null};if(plantas===0)p.bajo=bajo;
+    out.push(p);
   }
   return out;
 }
-function catPartes(cat){if(cat.partes)return cat.partes;const out=[],vistos=new Set();for(const k in cat.tiles)for(const p of cat.tiles[k]){const key=p.id||p.ring[0].join(',');if(vistos.has(key))continue;vistos.add(key);out.push(p);}return out;}
+// Partes sin plantas sobre rasante: porches y cobertizos (sin sótano) y patios sobre el sótano. No son casas: el juego las dibuja aparte
+const sinPlantas=p=>p.plantas===0;
+const tipoSinPlantas=p=>p.bajo>0?'patio':'porche';
+// La misma parte puede venir en dos trozos, y el Catastro numera las partes de cada respuesta a su manera (la «part4» de un trozo no es
+// la del otro): se reconocen por su forma (cuántos puntos y dónde empieza), no por su número
+const claveParte=p=>p.ring.length+':'+p.ring[0][0].toFixed(7)+','+p.ring[0][1].toFixed(7);
+function catPartes(cat){if(cat.partes)return cat.partes;const out=[],vistos=new Set();for(const k in cat.tiles)for(const p of cat.tiles[k]){const key=claveParte(p);if(vistos.has(key))continue;vistos.add(key);out.push(p);}return out;}
 /* La zona se pide en trozos de 700 m (el Catastro da como mucho 4 km² por consulta). Cada trozo se guarda
    por separado: si alguno falla, la próxima vez solo se pide ese. */
 function catTiles(g){
@@ -1505,7 +1513,7 @@ function trozosPendientes(jobs,tiles,failed){
 }
 // Lo guardado que es de esta zona (trozos enteros o partes de trozos)
 const deEstaZona=(tiles,jobs)=>{const out={};if(!tiles)return out;const ok=new Set(jobs.map(j=>j.key));for(const k in tiles)if(ok.has(k.split('/')[0]))out[k]=tiles[k];return out;};
-async function fetchCatastro(g,have=null,dentro=null,failedPrev=null){
+async function fetchCatastro(g,have=null,dentro=null,failedPrev=null,havePorches=false){
   const {zona,srs,jobs:todos}=catTiles(g),jobs=dentro?todos.filter(dentro):todos,tiles=deEstaZona(have,jobs),failed=[],errs=new Map();
   const todo=trozosPendientes(jobs,tiles,failedPrev),guardados=Object.keys(tiles).length;
   const urlDe=(bb,t)=>`${CATASTRO_URL}?z=${srs}&bbox=${bb.map(v=>v.toFixed(1)).join(',')}${t?'&t=building':''}`;
@@ -1528,7 +1536,8 @@ async function fetchCatastro(g,have=null,dentro=null,failedPrev=null){
   if(sinPedir)repLog('cat',`Tras varios fallos seguidos no he pedido los otros ${sinPedir} trozos, para no insistir en balde.`);
   if(!Object.keys(tiles).length&&failed.length){const e=lastErr||new Error('sin respuesta');e.cat=errCat(lastErr);throw e;}
   const partes=catPartes({tiles});   // de los trozos enteros y de sus partes, sin repetir
-  return {partes,tiles,failed,fails:failed.length,total:jobs.length,fetched:okN,guardados,errs:agrupa(errs),motivo};
+  const porches=!guardados||!!havePorches;   // todos los trozos leídos ya con los porches y patios (las zonas guardadas antes no los traen)
+  return {partes,tiles,failed,porches,fails:failed.length,total:jobs.length,fetched:okN,guardados,errs:agrupa(errs),motivo};
 }
 
 /* Parcelas del Catastro (para la linde de los chalets en el juego). Se piden con el mismo catastro.php y t=parcela;
@@ -2398,8 +2407,33 @@ function insetRing(r,d){const n=r.length,out=[];
     if(ml<1e-3){mx=n2[0];mz=n2[1];}else{mx/=ml;mz/=ml;}const cs=Math.max(0.35,mx*n1[0]+mz*n1[1]);out.push([p[0]+mx*d/cs,p[1]+mz*d/cs]);}
   return out;}
 
+/* ¿Teja o azotea? El color de la foto aérea casi no lo dice (acertaba 6 de cada 10 casas bajas de Huelva). Lo que sí: la parcela
+   (las casas con patio o jardín suelen ser de teja; las que la llenan y las muy largas, de azotea) y, si se ha mirado, la foto de
+   fachada (la franja de arriba de la casa, bajo el cielo, oscura, con sombra de alero y rojiza es teja). Son las mismas
+   regresiones logísticas que usa el juego, ajustadas con 214 casas de Huelva: 7 de cada 10 con la parcela y 8 de cada 10 con la foto */
+const MODELOS_TEJADO={fotoYParcela:{b:1.4803,dL:-0.02799,sombra:1.76946,rug:-0.4325,terra:1.72459,ocup:-2.7604,largo:-0.03915},
+  fotoYLargo:{b:-0.5618,dL:-0.02866,sombra:1.55372,rug:-0.54248,terra:1.71752,largo:-0.0303},parcela:{b:3.1903,ocup:-3.14921,largo:-0.05802},largo:{b:0.5974,largo:-0.04583}};
+function probabilidadTeja(rasgos,foto){const r={largo:Math.min(rasgos.largo,120),ocup:rasgos.ocup==null?null:Math.min(rasgos.ocup,1.5)};
+  const m=foto?(r.ocup!=null?MODELOS_TEJADO.fotoYParcela:MODELOS_TEJADO.fotoYLargo):(r.ocup!=null?MODELOS_TEJADO.parcela:MODELOS_TEJADO.largo);
+  let z=m.b;for(const k in m)if(k!=='b')z+=m[k]*(k in r?r[k]:foto[k]);return 1/(1+Math.exp(-z));}
+function envolvente(pts){const p=pts.slice().sort((A,B)=>A[0]-B[0]||A[1]-B[1]);if(p.length<3)return p;const cruz=(O,A,B)=>(A[0]-O[0])*(B[1]-O[1])-(A[1]-O[1])*(B[0]-O[0]),lo=[],hi=[];
+  for(const q of p){while(lo.length>=2&&cruz(lo[lo.length-2],lo[lo.length-1],q)<=0)lo.pop();lo.push(q);}
+  for(let i=p.length-1;i>=0;i--){const q=p[i];while(hi.length>=2&&cruz(hi[hi.length-2],hi[hi.length-1],q)<=0)hi.pop();hi.push(q);}
+  return lo.slice(0,-1).concat(hi.slice(0,-1));}
+// Lo largo de una casa: el lado mayor del rectángulo más pequeño que la envuelve
+function largoCasa(pts){const h=envolvente(pts);let mejor=null;
+  for(let k=0;k<h.length;k++){const p=h[k],q=h[(k+1)%h.length],l=Math.hypot(q[0]-p[0],q[1]-p[1]);if(l<1e-6)continue;const ux=(q[0]-p[0])/l,uz=(q[1]-p[1])/l;
+    let u0=1e18,u1=-1e18,v0=1e18,v1=-1e18;for(const [x,z] of h){const u=x*ux+z*uz,v=-x*uz+z*ux;u0=Math.min(u0,u);u1=Math.max(u1,u);v0=Math.min(v0,v);v1=Math.max(v1,v);}
+    const A=(u1-u0)*(v1-v0);if(!mejor||A<mejor[0])mejor=[A,Math.max(u1-u0,v1-v0)];}
+  return mejor?mejor[1]:0;}
+// Por referencia catastral: el largo de la casa (con todas sus partes) y cuánto ocupa de su parcela
+function rasgosParcelas(T){const porRef=new Map(),out=new Map(),areaPar=new Map();
+  for(const f of T.feats||[]){if(f.layer!=='building'||!f.cat||!f.ref||!f.polys)continue;let a=porRef.get(f.ref);if(!a)porRef.set(f.ref,a={A:0,pts:[]});a.A+=Math.abs(ringArea(f.polys[0]));a.pts.push(...f.polys[0]);}
+  if(T.parcelasCat){const proj=makeProj(T);for(const p of parcelasDe(T.parcelasCat))if(p.ref&&porRef.has(p.ref))areaPar.set(p.ref,(areaPar.get(p.ref)||0)+Math.abs(ringArea(p.ring.map(([la,lo])=>proj(la,lo)))));}
+  for(const [ref,a] of porRef){const P=areaPar.get(ref);out.set(ref,{largo:largoCasa(a.pts),ocup:P?a.A/P:null});}
+  return out;}
 function prepBuildings(T,satImg){
-  const list=[],M=T.M,tmp=new THREE.Color(),hasRoads=!!(M&&M.road&&M.road.some(v=>v>90));
+  const list=[],M=T.M,tmp=new THREE.Color(),hasRoads=!!(M&&M.road&&M.road.some(v=>v>90)),rasgosRef=rasgosParcelas(T);
   for(const f of (T.feats||[])){if(f.layer!=='building'||!f.polys)continue;
     const ring=cleanRing(f.polys[0]);if(ring.length<3)continue;
     const a=ringArea(ring),A=Math.abs(a);if(A<8||A>40000)continue;if(a<0)ring.reverse();
@@ -2415,8 +2449,9 @@ function prepBuildings(T,satImg){
     if(satImg){let sr=0,sg=0,sb=0,n=0;const st=Math.max(T.wM/T.MW,0.7);
       for(let z=z0+st/2;z<z1;z+=st)for(let x=x0+st/2;x<x1;x+=st){if(!pip(x,z,ring))continue;const k=maskK(x,z);sr+=satImg[k*4];sg+=satImg[k*4+1];sb+=satImg[k*4+2];n++;}
       if(!n){const k=maskK(cx,cz);sr=satImg[k*4];sg=satImg[k*4+1];sb=satImg[k*4+2];n=1;}rc=[sr/n,sg/n,sb/n];}
-    let kind;
+    let kind;const rasgos=f.cat&&f.ref?rasgosRef.get(f.ref):null,fe=rasgos&&FOTO.cache.get(f.ref);
     if(ind||floors>=4||A>700||church)kind='azotea';
+    else if(rasgos)kind=probabilidadTeja(rasgos,fe&&fe.col&&fe.col.tejado||null)>0.5?'teja':'azotea';   // casas del Catastro: el modelo
     else if(rc){const [r,g,b]=rc,Lm=(r+g+b)/3;kind=(r-b>24&&r>g*1.06&&Lm>50&&Lm<215)?'teja':'azotea';}
     else kind=seed<0.66?'teja':'azotea';
     list.push({ring,holes,h,floors,kind,rc,ind,church,cx,cz,x0,x1,z0,z1,A,seed,ref:f.ref||null,src:f.cat?'Catastro':(T.kind==='demo'?'ejemplo':'OpenStreetMap')});
@@ -2854,9 +2889,57 @@ function roadMaterial(){
 const fotoSt0=()=>({red:0,db:0,ok:0,sin:0,err:0,errs:new Map(),col:0,desc:0,whys:new Map(),rest:0,last:''});
 const FOTO={ok:null,cache:new Map(),active:0,count:0,max:500,d0:1e12,d1:-1,st:fotoSt0(),off:new Set(),msg:''};
 const fotoURL=ref=>`${CATASTRO_URL}?foto=${encodeURIComponent(ref)}`;
-const COLV=6;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra; 4: y un parche de su textura; 5: la casa en tres bandas, alta, media y zócalo, con un parche cada una; 6: la pared por grupos de tono y saturación, con balance de blancos y exposición: el ladrillo y el ocre ya no salen blancos ni rosa pálido)
+const COLV=7;   // versión del análisis de colores: lo guardado con otra versión se vuelve a sacar de la foto guardada (3: la pared por su tono, con luz y sombra; 4: y un parche de su textura; 5: la casa en tres bandas, alta, media y zócalo, con un parche cada una; 6: la pared por grupos de tono y saturación, con balance de blancos y exposición: el ladrillo y el ocre ya no salen blancos ni rosa pálido; 7: y los rasgos del tejado, teja o azotea)
 function imgDe(url){return new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error('la foto está dañada'));im.src=url;});}
-function colorsDe(im){let c;try{c=photoColors(im);}catch(err){c={why:'no se ha podido analizar la foto'};}c.v=COLV;return c;}
+function colorsDe(im){let c;try{c=photoColors(im);}catch(err){c={why:'no se ha podido analizar la foto'};}
+  if(c.wall)try{c.tejado=rasgosTejado(im);}catch(err){c.tejado=null;}   // la franja de arriba de la casa: ¿teja o azotea?
+  c.v=COLV;return c;}
+// Rasgos del tejado en la foto de fachada: la franja de arriba de la casa (bajo el cielo) frente a la pared de debajo.
+// Con teja, esa franja es más oscura que la pared (las tejas y la sombra del alero) y a menudo rojiza; con azotea, el pretil
+// es de la pared, y por encima asoman antenas, barandas y depósitos (el borde contra el cielo es más irregular).
+// Devuelve { dL, sombra, rug, terra } o null si no se ve bien el borde de la casa contra el cielo
+function rasgosTejado(im){
+  const iw=im.naturalWidth||im.width,ih=im.naturalHeight||im.height,W=320,H=Math.max(120,Math.min(400,Math.round(W*ih/iw))),N=W*H;
+  const c=document.createElement('canvas');c.width=W;c.height=H;const g=c.getContext('2d',{willReadFrequently:true});g.drawImage(im,0,0,W,H);
+  const d=g.getImageData(0,0,W,H).data,R=new Float32Array(N),G=new Float32Array(N),B=new Float32Array(N),L=new Float32Array(N),S=new Float32Array(N);
+  for(let i=0;i<N;i++){const r=d[i*4],gg=d[i*4+1],b=d[i*4+2],mx=Math.max(r,gg,b),mn=Math.min(r,gg,b);R[i]=r;G[i]=gg;B[i]=b;L[i]=(r+gg+b)/3;S[i]=mx>0?(mx-mn)/Math.max(mx,1):0;}
+  // cielo: azul, o claro y casi gris en la parte de arriba, unido al borde de arriba de la foto
+  const skyl=new Uint8Array(N);
+  for(let i=0;i<N;i++){const y=Math.floor(i/W);skyl[i]=((B[i]>R[i]+12&&B[i]>=G[i]-12&&S[i]>0.12)||(y<H*0.65&&L[i]>175&&S[i]<0.18&&B[i]>=R[i]-10))?1:0;}
+  const sky=new Uint8Array(N),st=[];
+  for(let x=0;x<W;x++)if(skyl[x]){sky[x]=1;st.push(x);}
+  while(st.length){const i=st.pop(),x=i%W,y=(i-x)/W;
+    for(const j of [x>0?i-1:-1,x<W-1?i+1:-1,y>0?i-W:-1,y<H-1?i+W:-1])if(j>=0&&!sky[j]&&skyl[j]){sky[j]=1;st.push(j);}}
+  const verde=i=>G[i]>R[i]+6&&G[i]>B[i]+4&&S[i]>0.1;
+  const h1=Math.max(3,Math.round(0.04*H)),h2=Math.max(4,Math.round(0.07*H)),cols=[];
+  for(let x=Math.floor(W*0.08);x<Math.floor(W*0.92);x++){
+    if(!sky[x])continue;
+    let y=0;while(y<H&&sky[y*W+x])y++;
+    if(y>=H||y<2||y>H*0.8||y+h1+2+h2>=H)continue;
+    let mal=false;for(let k=0;k<6&&!mal;k++)if(sky[(y+k)*W+x])mal=true;
+    if(mal)continue;
+    let v=0;for(let k=0;k<h1+h2;k++)if(verde((y+k)*W+x))v++;
+    if(v/(h1+h2)>0.2)continue;
+    cols.push([x,y]);}
+  if(cols.length<12)return null;
+  const med=a=>{const s=Float64Array.from(a).sort(),n=s.length;return n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2;};
+  const media=(x,y0,n,A)=>{let s=0;for(let k=0;k<n;k++)s+=A[(y0+k)*W+x];return s/n;};
+  // lo irregular del borde contra el cielo: lo que se aparta de su mediana móvil (31 columnas)
+  const ys=cols.map(c=>c[1]),n=ys.length,k2=Math.floor(Math.min(31,Math.floor(n/2)*2-1)/2);
+  let rug=0;for(let i=0;i<n;i++){const w=[];for(let j=i-k2;j<=i+k2;j++)w.push(ys[Math.min(n-1,Math.max(0,j))]);rug+=Math.abs(Math.max(-6,Math.min(6,ys[i]-med(w))));}
+  rug/=n;
+  // la franja de arriba (4 % del alto) y la pared de debajo (7 %)
+  const lb=cols.map(([x,y])=>media(x,y,h1,L)),lw=cols.map(([x,y])=>media(x,y+h1+2,h2,L));
+  const dL=med(lb.map((v,i)=>v-lw[i])),Lw=med(lw);
+  // la sombra del alero: la fila más oscura en el 10 % de debajo del borde, frente a la pared
+  const hs=Math.round(0.1*H);let minProf=Infinity;
+  for(let k=0;k<hs;k++)minProf=Math.min(minProf,med(cols.map(([x,y])=>L[(y+k)*W+x])));
+  const sombra=(Lw-minProf)/Math.max(30,Lw);
+  // color de teja en la franja de arriba
+  let terra=0;for(const [x,y] of cols){let t=0;for(let k=0;k<h1;k++){const i=(y+k)*W+x;if(R[i]-B[i]>18&&R[i]>=G[i]-2&&S[i]>0.14)t++;}terra+=t/h1;}
+  terra/=cols.length;
+  return {dL,sombra,rug,terra};
+}
 function contarCol(col){const f=FOTO.st;if(col&&col.wall)f.col++;else{f.desc++;cuenta(f.whys,(col&&col.why)||'no se ha podido analizar la foto');}}
 function fotoErr(e,msg){e.msg=msg;FOTO.st.err++;cuenta(FOTO.st.errs,msg);FOTO.st.last=msg;}
 function loadFoto(ref){
@@ -3179,7 +3262,7 @@ async function buildWorld(src){
     if(!enEspana(src.geo))repSet('cat','nada','Fuera de España no hay Catastro: las casas salen de OpenStreetMap.');
     else if(!catOk)repSet('cat','nada',`La zona mide ${fmt(area,1)} km² y el Catastro solo se pide hasta ${CAT_MAX_KM2} km²: las casas salen de OpenStreetMap.`);
     const pC=catDone?Promise.resolve({partes:raw.cat.partes||catPartes(raw.cat),fails:0,cached:true})
-      :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles,trozoDentro(src.poligono),raw.cat&&raw.cat.failed).catch(e=>({err:e})):null;
+      :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles,trozoDentro(src.poligono),raw.cat&&raw.cat.failed,raw.cat&&raw.cat.porches).catch(e=>({err:e})):null;
     // parcelas: solo con Catastro; las que faltan (o todas, si catastro.php no sabía darlas) se vuelven a pedir
     const parDone=raw.par&&!raw.par.viejo&&!(raw.par.failed||[]).length;
     const pP=catOk&&!parDone?fetchParcelas(src.geo,raw.par&&raw.par.tiles,trozoDentro(src.poligono),raw.par&&raw.par.failed).catch(e=>({err:e})):null;
@@ -3198,7 +3281,7 @@ async function buildWorld(src){
       :`Ninguno de los ${OVERPASS.length} servidores lo ha dado: el agua y la vegetación salen de la foto aérea y del relieve.`);
     if(osm)feats=osmToFeatures(osm,makeProj(T));
     if(pC){busy(raw.cat?'Leyendo las casas guardadas…':'Esperando las casas del Catastro…',null);const rc=await pC;
-      if(rc&&!rc.cached&&!rc.err&&(rc.fetched||!raw.cat))fresh.cat={tiles:rc.tiles,failed:rc.failed};
+      if(rc&&!rc.cached&&!rc.err&&(rc.fetched||!raw.cat))fresh.cat={tiles:rc.tiles,failed:rc.failed,porches:rc.porches};
       T.catMissing=rc&&!rc.cached?(rc.err?-1:rc.fails):0;T.catTotal=rc&&rc.total||0;
       if(rc.err){const m=rc.err.cat||errCat(rc.err);repSet('cat','fallo',`No ha llegado ninguna casa: ${m}. Se usan las de OpenStreetMap.`);
         if(sat||osm)notes.push(`No se han podido cargar las casas del Catastro: ${m}. Se han usado las de OpenStreetMap.`);}
@@ -3207,13 +3290,14 @@ async function buildWorld(src){
         else if(rc.fails)repSet('cat','aviso',`Han llegado ${rc.total-rc.fails} de ${rc.total} trozos (${fmt(rc.partes.length)} partes de edificio). En los ${rc.fails} que faltan no salen sus casas; se volverán a pedir.`);
         else repSet('cat','ok',rc.partes.length?`Completo: ${fmt(rc.partes.length)} partes de edificio.`:'El Catastro no tiene edificios en esta zona.');
         if(rc.partes.length){const proj=makeProj(T);
-          const cf=rc.partes.map(p=>({layer:'building',tags:isNaN(p.plantas)?{building:'catastro'}:{building:'catastro','building:levels':String(p.plantas)},polys:[p.ring,...p.holes].map(r=>r.map(([la,lo])=>proj(la,lo))),cat:true,ref:p.ref}));
+          const cf=rc.partes.filter(p=>!sinPlantas(p)).map(p=>({layer:'building',tags:isNaN(p.plantas)?{building:'catastro'}:{building:'catastro','building:levels':String(p.plantas)},polys:[p.ring,...p.holes].map(r=>r.map(([la,lo])=>proj(la,lo))),cat:true,ref:p.ref}));
           feats=(feats||[]).filter(f=>f.layer!=='building').concat(cf);T.catN=cf.length;
           if(rc.fails)notes.push(`El Catastro no ha dado ${rc.fails} de ${rc.total} trozos de la zona (${rc.motivo||'sin respuesta'}); ahí no salen sus casas. Lo que sí llegó queda guardado, y la próxima vez que abras la zona solo se pedirá lo que falta.`);}}}
     if(pP){busy('Esperando las parcelas del Catastro…',null);const rp=await pP;
       if(rp.err)repLog('cat',`Las parcelas no han llegado: ${errCat(rp.err)}.`);
       else if(rp.viejo){fresh.par={viejo:true,tiles:{},failed:[]};repLog('cat','catastro.php no sabe dar parcelas (es la versión antigua): sin ellas, las vallas de los chalets del juego se calculan. Sube el catastro.php nuevo para tenerlas.');}
       else{fresh.par={tiles:rp.tiles,failed:rp.failed};repLog('cat',`Parcelas: ${fmt(parcelasDe(fresh.par).length)}${rp.failed.length?`; faltan ${rp.failed.length} trozos, se volverán a pedir`:''}.`);}}
+    T.parcelasCat=fresh.par&&!fresh.par.viejo&&fresh.par.tiles?fresh.par:(raw.par&&!raw.par.viejo?raw.par:null);   // para decidir teja o azotea
     if(sat&&sat.failed&&sat.failed.length)notes.push(`Faltan ${sat.failed.length} trozos de la foto aérea; se ven lisos. Se volverán a pedir la próxima vez que abras la zona.`);
     if(!sat&&!osm)notes.push('No he podido descargar la foto aérea ni el mapa de OpenStreetMap, así que el paisaje se ha pintado a partir del relieve.');
     else if(!sat)notes.push('No he podido descargar la foto aérea: el suelo se ha pintado a partir del mapa y del relieve.');
@@ -4007,11 +4091,12 @@ async function zoneExport(opts={}){
     const casas=[];
     if(cat){const proj=makeProj(W);
       for(const p of catPartes(cat)){const ring=p.ring.map(([la,lo])=>[r7(lo),r7(la)]);if(ring.length<3)continue;if(ring[0][0]!==ring[ring.length-1][0]||ring[0][1]!==ring[ring.length-1][1])ring.push(ring[0]);
-        const pr={referencia_catastral:p.ref||null,plantas:isNaN(p.plantas)?null:p.plantas,altura_aprox_m:isNaN(p.plantas)?null:+(p.plantas*3.1+0.7).toFixed(1),fuente:'Catastro'};
-        if(p.ref&&bldByRef.has(p.ref)){let cx=0,cz=0;for(const [la,lo] of p.ring){const q=proj(la,lo);cx+=q[0];cz+=q[1];}cx/=p.ring.length;cz/=p.ring.length;
+        const pr={referencia_catastral:p.ref||null,plantas:isNaN(p.plantas)?null:p.plantas,altura_aprox_m:isNaN(p.plantas)||sinPlantas(p)?null:+(p.plantas*3.1+0.7).toFixed(1),fuente:'Catastro'};
+        if(sinPlantas(p)){pr.tipo=tipoSinPlantas(p);pr.plantas_bajo_rasante=p.bajo||0;}   // porche o patio: ni tejado ni colores de fachada
+        else if(p.ref&&bldByRef.has(p.ref)){let cx=0,cz=0;for(const [la,lo] of p.ring){const q=proj(la,lo);cx+=q[0];cz+=q[1];}cx/=p.ring.length;cz/=p.ring.length;
           let best=null,bd=1e18;for(const i of bldByRef.get(p.ref)){const b=bldData[i],d=(b.cx-cx)**2+(b.cz-cz)**2;if(d<bd){bd=d;best=b;}}
           if(best&&bd<400)pr.tejado=best.kind==='teja'?'teja árabe':'azotea';}
-        const c=p.ref&&colBy.get(p.ref);if(c&&c.col.wall&&!c.off){pr.color_pared=hex(c.col.wall);pr.color_zocalo=hex(c.col.zoc);pr.color_carpinteria=hex(c.col.carp);}
+        const c=p.ref&&!sinPlantas(p)&&colBy.get(p.ref);if(c&&c.col.wall&&!c.off){pr.color_pared=hex(c.col.wall);pr.color_zocalo=hex(c.col.zoc);pr.color_carpinteria=hex(c.col.carp);}
         const holes=p.holes.map(hh=>{const r=hh.map(([la,lo])=>[r7(lo),r7(la)]);if(r[0][0]!==r[r.length-1][0]||r[0][1]!==r[r.length-1][1])r.push(r[0]);return r;});
         casas.push({type:'Feature',properties:pr,geometry:{type:'Polygon',coordinates:[ring,...holes]}});}}
     else casas.push(...og.edif);
@@ -4054,7 +4139,7 @@ QUÉ HAY EN ESTE ARCHIVO
 - curvas.geojson ....... curvas de nivel cada ${eq} m (la propiedad «maestra» marca una de cada cinco).
 ${foto?'- ortofoto.jpg ......... la foto aérea de la zona, georreferenciada con ortofoto.jgw y ortofoto.prj (EPSG:3857).\n':''}- calles.geojson ....... calles, carreteras y caminos de OpenStreetMap, con su nombre, tipo, superficie y la anchura con la que se dibujan en 3D:
                           ancho_calzada_m, ancho_entre_fachadas_m y ancho_acera_m (calculadas con las fachadas del Catastro).
-- casas.geojson ........ ${cat?'casas del Catastro con su referencia catastral, plantas, altura aproximada, tejado y, si se ha mirado su foto de fachada, los colores de pared, zócalo y carpintería.':'edificios de OpenStreetMap (esta zona no tiene casas del Catastro).'}
+- casas.geojson ........ ${cat?'casas del Catastro con su referencia catastral, plantas, altura aproximada, tejado y, si se ha mirado su foto de fachada, los colores de pared, zócalo y carpintería.\n                          Las partes sin plantas llevan «tipo»: porche (o cobertizo) y patio (sobre un sótano).':'edificios de OpenStreetMap (esta zona no tiene casas del Catastro).'}
 ${par?'- parcelas.geojson ..... parcelas del Catastro con su referencia catastral (la linde de cada solar).':''}
 - mapa.geojson ......... agua, playas, vegetación, cultivos y usos del suelo de OpenStreetMap.
 - lugares.geojson ...... nombres de pueblos, parajes, playas, cimas y miradores.
