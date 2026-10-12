@@ -2623,8 +2623,19 @@ function surfCM(t){const s=String(t.surface||'').toLowerCase();if(!s)return -1;
 function meshH(x,z){const fi=clamp((x+W.wM/2)/W.dx,0,W.FW-1.0001),fj=clamp((z+W.hM/2)/W.dy,0,W.FH-1.0001),i0=fi|0,j0=fj|0,fx=fi-i0,fy=fj-j0,k=j0*W.FW+i0,h=W.hg;
   const a=h[k],b=h[k+1],c=h[k+W.FW],d=h[k+W.FW+1];
   return (fx+fy<=1?a+(b-a)*fx+(c-a)*fy:d+(c-d)*(1-fx)+(b-d)*(1-fy))*S.exag;}
+// ¿Hay una parcela urbana del Catastro a menos de R de (x, z)? null sin parcelas. Las rústicas tienen otra forma de referencia
+function parcelasUrbanas(T){if(!T.parcelasCat)return null;const proj=makeProj(T),G=20,celdas=new Map(),ps=[];
+  for(const p of parcelasDe(T.parcelasCat)){if(!p.ref||!/^\d{7}[A-Z]{2}\d{4}[A-Z]$/.test(p.ref))continue;const r=p.ring.map(([la,lo])=>proj(la,lo));let x0=1e18,z0=1e18,x1=-1e18,z1=-1e18;
+    for(const [x,z] of r){x0=Math.min(x0,x);x1=Math.max(x1,x);z0=Math.min(z0,z);z1=Math.max(z1,z);}const k=ps.push({r,x0,z0,x1,z1})-1;
+    for(let i=Math.floor(x0/G);i<=Math.floor(x1/G);i++)for(let j=Math.floor(z0/G);j<=Math.floor(z1/G);j++){const c=i+','+j;let a=celdas.get(c);if(!a)celdas.set(c,a=[]);a.push(k);}}
+  if(!ps.length)return null;
+  const dSeg=(x,z,a,b)=>{const dx=b[0]-a[0],dz=b[1]-a[1],L=dx*dx+dz*dz;let t=L>0?((x-a[0])*dx+(z-a[1])*dz)/L:0;t=Math.max(0,Math.min(1,t));return Math.hypot(a[0]+dx*t-x,a[1]+dz*t-z);};
+  return (x,z,R)=>{const vistas=new Set();for(let i=Math.floor((x-R)/G);i<=Math.floor((x+R)/G);i++)for(let j=Math.floor((z-R)/G);j<=Math.floor((z+R)/G);j++)for(const k of celdas.get(i+','+j)||[]){
+      if(vistas.has(k))continue;vistas.add(k);const p=ps[k];if(x<p.x0-R||x>p.x1+R||z<p.z0-R||z>p.z1+R)continue;if(pip(x,z,p.r))return true;
+      for(let m=0;m<p.r.length;m++)if(dSeg(x,z,p.r[m],p.r[(m+1)%p.r.length])<R)return true;}
+    return false;};}
 function prepRoads(T){
-  const X=T.wM/2-0.5,Z=T.hM/2-0.5,polys=[];
+  const X=T.wM/2-0.5,Z=T.hM/2-0.5,polys=[],parcelaUrbana=parcelasUrbanas(T);
   // recorta una línea al terreno (Liang-Barsky por tramos)
   const clip=line=>{const out=[];let cur=[];
     for(let i=0;i<line.length-1;i++){const a=line[i],b=line[i+1],dx=b[0]-a[0],dz=b[1]-a[1];let t0=0,t1=1,ok=true;
@@ -2693,14 +2704,16 @@ function prepRoads(T){
   for(const P of R){const Sm=P.S,n=Sm.length,t=P.t;
     let a0=P.w0/2;const wt=parseFloat(String(t.width||'').replace(',','.')),lt=parseInt(t.lanes,10);
     if(isFinite(wt)&&wt>1&&wt<40&&P.cls>=0)a0=wt/2;else if(isFinite(lt)&&lt>0&&P.cls>=1)a0=Math.max(a0,lt*3.2/2);
-    const oneway=t.oneway==='yes'||t.oneway==='1'||t.junction==='roundabout'||/motorway$/.test(P.hw);
+    const oneway=t.oneway==='yes'||t.oneway==='1'||t.oneway==='true'||t.oneway==='-1'||(t.oneway==null&&(t.junction==='roundabout'||t.junction==='circular'||/motorway$/.test(P.hw)));
     let cm=surfCM(t);if(cm<0)cm=(P.cls===0||P.hw==='living_street')?1:P.cls>=1?0:P.cls===-1?3:-9;
     P.a0=a0;P.oneway=oneway;
     const eP=new Float32Array(n).fill(NaN),eM=new Float32Array(n).fill(NaN);let found=0;
     if((P.cls>=0||P.cls===-2)&&!P.bridge&&bldData.length){const Rr=P.cls>=0?Math.min(14,a0+7):10;
       for(let i=0;i<n;i++){const q=Sm[i];if(inBld(q.x,q.z))continue;const p=rayHit(q.x,q.z,q.nx,q.nz,Rr),m=rayHit(q.x,q.z,-q.nx,-q.nz,Rr);
         if(isFinite(p))eP[i]=p;if(isFinite(m))eM[i]=m;if(isFinite(p)||isFinite(m))found++;}}
-    const urban=P.cls>=-2&&n>0&&found/n>=0.3;P.urban=urban;
+    // de ciudad: casas a los lados en buena parte de la calle o, si no (avenidas anchas, casas con jardín delante, parques y solares),
+    // parcelas urbanas del Catastro a menos de 15 m de la calzada en la mitad de la calle o más (no en las rotondas: por dentro va la isleta)
+    const urban=P.cls>=-2&&n>0&&(found/n>=0.3||(P.cls>=1&&t.junction!=='roundabout'&&t.junction!=='circular'&&!/^(motorway|trunk)/.test(P.hw)&&parcelaUrbana&&Sm.filter(q=>parcelaUrbana(q.x,q.z,a0+15)).length/n>=0.5));P.urban=urban;
     if(P.cls<0){eP.fill(NaN);eM.fill(NaN);}
     if(cm===-9)cm=urban?5:3;     // senderos: baldosa en el pueblo, tierra en el campo
     const sideNom=urban?a0+1.5:a0;
@@ -4082,9 +4095,9 @@ async function zoneExport(opts={}){
     busy('Preparando el archivo: calles, casas y mapa…',0.4);await frame();
     const og=osmGeo(osm),st=W.rd?W.rd.stats:new Map(),R=W.rd?W.rd.roads:[];
     const tipoDe=new Map();for(const P of R){const d=P.cross?'paso de peatones':P.et===1?'calle con aceras':P.et===2?'carretera con arcén':P.cm===1?'calle de adoquín':P.cm===3?'camino de tierra':P.cm===4?'camino de grava':P.cm===5?'acera o sendero de baldosa':'calle sin aceras';for(const id of P.pid)if(!tipoDe.has(id))tipoDe.set(id,d);}
-    const calles=og.calles.map(({el,t,geom})=>{const s=st.get(el.id),n=s&&s.n,pr={osm_id:el.id,nombre:t.name||null,tipo:t.highway,superficie:t.surface||null,sentido_unico:t.oneway==='yes'||t.junction==='roundabout',carriles:t.lanes?+t.lanes:null,ancho_osm_m:t.width?parseFloat(t.width):null,
+    const calles=og.calles.map(({el,t,geom})=>{const s=st.get(el.id),n=s&&s.n,pr={osm_id:el.id,nombre:t.name||null,tipo:t.highway,superficie:t.surface||null,sentido_unico:t.oneway==='yes'||t.oneway==='1'||t.oneway==='true'||t.oneway==='-1'||(t.oneway==null&&(t.junction==='roundabout'||t.junction==='circular'||/^motorway(_link)?$/.test(t.highway))),carriles:t.lanes?+t.lanes:null,ancho_osm_m:t.width?parseFloat(t.width):null,
         dibujada_como:tipoDe.get(el.id)||'no se dibuja',ancho_calzada_m:n?+(2*s.a/n).toFixed(1):null,ancho_entre_fachadas_m:n&&s.u?+(2*s.h/n).toFixed(1):null,ancho_acera_m:n&&s.et===1?+(s.sw/n).toFixed(1):null};
-      for(const k in t)if(!['name','highway','surface','oneway','lanes','width'].includes(k))pr['osm:'+k]=t[k];return {type:'Feature',properties:pr,geometry:geom};});
+      for(const k in t)if(!['name','highway','surface','lanes','width'].includes(k))pr['osm:'+k]=t[k];return {type:'Feature',properties:pr,geometry:geom};});   // con osm:oneway tal cual («-1»: al revés del trazado)
     // colores sacados de las fotos de fachada
     const colAll=(await DB.all('colores'))||[],colBy=new Map();for(const c of colAll)if(c&&c.ref&&c.col&&c.col.v===COLV&&bldByRef.has(c.ref))colBy.set(c.ref,c);
     const hex=a=>a?'#'+a.map(v=>Math.round(clamp(v,0,255)).toString(16).padStart(2,'0')).join(''):null;

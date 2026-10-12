@@ -272,7 +272,55 @@ function completarAceras(p, ancho, acera, unSentido, carriles) {
   if (p.dibujada_como === 'calle con aceras') return { ancho, acera: ACERA_POR_TIPO[tipoBase(p.tipo)] || 1.5, unSentido, carriles };
   return { ancho, acera, unSentido, carriles };
 }
-function parsearCalles(geo) {
+// Sentido único según OpenStreetMap: «yes», «1» o «true»; «-1» es de sentido único al revés del trazado (se le da la vuelta);
+// las rotondas y las autopistas lo son aunque no lo digan. El Paseo solo guardaba «sí» o «no», así que el «oneway» se mira
+// también en sus datos de OpenStreetMap (sentidos: id de la calle → oneway). Devuelve { unico, alReves }
+function sentidoDeCalle(p, sentidos) {
+  const ow = String(p['osm:oneway'] ?? (sentidos && sentidos.get(p.osm_id)) ?? '').toLowerCase(), cruce = String(p['osm:junction'] || '');
+  if (ow === '-1' || ow === 'reverse') return { unico: true, alReves: true };
+  if (ow === 'yes' || ow === '1' || ow === 'true') return { unico: true, alReves: false };
+  if (ow === 'no' || ow === 'false' || ow === '0' || ow === 'reversible' || ow === 'alternating') return { unico: false, alReves: false };
+  return { unico: !!p.sentido_unico || cruce === 'roundabout' || cruce === 'circular' || p.tipo === 'motorway' || p.tipo === 'motorway_link', alReves: false };
+}
+// El oneway de cada calle en los datos de OpenStreetMap de la zona (datos/osm.json)
+function sentidosOSM(osm) {
+  const m = new Map();
+  for (const el of (osm && osm.elements) || []) if (el.type === 'way' && el.tags && el.tags.highway && el.tags.oneway != null) m.set(el.id, el.tags.oneway);
+  return m;
+}
+// Aceras en las calles de ciudad que el Paseo dejó sin ellas. El Paseo pone acera si a pocos metros del eje (unos 12) hay casas
+// en buena parte de la calle; en las avenidas anchas, en las calles con jardín delante de las casas o junto a parques y solares no
+// las encuentra, y la calle sale como «carretera con arcén». Aquí se mira también la parcela: si en la mitad de la calle o más hay
+// a los lados parcelas urbanas del Catastro (a 15 m de la calzada, aunque la casa esté retranqueada) o casas (a 25 m), es una calle
+// de ciudad y lleva acera. Ni las autovías, ni los enlaces, ni los túneles. Las rotondas, solo por fuera (t.soloLado): por dentro
+// está la isleta; también las que ya traían acera por los dos lados
+const TIPOS_ACERA_URBANA = new Set(['primary', 'secondary', 'tertiary', 'unclassified', 'residential']);
+const REF_URBANA = /^\d{7}[A-Z]{2}\d{4}[A-Z]$/;   // las de las parcelas rústicas son de otra forma (21900A00800005)
+function acerasUrbanas(tramos, parcelas, edif, rejilla, rotondas) {
+  const urb = (parcelas || []).filter(p => p.ref && REF_URBANA.test(p.ref)), rejP = construirRejilla(urb), nadie = new Set();
+  let n = 0, metros = 0;
+  for (const t of tramos) {
+    const cum = acumulados(t.pts), L = cum[cum.length - 1], k = Math.max(1, Math.round(L / 10)), h = t.ancho / 2;
+    if (t.rotonda) {   // el lado de fuera: el que no mira al centro de su rotonda
+      const e = enPolilinea(t.pts, cum, L / 2), r = rotondas && rotondas.find(o => Math.abs(Math.hypot(e.x - o.cx, e.z - o.cz) - o.r) < 10);
+      if (!r) continue;
+      t.soloLado = -e.tz * (e.x - r.cx) + e.tx * (e.z - r.cz) > 0 ? 1 : -1;
+    }
+    if (t.acera > 0 || !/con arcén/.test(t.dib) || !TIPOS_ACERA_URBANA.has(tipoBase(t.tipo)) || t.tunel || (/_link$/.test(t.tipo) && !t.rotonda)) continue;
+    let si = 0;
+    for (let i = 0; i <= k; i++) {
+      const e = enPolilinea(t.pts, cum, L * i / k);
+      if (casaCerca(urb, rejP, e.x, e.z, h + 15, nadie) || casaCerca(edif, rejilla, e.x, e.z, h + 25, nadie)) si++;
+    }
+    if (si / (k + 1) < 0.5) continue;
+    t.acera = ACERA_POR_TIPO[tipoBase(t.tipo)] || 1.5; t.dib = 'calle con aceras'; t.aceraUrbana = true;
+    n++; metros += L;
+  }
+  return { n, metros };
+}
+// ¿Tiene acera la calle t por su lado sg (1 o -1)? Las rotondas, solo por fuera
+const ladoConAcera = (t, sg) => t.acera > 0 && !/tierra|grava/.test(t.dib) && (!t.soloLado || t.soloLado === sg);
+function parsearCalles(geo, sentidos = null) {
   const tramos = [];
   for (const f of geo.features) {
     const g = f.geometry, p = f.properties || {};
@@ -282,7 +330,10 @@ function parsearCalles(geo) {
     let vel = parseInt(String(p['osm:maxspeed'] ?? ''), 10);
     if (!(vel > 0)) vel = VEL_TIPO[bt] || 30;
     const carrilesOSM = Number(p.carriles) > 0 ? Number(p.carriles) : 0;   // carriles reales de OpenStreetMap (0 si no se sabe)
-    const cal = completarAceras(p, anchoDatos, typeof p.ancho_acera_m === 'number' ? p.ancho_acera_m : 0, !!p.sentido_unico, carrilesOSM);
+    const sentido = sentidoDeCalle(p, sentidos);
+    const cal = completarAceras(p, anchoDatos, typeof p.ancho_acera_m === 'number' ? p.ancho_acera_m : 0, sentido.unico, carrilesOSM);
+    const pts = g.coordinates.map(c => proyectar(c[0], c[1]));
+    if (sentido.alReves) pts.reverse();   // de sentido único al revés de como está dibujada: el grafo va siempre de su inicio a su fin
     tramos.push({
       id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho: cal.ancho, velocidad: vel,
       acera: cal.acera,                                                          // ancho de cada acera (0 si no hay)
@@ -290,7 +341,8 @@ function parsearCalles(geo) {
       unSentido: cal.unSentido,
       carriles: cal.carriles,
       tunel: p['osm:tunnel'] || '',                                              // 'building_passage': pasa bajo un edificio
-      pts: g.coordinates.map(c => proyectar(c[0], c[1])),
+      rotonda: /^(roundabout|circular)$/.test(String(p['osm:junction'] || '')),
+      pts,
     });
   }
   return tramos;
@@ -2008,6 +2060,8 @@ function tramosCerca(G, x, z, R) {
   return G.tramos.filter(t => G.nodos[t.a].comp && Math.hypot(t.pts[0][0] - x, t.pts[0][1] - z) < R);
 }
 // Coche de tráfico sobre el tramo seg, en sentido fwd y a s metros de su inicio de sentido
+// En una calle de sentido único, siempre en su sentido (del inicio al fin del tramo); en las demás, en uno cualquiera
+const sentidoAlAzar = (G, seg, rng) => G.tramos[seg].unSentido || rng() < 0.5;
 function nuevoCocheTrafico(G, rng, seg, fwd, s) {
   const t = prepararTramo(G.tramos[seg]);
   return { seg, fwd, s, origen: fwd ? t.a : t.b, k: 0.75 + rng() * 0.25, color: rng(), carril: Math.floor(rng() * 3) };
@@ -2045,7 +2099,7 @@ function posicionTrafico(G, c) {
 // Peatón sobre una acera del tramo seg (lado -1 o 1): camina de un extremo al otro y da la vuelta
 function nuevoPeaton(G, rng, seg) {
   const t = prepararTramo(G.tramos[seg]);
-  return { seg, fwd: rng() < 0.5, s: rng() * t.len, lado: rng() < 0.5 ? -1 : 1, v: 1.0 + rng() * 0.5, color: rng() };
+  return { seg, fwd: rng() < 0.5, s: rng() * t.len, lado: t.soloLado || (rng() < 0.5 ? -1 : 1), v: 1.0 + rng() * 0.5, color: rng() };   // en las rotondas, por fuera
 }
 function avanzaPeaton(G, p, dt, vel = p.v) {
   const t = G.tramos[p.seg];
@@ -3411,7 +3465,6 @@ function esquinasCruces(tramos) {
     nodos.get(c).de.push([k, i]);
   }));
   const cortar = (k, sg, a, b) => { const c = k + '|' + sg; if (!cortes.has(c)) cortes.set(c, []); cortes.get(c).push([a, b]); };
-  const conAcera = t => t.acera > 0 && !/tierra|grava/.test(t.dib);
   for (const { p: O, de } of nodos.values()) {
     if (new Set(de.map(([k]) => k)).size < 2) continue;
     const brazos = [];
@@ -3422,7 +3475,7 @@ function esquinasCruces(tramos) {
         const libre = fwd ? L - s : s, e = enPolilinea(t.pts, cum, fwd ? s + Math.min(4, libre) : s - Math.min(4, libre));
         const dx = e.x - O[0], dz = e.z - O[1], l = Math.hypot(dx, dz);
         if (l < 0.05) continue;
-        brazos.push({ k, t, s, fwd, libre, d: [dx / l, dz / l], ang: Math.atan2(dz, dx), h: t.ancho / 2, acera: conAcera(t) });
+        brazos.push({ k, t, s, fwd, libre, d: [dx / l, dz / l], ang: Math.atan2(dz, dx), h: t.ancho / 2 });
       }
     }
     if (brazos.length < 2) continue;
@@ -3433,6 +3486,7 @@ function esquinasCruces(tramos) {
       let phi = B.ang - A.ang;
       if (phi <= 0) phi += 2 * Math.PI;
       const sA = A.fwd ? 1 : -1, sB = B.fwd ? -1 : 1;   // el lado de cada calle que da a la esquina
+      A.acera = ladoConAcera(A.t, sA); B.acera = ladoConAcera(B.t, sB);   // (una rotonda solo tiene acera por fuera)
       const nA = [-A.d[1], A.d[0]], nB = [B.d[1], -B.d[0]];
       const hasta = (b, l) => cortar(b.k, b === A ? sA : sB, b.fwd ? b.s : b.s - l, b.fwd ? b.s + l : b.s);
       const colorDe = t => (/adoqu/.test(t.dib) ? [0.52, 0.5, 0.47] : COLOR_CALZADA(t));
@@ -3569,6 +3623,7 @@ function mallaCarreteras(tramos, esq) {
       // ni donde empieza la esquina de un cruce; cada acera, con el ancho medido en cada punto
       const cum = acumulados(t.pts);
       for (const sg of [1, -1]) {
+        if (!ladoConAcera(t, sg)) continue;   // rotonda: por dentro, la isleta
         const trozos = restarTrozos(trozosLibres(t, cum, sg * (h + t.acera / 2), (x, z) => enOtra(x, z, k)), (esq && esq.cortes.get(k + '|' + sg)) || []);
         for (const [d0, d1] of trozos) {
           if (d1 - d0 < 0.5) continue;
@@ -5430,7 +5485,7 @@ async function cargarZona(archivo) {
     return JSON.parse(await f.async('string'));
   };
   const opcional = async (nombre, vacio) => zip.file(nombre) ? leer(nombre) : vacio;
-  const calles = await leer('calles.geojson');
+  const calles = await leer('calles.geojson'), osm = await opcional('datos/osm.json', { elements: [] });   // de OpenStreetMap: el sentido de las calles, piscinas, rotondas…
   // el centro y el nombre del lugar: de zona.json (zips del Paseo) o, si no está, del centro de las calles
   const meta = await opcional('zona.json', null);
   const g = meta && meta.geo, centro = g ? { lat: (g.n + g.s) / 2, lon: (g.e + g.w) / 2 } : centroDeCalles(calles);
@@ -5439,7 +5494,7 @@ async function cargarZona(archivo) {
   limpiarCarrera(); coche = null; zona = null;   // si había otra zona abierta
   $('estado').textContent = 'Procesando calles…';
   await new Promise(r => setTimeout(r, 0));
-  const tramos = parsearCalles(calles);
+  const tramos = parsearCalles(calles, sentidosOSM(osm));
   if (!tramos.length) throw new Error('la zona no trae calles por las que conducir (¿no respondió OpenStreetMap?): prepárala otra vez en el Paseo');
   const G = construirGrafo(tramos);
   // la foto aérea se carga antes que las casas: si hay que simularlas, dice dónde hay jardines y dónde campo
@@ -5480,8 +5535,8 @@ async function cargarZona(archivo) {
   if (hacenFaltaCasas(casas, edif, tramos)) {
     $('estado').textContent = 'No hay casas del Catastro: simulando casas junto a las calles…';
     await new Promise(r => setTimeout(r, 0));
-    const capas = parsearMapa(mapa), osm0 = await opcional('datos/osm.json', { elements: [] });
-    const aguas = construirAguas(capas, extraerOSM(osm0).piscinas);
+    const capas = parsearMapa(mapa);
+    const aguas = construirAguas(capas, extraerOSM(osm).piscinas);
     const nuevas = simularCasas(tramos, capas, aguas, construirRejilla(aguas), edif, rejilla, verdeDeFoto(foto), mulberry32(2024));
     simuladas = nuevas.length;
     edif = edif.concat(nuevas);
@@ -5509,8 +5564,8 @@ async function cargarZona(archivo) {
   zona.patios = sinPlantas.filter(p => p.tipo === 'patio');
   $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas, vallas de los chalets)…';
   await new Promise(r => setTimeout(r, 0));
-  const osm = await opcional('datos/osm.json', { elements: [] });
   zona.parcelas = parcelasGeo ? parsearParcelas(parcelasGeo) : [];
+  zona.acerasUrbanas = acerasUrbanas(tramos, zona.parcelas, edif, zona.rejilla, extraerOSM(osm).rotondas);   // las calles de ciudad que el Paseo dejó sin acera
   decidirTejados(edif, zona.parcelas);   // teja o azotea: por la parcela y, si ya se miró, por la foto de fachada
   const altura = await leerAlturas(zip);
   zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas, pixelesFoto(foto), altura);
@@ -5693,7 +5748,7 @@ function colocarCoche(c) {
   if (!candidatos.length) return;
   for (let k = 0; k < 20; k++) {
     const seg = candidatos[Math.floor(rngTrafico() * candidatos.length)];
-    const nuevo = nuevoCocheTrafico(zona.G, rngTrafico, seg, rngTrafico() < 0.5, rngTrafico() * zona.G.tramos[seg].len);
+    const nuevo = nuevoCocheTrafico(zona.G, rngTrafico, seg, sentidoAlAzar(zona.G, seg, rngTrafico), rngTrafico() * zona.G.tramos[seg].len);
     const p = posicionTrafico(zona.G, nuevo);
     if (Math.hypot(p.x - coche.x, p.z - coche.z) > 60) { reiniciarCocheTrafico(c, nuevo); return; }
   }
@@ -6321,7 +6376,7 @@ function colocarCiclista(c) {
   if (!candidatos.length) return;
   for (let k = 0; k < 15; k++) {
     const seg = candidatos[Math.floor(rngTrafico() * candidatos.length)];
-    const nuevo = nuevoCocheTrafico(zona.G, rngTrafico, seg, rngTrafico() < 0.5, rngTrafico() * zona.G.tramos[seg].len);
+    const nuevo = nuevoCocheTrafico(zona.G, rngTrafico, seg, sentidoAlAzar(zona.G, seg, rngTrafico), rngTrafico() * zona.G.tramos[seg].len);
     Object.assign(c, nuevo, { k: 0.85 + rngTrafico() * 0.35, caido: 0, ox: 0, oz: 0, svx: 0, svz: 0, fase: rngTrafico() * 6, factor: 1, rodar: 0 });
     const p = posicionCiclista(c);
     c.x = p.x; c.z = p.z; c.h = p.h;
@@ -7374,7 +7429,7 @@ function bordillos(c, x0, z0) {
     if (enAcera) { r.nx = esquina.nx; r.nz = esquina.nz; }
   } else if (r) {
     const t = r.t, mitad = t.ancho / 2, e = enPolilinea(t.pts, t.cum, r.s), lado = r.nx * -e.tz + r.nz * e.tx >= 0 ? 1 : -1;
-    enAcera = t.acera > 0 && !/tierra|grava/.test(t.dib) && r.d > mitad + 0.15 && r.d < mitad + anchoAcera(t, lado, r.s) + 0.4 && !zona.enCalzadaAjena(c.x, c.z, r.i);
+    enAcera = ladoConAcera(t, lado) && r.d > mitad + 0.15 && r.d < mitad + anchoAcera(t, lado, r.s) + 0.4 && !zona.enCalzadaAjena(c.x, c.z, r.i);
   }
   if (enAcera && !c.acera) {
     const fx = Math.sin(c.h), fz = Math.cos(c.h), Vx = fx * c.v + c.sx, Vz = fz * c.v + c.sz;
