@@ -334,11 +334,17 @@ function parsearCalles(geo, sentidos = null) {
     const cal = completarAceras(p, anchoDatos, typeof p.ancho_acera_m === 'number' ? p.ancho_acera_m : 0, sentido.unico, carrilesOSM);
     const pts = g.coordinates.map(c => proyectar(c[0], c[1]));
     if (sentido.alReves) pts.reverse();   // de sentido único al revés de como está dibujada: el grafo va siempre de su inicio a su fin
+    // por donde no se pasa: pasillos de aparcamiento, entradas de garaje y calles privadas, prohibidas o con permiso
+    const servicio = String(p['osm:service'] || ''), acceso = String(p['osm:access'] || ''), motor = String(p['osm:motor_vehicle'] ?? p['osm:motorcar'] ?? p['osm:vehicle'] ?? '');
+    const sinPaso = /^(parking_aisle|driveway|drive-through|emergency_access)$/.test(servicio) || /^(no|private|permit)$/.test(motor) ||
+      (/^(no|private|permit)$/.test(acceso) && !/^(yes|designated|destination|permissive)$/.test(motor));
     tramos.push({
       id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho: cal.ancho, velocidad: vel,
       acera: cal.acera,                                                          // ancho de cada acera (0 si no hay)
       dib: p.dibujada_como || '',                                                // calle con aceras, adoquín, camino de tierra…
       unSentido: cal.unSentido,
+      sentidoSupuesto: cal.unSentido && !sentido.unico,                          // estrecha y sin sentido en el mapa: el del trazado, a ojo
+      sinPaso,
       carriles: cal.carriles,
       tunel: p['osm:tunnel'] || '',                                              // 'building_passage': pasa bajo un edificio
       rotonda: /^(roundabout|circular)$/.test(String(p['osm:junction'] || '')),
@@ -348,34 +354,51 @@ function parsearCalles(geo, sentidos = null) {
   return tramos;
 }
 
-// --- grafo: nodos = extremos de tramos; aristas respetan sentido único ---
+// --- grafo: nodos = cruces y extremos de calle; aristas respetan sentido único ---
+// En OpenStreetMap casi todos los cruces son un vértice en mitad de una de las calles, y muchas rotondas son un anillo cerrado de
+// una sola pieza: para el grafo, cada calle se parte por los puntos que comparte con otra (o consigo misma), o el tráfico y las
+// rutas solo podrían girar en sus extremos. G.tramos son esas piezas, que heredan todo de su calle (padre: su índice en
+// G.calles; s0: metros desde su inicio); las calles enteras, las que se dibujan, quedan en G.calles. Las calles sin paso
+// (aparcamientos, garajes, privadas) no entran, y las de sentido supuesto cuestan el triple: las rutas las evitan si pueden
 function construirGrafo(tramos) {
-  const indice = new Map(), nodos = [];
+  const indice = new Map(), nodos = [], piezas = [], piezasDe = tramos.map(() => []);
+  const clave = p => p[0].toFixed(2) + '|' + p[1].toFixed(2);
   const nodoDe = p => {
-    const k = p[0].toFixed(2) + '|' + p[1].toFixed(2);
+    const k = clave(p);
     let i = indice.get(k);
     if (i === undefined) { i = nodos.length; indice.set(k, i); nodos.push({ x: p[0], z: p[1], adj: [], comp: false }); }
     return i;
   };
-  tramos.forEach((t, s) => {
-    t.a = nodoDe(t.pts[0]);
-    t.b = nodoDe(t.pts[t.pts.length - 1]);
-    let len = 0;
-    for (let k = 1; k < t.pts.length; k++) len += Math.hypot(t.pts[k][0] - t.pts[k - 1][0], t.pts[k][1] - t.pts[k - 1][1]);
-    t.len = len;
-    nodos[t.a].adj.push({ to: t.b, seg: s, fwd: true, len });
-    if (!t.unSentido) nodos[t.b].adj.push({ to: t.a, seg: s, fwd: false, len });
+  const usos = new Map();
+  for (const t of tramos) if (!t.sinPaso) for (const p of t.pts) { const k = clave(p); usos.set(k, (usos.get(k) || 0) + 1); }
+  tramos.forEach((t, padreIdx) => {
+    if (t.sinPaso) return;
+    const n = t.pts.length, cortes = [0];
+    for (let i = 1; i < n - 1; i++) if (usos.get(clave(t.pts[i])) > 1) cortes.push(i);
+    cortes.push(n - 1);
+    let s0 = 0;
+    for (let j = 0; j + 1 < cortes.length; j++) {
+      const pts = t.pts.slice(cortes[j], cortes[j + 1] + 1), ptsRev = pts.slice().reverse(), cum = acumulados(pts), len = cum[cum.length - 1];
+      if (len > 0.01) {
+        const s = piezas.length, q = Object.assign(Object.create(t), { pts, cum, ptsRev, cumRev: acumulados(ptsRev), len, padre: padreIdx, s0, a: nodoDe(pts[0]), b: nodoDe(pts[pts.length - 1]) });
+        piezas.push(q); piezasDe[padreIdx].push(s);
+        const coste = len * (t.sentidoSupuesto ? 3 : 1);
+        nodos[q.a].adj.push({ to: q.b, seg: s, fwd: true, len, coste });
+        if (!t.unSentido) nodos[q.b].adj.push({ to: q.a, seg: s, fwd: false, len, coste });
+      }
+      s0 += len;
+    }
   });
   // componente conectada más grande (ignorando sentido)
   const padre = nodos.map((_, i) => i);
   const raiz = i => { while (padre[i] !== i) { padre[i] = padre[padre[i]]; i = padre[i]; } return i; };
-  for (const t of tramos) { const ra = raiz(t.a), rb = raiz(t.b); padre[ra] = rb; }
+  for (const t of piezas) { const ra = raiz(t.a), rb = raiz(t.b); padre[ra] = rb; }
   const tam = new Map();
   for (let i = 0; i < nodos.length; i++) { const r = raiz(i); tam.set(r, (tam.get(r) || 0) + 1); }
   let mayor = -1, mejor = -1;
   for (const [r, n] of tam) if (n > mejor) { mejor = n; mayor = r; }
   for (let i = 0; i < nodos.length; i++) nodos[i].comp = raiz(i) === mayor;
-  return { nodos, tramos };
+  return { nodos, tramos: piezas, calles: tramos, piezasDe };
 }
 
 // --- Dijkstra con montículo binario ---
@@ -405,7 +428,7 @@ function dijkstra(G, origen, destino) {
     if (d > dist[u]) continue;
     if (u === destino) break;
     for (const e of G.nodos[u].adj) {
-      const nd = d + e.len;
+      const nd = d + (e.coste ?? e.len);   // coste: los metros, o el triple por una calle de sentido supuesto
       if (nd < dist[e.to]) {
         dist[e.to] = nd; prev[e.to] = u; prevArista[e.to] = e;
         heap.push([nd, e.to]); heapArriba(heap, heap.length - 1);
@@ -416,7 +439,7 @@ function dijkstra(G, origen, destino) {
   const camino = [];
   for (let v = destino; v !== origen; v = prev[v]) camino.push(prevArista[v]);
   camino.reverse();
-  return { camino, longitud: dist[destino] };
+  return { camino, longitud: camino.reduce((a, e) => a + e.len, 0), coste: dist[destino] };
 }
 
 function polilinea(G, camino) {
@@ -2050,9 +2073,10 @@ function calcularCaja(tramos, edif) {
   return [x0 - 60, z0 - 60, x1 + 60, z1 + 60];
 }
 // --- tráfico, peatones y flechas de la ruta: se mueven por el grafo de calles y por las aceras ---
-// Cada tramo guarda su trazado al revés y las distancias acumuladas (se calculan una vez)
+// Cada tramo guarda su trazado al revés, las distancias acumuladas y su largo (se calculan una vez; las piezas del grafo ya los traen)
 function prepararTramo(t) {
   if (!t.cum) { t.cum = acumulados(t.pts); t.ptsRev = t.pts.slice().reverse(); t.cumRev = acumulados(t.ptsRev); }
+  if (t.len === undefined) t.len = t.cum[t.cum.length - 1];
   return t;
 }
 // Tramos del grupo principal de calles que empiezan a menos de R metros de (x, z)
@@ -2066,11 +2090,12 @@ function nuevoCocheTrafico(G, rng, seg, fwd, s) {
   const t = prepararTramo(G.tramos[seg]);
   return { seg, fwd, s, origen: fwd ? t.a : t.b, k: 0.75 + rng() * 0.25, color: rng(), carril: Math.floor(rng() * 3) };
 }
-// Siguiente tramo al llegar a un nodo: uno cualquiera, sin volver por donde se venía (si no hay otro, se da la vuelta)
+// Siguiente tramo al llegar a un nodo: uno cualquiera, sin volver por donde se venía (si no hay otro, se da la vuelta) y, si
+// se puede, sin meterse en una calle estrecha de sentido supuesto (el mapa no lo dice: podría ir al revés que en la realidad)
 function siguienteArista(G, nodo, desde, rng) {
   const adj = G.nodos[nodo].adj;
-  const opciones = adj.filter(e => e.to !== desde && G.nodos[e.to].comp);
-  const lista = opciones.length ? opciones : adj;
+  const opciones = adj.filter(e => e.to !== desde && G.nodos[e.to].comp), seguras = opciones.filter(e => !G.tramos[e.seg].sentidoSupuesto);
+  const lista = seguras.length ? seguras : opciones.length ? opciones : adj;
   return lista.length ? lista[Math.floor(rng() * lista.length)] : null;
 }
 // Avanza el coche dt segundos; false si se ha quedado en un callejón sin salida (hay que reciclarlo)
@@ -2096,19 +2121,20 @@ function posicionTrafico(G, c) {
   const carril = desplazamientoCarril(t, c.carril || 0, c.fwd);   // por su carril (los de la calle real)
   return { x: e.x - e.tz * carril, z: e.z + e.tx * carril, h: Math.atan2(e.tx, e.tz) };
 }
-// Peatón sobre una acera del tramo seg (lado -1 o 1): camina de un extremo al otro y da la vuelta
-function nuevoPeaton(G, rng, seg) {
-  const t = prepararTramo(G.tramos[seg]);
+// Peatón sobre una acera de la calle seg (lado -1 o 1): camina de un extremo al otro y da la vuelta. Van por las calles enteras
+// (zona.tramos), no por las piezas del grafo
+function nuevoPeaton(tramos, rng, seg) {
+  const t = prepararTramo(tramos[seg]);
   return { seg, fwd: rng() < 0.5, s: rng() * t.len, lado: t.soloLado || (rng() < 0.5 ? -1 : 1), v: 1.0 + rng() * 0.5, color: rng() };   // en las rotondas, por fuera
 }
-function avanzaPeaton(G, p, dt, vel = p.v) {
-  const t = G.tramos[p.seg];
+function avanzaPeaton(tramos, p, dt, vel = p.v) {
+  const t = prepararTramo(tramos[p.seg]);
   p.s += vel * dt;
   if (p.s >= t.len) { p.s -= t.len; p.fwd = !p.fwd; }
 }
 // Posición y rumbo del peatón, en el centro de su acera
-function posicionPeaton(G, p) {
-  const t = prepararTramo(G.tramos[p.seg]);
+function posicionPeaton(tramos, p) {
+  const t = prepararTramo(tramos[p.seg]);
   const e = enPolilinea(p.fwd ? t.pts : t.ptsRev, p.fwd ? t.cum : t.cumRev, p.s);
   const off = p.lado * (t.ancho / 2 + t.acera / 2);
   return { x: e.x - e.tz * off, z: e.z + e.tx * off, h: Math.atan2(e.tx, e.tz) };
@@ -2402,13 +2428,15 @@ function construirRejillaSegmentos(tramos) {
   });
   return celdas;
 }
-// Calle más cercana a (x, z) a menos de R metros: { i, t, d, nx, nz } (n: del eje de la calle hacia el punto); null si no hay
-function calleMasCercana(celdas, tramos, x, z, R) {
+// Calle más cercana a (x, z) a menos de R metros: { i, t, d, nx, nz } (n: del eje de la calle hacia el punto); null si no hay.
+// vale(i): opcional, qué calles cuentan
+function calleMasCercana(celdas, tramos, x, z, R, vale = null) {
   let md = R * R, mi = -1, mk = -1;
   for (let cx = Math.floor((x - R) / TAM_CELDA); cx <= Math.floor((x + R) / TAM_CELDA); cx++)
     for (let cz = Math.floor((z - R) / TAM_CELDA); cz <= Math.floor((z + R) / TAM_CELDA); cz++) {
       const arr = celdas.get(cx + ',' + cz);
       if (arr) for (let j = 0; j < arr.length; j += 2) {
+        if (vale && !vale(arr[j])) continue;
         const p = tramos[arr[j]].pts, k = arr[j + 1];
         const d = distSeg2(x, z, p[k][0], p[k][1], p[k + 1][0], p[k + 1][1]);
         if (d < md) { md = d; mi = arr[j]; mk = k; }
@@ -2423,23 +2451,26 @@ function calleMasCercana(celdas, tramos, x, z, R) {
   return { i: mi, t, d, nx, nz, s };
 }
 // --- rutas desde donde esté el coche: la vuelta al camino cuando se sale de la ruta, y los destinos de la exploración ---
-// Camino más corto desde (x, z), mirando hacia h, hasta el nodo destino: sigue la calle en la que está el coche hasta uno de sus
-// extremos (dar la vuelta cuesta 40 m; contra dirección prohibida no) y de ahí por el grafo. { pts, longitud } o null
+// Camino más corto desde (x, z), mirando hacia h, hasta el nodo destino: sigue la pieza de calle en la que está el coche hasta uno
+// de sus extremos (dar la vuelta cuesta 40 m; contra dirección prohibida no) y de ahí por el grafo. celdas: rejilla de las calles
+// enteras (G.calles). { pts, longitud } o null
 function rutaDesde(G, celdas, x, z, h, destino) {
-  const r = calleMasCercana(celdas, G.tramos, x, z, 60);
-  if (!r) return null;
-  const t = prepararTramo(r.t), e = enPolilinea(t.pts, t.cum, r.s);
+  const c = calleMasCercana(celdas, G.calles, x, z, 60, i => G.piezasDe[i].length > 0);
+  if (!c) return null;
+  let j = G.piezasDe[c.i][0];
+  for (const k of G.piezasDe[c.i]) if (G.tramos[k].s0 <= c.s) j = k;
+  const t = G.tramos[j], s = Math.min(t.len, Math.max(0, c.s - t.s0)), e = enPolilinea(t.pts, t.cum, s);
   const haciaB = e.tx * Math.sin(h) + e.tz * Math.cos(h) >= 0;
   let mejor = null;
-  for (const [nodo, dTramo, alB] of [[t.b, t.len - r.s, true], [t.a, r.s, false]]) {
+  for (const [nodo, dTramo, alB] of [[t.b, t.len - s, true], [t.a, s, false]]) {
     if ((!alB && t.unSentido) || !G.nodos[nodo].comp) continue;
-    const res = nodo === destino ? { camino: [], longitud: 0 } : dijkstra(G, nodo, destino);
+    const res = nodo === destino ? { camino: [], coste: 0 } : dijkstra(G, nodo, destino);
     if (!res) continue;
-    const total = dTramo + (alB === haciaB ? 0 : 40) + res.longitud;
+    const total = dTramo + (alB === haciaB ? 0 : 40) + res.coste;
     if (!mejor || total < mejor.total) mejor = { total, alB, res };
   }
   if (!mejor) return null;
-  const tramo = mejor.alB ? subPolilinea(t.pts, t.cum, r.s, t.len) : subPolilinea(t.ptsRev, t.cumRev, t.len - r.s, t.len);
+  const tramo = mejor.alB ? subPolilinea(t.pts, t.cum, s, t.len) : subPolilinea(t.ptsRev, t.cumRev, t.len - s, t.len);
   const pts = tramo.concat(polilinea(G, mejor.res.camino).slice(1));
   return { pts, longitud: mejor.total };
 }
@@ -2450,7 +2481,7 @@ function nombreNodo(G, i) {
   return '';
 }
 // Exploración: siguiente destino a 350–900 m en línea recta, lejos de los ya visitados y por calles poco recorridas.
-// usados: tramos ya recorridos; visitados: [[x, z], ...]. { nodo, camino, longitud } o null
+// usados: calles ya recorridas (índices de G.calles); visitados: [[x, z], ...]. { nodo, camino, longitud } o null
 function elegirDestino(G, rng, desde, usados, visitados) {
   const S = G.nodos[desde];
   for (const estricto of [true, false]) {
@@ -2465,7 +2496,7 @@ function elegirDestino(G, rng, desde, usados, visitados) {
       if (!r || !r.camino.length || r.longitud > d * 2.4) continue;
       probados++;
       let repetido = 0;
-      for (const e of r.camino) if (usados.has(e.seg)) repetido += G.tramos[e.seg].len;
+      for (const e of r.camino) if (usados.has(G.tramos[e.seg].padre)) repetido += G.tramos[e.seg].len;
       const nota = repetido / r.longitud * 3 + rng() * 0.3;
       if (!mejor || nota < mejor.nota) mejor = { nodo: i, camino: r.camino, longitud: r.longitud, nota };
     }
@@ -5742,6 +5773,12 @@ function segmentosCerca(R, cumple) {
   });
   return out;
 }
+// Calles enteras (por las que van los peatones) que empiezan a menos de R metros del coche y cumplen la condición
+function callesCerca(R, cumple) {
+  const out = [];
+  zona.tramos.forEach((t, i) => { if (Math.hypot(t.pts[0][0] - coche.x, t.pts[0][1] - coche.z) < R && cumple(t)) out.push(i); });
+  return out;
+}
 // Un coche de tráfico nuevo en una calle cercana, a más de 60 m del jugador
 function colocarCoche(c) {
   const candidatos = segmentosCerca(RADIO_TRAFICO, t => t.ancho >= 5);
@@ -5764,9 +5801,9 @@ function reiniciarCocheTrafico(c, nuevo) {
 // Tipos de peatón: paseando, corriendo, paseando al perro o cruzando la calle por un paso de cebra
 function colocarPeaton(p) {
   if (p.tipo === 'cruza' && colocarCruzante(p)) return;
-  const candidatos = segmentosCerca(260, t => t.acera > 0 && t.ancho >= 4);
+  const candidatos = callesCerca(260, t => t.acera > 0 && t.ancho >= 4);
   if (!candidatos.length) return;
-  Object.assign(p, nuevoPeaton(zona.G, rngTrafico, candidatos[Math.floor(rngTrafico() * candidatos.length)]), { ex: 0, ez: 0, evx: 0, evz: 0, susto: 0, mira: null, paso: null });
+  Object.assign(p, nuevoPeaton(zona.tramos, rngTrafico, candidatos[Math.floor(rngTrafico() * candidatos.length)]), { ex: 0, ez: 0, evx: 0, evz: 0, susto: 0, mira: null, paso: null });
   reiniciarEstadoPeaton(p);
   if (p.tipo === 'corre') p.v = 2.6 + rngTrafico() * 0.8;
   if (p.perro) p.perro.listo = false;
@@ -6144,7 +6181,7 @@ function avisoPeaton(texto) {
 function claxonarPeatones() {
   for (const p of peatones) {
     if (p.ira === undefined) continue;
-    const pos = posicionPeaton(zona.G, p);
+    const pos = posicionPeaton(zona.tramos, p);
     if (Math.hypot(pos.x - coche.x, pos.z - coche.z) < 10) subeIra(p, p.pers === 'agresivo' ? 25 : p.edad === 'adolescente' ? 20 : p.edad === 'anciano' ? 10 : 15);
   }
 }
@@ -6235,7 +6272,7 @@ function actualizarPeatones(dt) {
     if (p.mira) { p.mira.t -= dt; if (p.mira.t <= 0) p.mira = null; }
     // su carácter decide la velocidad y si mira al coche (los que cruzan siguen su propio movimiento)
     const cruza = p.tipo === 'cruza' && p.paso;
-    const pre = cruza ? posicionCruzante(p) : posicionPeaton(zona.G, p);
+    const pre = cruza ? posicionCruzante(p) : posicionPeaton(zona.tramos, p);
     const { vel, mirar } = comportamientoPeaton(p, pre, Math.hypot(pre.x - coche.x, pre.z - coche.z), dt);
     p.mirar = mirar && !cruza;
     let pos;
@@ -6248,11 +6285,11 @@ function actualizarPeatones(dt) {
       }
       pos = posicionCruzante(p);
       if (p.estado === 'espera') pos.h = Math.atan2(p.q * p.paso.tz, -p.q * p.paso.tx);   // en el bordillo, mirando a la calle
-      if (Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = p.paso ? posicionCruzante(p) : posicionPeaton(zona.G, p); }   // sin paso libre cerca, pasea
+      if (Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = p.paso ? posicionCruzante(p) : posicionPeaton(zona.tramos, p); }   // sin paso libre cerca, pasea
     } else {
-      if (!(p.susto > 0) && !p.mira) avanzaPeaton(zona.G, p, dt, vel);
-      pos = posicionPeaton(zona.G, p);
-      if (zona.enCalzadaAjena(pos.x, pos.z, p.seg) || Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = p.tipo === 'cruza' && p.paso ? posicionCruzante(p) : posicionPeaton(zona.G, p); }   // si su acera se corta en un cruce, busca otra
+      if (!(p.susto > 0) && !p.mira) avanzaPeaton(zona.tramos, p, dt, vel);
+      pos = posicionPeaton(zona.tramos, p);
+      if (zona.enCalzadaAjena(pos.x, pos.z, p.seg) || Math.hypot(pos.x - coche.x, pos.z - coche.z) > 300) { colocarPeaton(p); pos = p.tipo === 'cruza' && p.paso ? posicionCruzante(p) : posicionPeaton(zona.tramos, p); }   // si su acera se corta en un cruce, busca otra
     }
     // si el coche se le echa encima, se aparta de un salto hacia el lado contrario; luego vuelve despacio a su sitio
     const dx = pos.x + p.ex - coche.x, dz = pos.z + p.ez - coche.z;
@@ -6339,7 +6376,7 @@ function actualizarPerros(dt, ahora) {
   const B = new THREE.Matrix4(), L = new THREE.Matrix4(), R = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), esc = new THREE.Vector3();
   const correa = M.correas.geometry.attributes.position.array;
   M.perros.forEach((p, i) => {
-    const d = p.perro, t = prepararTramo(zona.G.tramos[p.seg]);
+    const d = p.perro, t = prepararTramo(zona.tramos[p.seg]);
     // va 1,8 m por delante del dueño, un poco hacia la calle
     const s = Math.min(t.len, p.s + 1.8), e = enPolilinea(p.fwd ? t.pts : t.ptsRev, p.fwd ? t.cum : t.cumRev, s);
     const off = p.lado * (t.ancho / 2 + t.acera / 2 - 0.45);
@@ -7200,7 +7237,7 @@ function siguienteDestino(rng = Math.random) {
   if (carrera.destino) { scene.remove(carrera.destino.baliza); carrera.destino = null; }
   if (!D) { mostrarAviso('No quedan destinos nuevos: ¡has visto toda la zona!', 3); return; }
   const n = zona.G.nodos[D.nodo], nombre = nombreNodo(zona.G, D.nodo) || 'un cruce sin nombre';
-  for (const e of D.camino) carrera.usados.add(e.seg);
+  for (const e of D.camino) carrera.usados.add(zona.G.tramos[e.seg].padre);
   carrera.visitados.push([n.x, n.z]);
   const baliza = crearBaliza(0x3fd0ff);
   baliza.position.set(n.x, 0, n.z);
