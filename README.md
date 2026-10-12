@@ -159,7 +159,7 @@ En Huelva son 135 porches (78 cubiertos, con 1.035 pilares) y 1.810 patios.
 
 **Solería**: los patios llevan baldosas: los del Catastro, los de dentro de las casas, el suelo de los porches y, con parcelas y foto aérea, lo que queda sin construir de las parcelas con casa de hasta 2.000 m² y con al menos un 40 % construido (los patios de las casas y de los bloques; los jardines de los chalets, no). Cada patio, su solería, alineada con su lado más largo: barro, terrazo, losa clara, mármol blanco o hidráulica en damero. La foto aérea, que es borrosa, solo le da luces y sombras, y donde la foto es verde (césped, árboles) no se enlosa: se ve el suelo con su hierba.
 
-El Catastro numera las partes de cada respuesta a su manera (la «part4» de un trozo no es la de otro), así que al juntar los trozos las partes se reconocen ahora por su forma y no por su número. En la zona incluida había 472 casas repetidas (la misma pieza con dos números) que se dibujaban dos veces; ya no están.
+El Catastro numera las partes de cada respuesta a su manera (la «part4» de un trozo no es la de otro), así que al juntar los trozos las partes se reconocen ahora por su forma y no por su número. En la zona incluida había 472 casas repetidas (la misma pieza con dos números) que se dibujaban dos veces; ya no están, y en las zonas preparadas antes el juego descarta las repetidas al cargarlas.
 
 ## Casas que cortan calles
 

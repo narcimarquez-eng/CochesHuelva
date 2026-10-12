@@ -464,7 +464,7 @@ function colorValido(c) {
   return typeof c === 'string' && /^#?[0-9a-f]{6}$/i.test(c) ? (c[0] === '#' ? c : '#' + c) : null;
 }
 function parsearCasas(geo) {
-  const edif = [];
+  const edif = [], vistas = new Set();
   for (const f of geo.features || []) {
     const g = f.geometry;
     if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) continue;   // los edificios de OpenStreetMap pueden venir en varias piezas
@@ -473,6 +473,10 @@ function parsearCasas(geo) {
     let h = Number(p.altura_aprox_m);
     if (!(h > 0)) h = (Number(p.plantas) || 2) * 3;
     for (const poli of g.type === 'Polygon' ? [g.coordinates] : g.coordinates) {
+      // la misma pieza dos veces (las zonas preparadas antes juntaban las partes del Catastro por su número, que cambia de un trozo a otro)
+      const firma = poli[0].length + ':' + poli[0][0];
+      if (p.fuente === 'Catastro' && vistas.has(firma)) continue;
+      vistas.add(firma);
       const pts = poli[0].map(c => proyectar(c[0], c[1]));
       if (pts.length > 1) {
         const a = pts[0], b = pts[pts.length - 1];
@@ -570,7 +574,7 @@ function prepararPorches(lista, edif, rejilla, tramos) {
   });
   return out;
 }
-// Alturas del tejado del porche (se miran al hacer la malla: la casa puede cambiar de teja a azotea con la foto aérea).
+// Alturas del tejado del porche (se miran al hacer la malla: la casa puede pasar de teja a azotea al llegar su foto de fachada).
 // Pegado a una casa de teja: a un agua, de 2,45 m por fuera a lo que dé su pendiente junto a la pared (sin pasar del alero);
 // pegado a una de azotea: losa plana a 2,9 m. Suelto: losa a 2,7 m, y las marquesinas grandes a 4,2 m.
 // Devuelve { teja, y(x, z) (cara de arriba), k (pendiente), sx, sz (hacia donde baja), ux, uz (a lo largo de la pared) }
@@ -8238,11 +8242,11 @@ async function descargarLoQueFalta() {
     const resumen = [];
     if (nuevos.length - nPorches - nPatios) resumen.push(`${nuevos.length - nPorches - nPatios} partes de casa nuevas`);
     if (f.porches && cat.porches) resumen.push(`${nPorches.toLocaleString('es')} porches y ${nPatios.toLocaleString('es')} patios`);
-    if (par) resumen.push(`${nParcelas.toLocaleString('es')} parcelas`);
+    if (par && f.parcelas) resumen.push(`${nParcelas.toLocaleString('es')} parcelas`);
     let txt = resumen.length ? 'Descargado: ' + resumen.join(' y ') + '.' : '';
     if (viejo) txt += ' catastro.php es el antiguo y no da parcelas: sube el nuevo (está en la carpeta servidor/ del repositorio) para tenerlas.';
     if (quedan && quedan.trozos.length) txt += ` Siguen faltando ${quedan.trozos.length} trozos (${notas[0] || 'el Catastro no ha contestado'}).`;
-    else if (quedan && quedan.porches && f.porches) txt += ` Faltan los porches y patios de ${(cat.sinPorches || []).length || 'algunos'} trozos (${notas[0] || 'el Catastro no ha contestado'}); se pueden volver a pedir.`;
+    else if (quedan && quedan.porches && f.porches) { const n = (cat.sinPorches || []).length; txt += ` Faltan los porches y patios de ${n === 1 ? 'un trozo' : n ? n + ' trozos' : 'algunos trozos'} (${notas[0] || 'el Catastro no ha contestado'}); se pueden volver a pedir.`; }
     avisar(($('estado').textContent + ' ' + txt).trim());
   } catch (err) {
     avisar('No he podido descargar lo que falta: ' + (err.message || err) + '. Comprueba la conexión y vuelve a probar.');
