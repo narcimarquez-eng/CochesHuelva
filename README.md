@@ -150,6 +150,12 @@ Antes de usarlos se probaron en otras 101 casas que no se habían usado para ele
 - **Mientras conduces**, cuando llega la foto de fachada de una casa (las que se piden para el color), también se miran esos rasgos del tejado. Si con ellos cambia de teja a azotea o al revés, su bloque de casas se rehace con el tejado nuevo cuando no se nota: con la casa fuera de la vista o pequeña, a lo lejos, sin fundidos de color a medias en el bloque y un bloque por segundo como mucho (rehacer uno de 190 casas lleva unos 40 ms). Los rasgos se guardan con los colores, así que la próxima vez ya sale bien. Por eso el análisis de la foto pasa a la versión 7: las casas con colores de la versión 6 se vuelven a pedir al pasar por ellas.
 - El Paseo decide igual, y su análisis de la foto guarda también los rasgos del tejado (van en `zona.json` con los colores).
 
+### Plano y foto al tocar una casa
+
+En el menú, la opción **Casas** (desactivada al principio) hace que, durante la partida, al tocar una casa (o hacer clic en ella) se abra su ficha: la **foto de la fachada** del Catastro y el **plano** de la casa y de su parcela. El plano se dibuja en metros, con el norte arriba: la parcela del Catastro a trazos, la casa en amarillo, las casas de alrededor y las calles con su anchura, además de la escala y la superficie de la planta y de la parcela. Como el plano sale de los contornos que ya trae la zona, funciona aunque el Catastro no responda; solo la foto necesita la red.
+
+Mientras la ficha está abierta, la partida se para (el coche no se mueve y el tiempo de carrera no cuenta) y sigue al cerrarla con ×, con Esc o con B o A del mando. Las casas que no vienen del Catastro (de OpenStreetMap o inventadas) tienen plano, pero no foto. El plano no es el oficial que da la Sede del Catastro (de allí no se puede sacar desde el juego): es el dibujo de sus contornos.
+
 ## Porches y patios
 
 El Catastro da cada casa en **partes**, cada una con sus plantas sobre y bajo rasante. Las que no tienen ninguna planta sobre rasante el Paseo y el juego las tiraban; ahora se guardan (en `casas.geojson`, con `plantas: 0` y `tipo`) y se dibujan:

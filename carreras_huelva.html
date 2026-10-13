@@ -106,6 +106,18 @@
   @media (max-width:640px){#fueraRuta{bottom:auto;top:40%;max-width:80vw}}
   body.fuera #fueraRuta{display:block}
   #podioPanel{display:none;position:fixed;right:calc(12px + env(safe-area-inset-right,0px));top:12px;bottom:12px;width:min(340px,46vw);flex-direction:column;gap:8px;padding:12px 14px;color:#fff;z-index:7;overflow:auto;box-sizing:border-box}
+  #fichaCasa{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(780px,94vw);max-height:92vh;overflow:auto;box-sizing:border-box;padding:14px 16px;border-radius:14px;background:rgba(10,20,30,.94);color:#fff;z-index:9;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  #fichaCasa .x{position:absolute;right:8px;top:6px;background:none;color:#fff;font-size:26px;line-height:1;padding:4px 10px}
+  #fichaCasa .eyebrow{margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.7}
+  #fichaCasa h2{margin:2px 0 10px;font-size:19px;padding-right:36px}
+  #fichaCasa .cuerpo{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  #fichaCasa .plano{background:#f4f1ea;border-radius:10px;padding:6px;min-height:120px}
+  #fichaCasa .plano svg{display:block;width:100%;height:auto}
+  #fichaCasa .foto{background:#1b2630;border-radius:10px;min-height:150px;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  #fichaCasa .foto img{width:100%;height:auto;display:block}
+  #fichaCasa .datos{font-size:14px;margin:10px 0 4px}
+  #fichaCasa .nota{font-size:12px;opacity:.65;margin:4px 0 0}
+  @media (max-width:640px){#fichaCasa .cuerpo{grid-template-columns:1fr}}
   #podioPanel h2{margin:0;font-size:20px}
   #podioPanel table{border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
   #podioPanel td{padding:4px 6px;border-bottom:1px solid rgba(255,255,255,.12);white-space:nowrap}
@@ -183,6 +195,18 @@
   </div>
   </div>
 </div>
+<aside id="fichaCasa" hidden aria-live="polite" aria-label="Ficha de la casa">
+  <button class="x" id="fichaX" type="button" aria-label="Cerrar la ficha">×</button>
+  <p class="eyebrow" id="fichaK"></p>
+  <h2 id="fichaT"></h2>
+  <div class="cuerpo">
+    <div class="plano" id="fichaPlano"></div>
+    <div class="foto"><img id="fichaImg" alt="Foto de la fachada en el Catastro" hidden></div>
+  </div>
+  <p class="datos" id="fichaDatos"></p>
+  <p class="nota" id="fichaFotoN"></p>
+  <p class="nota">La partida se para mientras la miras. Para cerrar: ×, Esc, B o A.</p>
+</aside>
 <div id="pantalla">
   <h1 id="titulo">Carreras por Huelva</h1>
   <p class="intro">Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
@@ -195,6 +219,9 @@
   </div></div>
   <div class="opcion"><span>Hora</span><div class="selector" id="horas">
     <button data-hora="dia">☀️ Día</button><button data-hora="tarde">🌇 Atardecer</button><button data-hora="noche">🌙 Noche</button>
+  </div></div>
+  <div class="opcion"><span>Casas</span><div class="selector" id="fichas">
+    <button data-ficha="no">Sin ficha</button><button data-ficha="si">🏠 Al tocar una casa, su plano y su foto del Catastro</button>
   </div></div>
   <div id="coches"></div>
   <div id="botonesMenu"><button id="btnSeguir" style="display:none">Continuar</button><button id="btnNueva" disabled>Nueva partida</button></div>
@@ -5766,10 +5793,13 @@ function leerMando(ahora) {
     mando.freno = corte(Math.max(valor(6), valor(2)));
     const stick = eje(0), cruceta = (pulsado(15) ? 1 : 0) - (pulsado(14) ? 1 : 0);
     mando.giro = cruceta || Math.sign(stick) * Math.pow(Math.abs(stick), 1.5);   // más fino cerca del centro
-    if (nuevo(1) || nuevo(5)) tocarClaxon();
-    if (nuevo(3)) cambiarCamara();
-    if (nuevo(4)) pulsarSentido();
-    if ((nuevo(9) || nuevo(8)) && estado !== 'menu') pausar(ahora, 'Pausa');
+    if (FICHA.abierta) { if (nuevo(0) || nuevo(1)) cerrarFichaCasa(); }
+    else {
+      if (nuevo(1) || nuevo(5)) tocarClaxon();
+      if (nuevo(3)) cambiarCamara();
+      if (nuevo(4)) pulsarSentido();
+      if ((nuevo(9) || nuevo(8)) && estado !== 'menu') pausar(ahora, 'Pausa');
+    }
   }
   mando.antes = gp.buttons.map(b => b.pressed);
 }
@@ -7363,6 +7393,118 @@ function pintarSelector(id, attr, actual, alElegir) {
 }
 pintarSelector('modos', 'modo', modoJuego, m => { modoJuego = m; try { localStorage.setItem('cochesHuelva.modo', m); } catch (err) { /* nada */ } });
 pintarSelector('horas', 'hora', horaElegida, h => { aplicarHora(h); try { localStorage.setItem('cochesHuelva.hora', h); } catch (err) { /* nada */ } });
+// --- ficha de la casa: con la opción «Casas» del menú, al tocar una casa se abren su plano y su foto de fachada del Catastro.
+// La partida se para mientras se mira; al cerrar sigue, con la pausa descontada del tiempo ---
+const FICHA = { activa: false, abierta: false, casa: null, tPausa: 0, fotos: new Map(), pedido: 0 };
+try { FICHA.activa = localStorage.getItem('cochesHuelva.fichaCasas') === 'si'; } catch (err) { /* sin almacenamiento: sin ficha */ }
+pintarSelector('fichas', 'ficha', FICHA.activa ? 'si' : 'no', v => {
+  FICHA.activa = v === 'si';
+  if (!FICHA.activa) cerrarFichaCasa();
+  try { localStorage.setItem('cochesHuelva.fichaCasas', v); } catch (err) { /* nada */ }
+});
+// La parcela del Catastro de la casa: la de su referencia; si no la trae, la que la contiene
+function parcelaDeCasa(e) {
+  const ps = zona.parcelas || [];
+  const porRef = e.ref && ps.find(p => p.ref && p.ref.slice(0, 14).toUpperCase() === e.ref);
+  if (porRef) return porRef;
+  const cx = (e.bbox[0] + e.bbox[2]) / 2, cz = (e.bbox[1] + e.bbox[3]) / 2;
+  return ps.find(p => enPoligono(p.pts, cx, cz)) || null;
+}
+// Plano en metros, con el norte arriba (z crece hacia el sur): la parcela del Catastro a trazos, la casa en amarillo, las casas
+// de alrededor y las calles cercanas con su anchura
+function planoCasa(e, parcela) {
+  const anillos = parcela ? [parcela.pts, e.pts] : [e.pts];
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const r of anillos) for (const [x, z] of r) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const M = 6, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  x0 -= M; x1 += M; z0 -= M; z1 += M;
+  if (x1 - x0 < 30) { x0 = cx - 15; x1 = cx + 15; }
+  if (z1 - z0 < 30) { z0 = cz - 15; z1 = cz + 15; }
+  const f = n => n.toFixed(2), ruta = (pts, cierra) => pts.map(([x, z], i) => (i ? 'L' : 'M') + f(x) + ' ' + f(z)).join(' ') + (cierra ? 'Z' : '');
+  const cerca = b => b[2] >= x0 && b[0] <= x1 && b[3] >= z0 && b[1] <= z1;
+  let svg = '';
+  for (const t of zona.tramos) if (t.pts.some(([x, z]) => x >= x0 && x <= x1 && z >= z0 && z <= z1))
+    svg += `<polyline points="${t.pts.map(([x, z]) => f(x) + ',' + f(z)).join(' ')}" fill="none" stroke="#bfb8a9" stroke-width="${Math.max(2, t.ancho).toFixed(2)}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  for (const o of zona.edif) if (o !== e && cerca(o.bbox)) svg += `<path d="${ruta(o.pts, true)}" fill="#b9b0a0" stroke="#7d7467" stroke-width="0.3"/>`;
+  if (parcela) svg += `<path d="${ruta(parcela.pts, true)}" fill="#e6eed8" stroke="#4f6b3a" stroke-width="0.4" stroke-dasharray="1.2 0.6"/>`;
+  svg += `<path d="${ruta(e.pts, true)}${(e.huecos || []).map(h => ruta(h, true)).join('')}" fill="#e8c547" fill-rule="evenodd" stroke="#2b2b2b" stroke-width="0.35"/>`;
+  const by = z1 - 2.2, ax = x1 - 2.5;
+  svg += `<rect x="${f(x0 + 2)}" y="${f(by)}" width="10" height="0.5" fill="#222"/><text x="${f(x0 + 2)}" y="${f(by - 0.8)}" font-size="1.7" font-family="sans-serif" fill="#222">10 m</text>`;
+  svg += `<path d="M${f(ax)} ${f(z0 + 2.4)} L${f(ax - 1)} ${f(z0 + 4.6)} L${f(ax + 1)} ${f(z0 + 4.6)} Z" fill="#222"/><text x="${f(ax)}" y="${f(z0 + 1.6)}" font-size="1.9" font-family="sans-serif" text-anchor="middle" fill="#222">N</text>`;
+  return `<svg viewBox="${f(x0)} ${f(z0)} ${f(x1 - x0)} ${f(z1 - z0)}" role="img" aria-label="Plano de la casa y de su parcela">${svg}</svg>`;
+}
+// La foto de fachada del Catastro (la misma que pide el Paseo, reducida en el servidor); se guarda mientras dure la partida
+async function fotoDeCasa(ref) {
+  if (!FICHA.fotos.has(ref)) {
+    const r = await fetch(`${Catastro.URL_PHP}?foto=${encodeURIComponent(ref)}&tam=800`);
+    if (r.status === 404) return { sin: true };
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    FICHA.fotos.set(ref, URL.createObjectURL(await r.blob()));
+  }
+  return { url: FICHA.fotos.get(ref) };
+}
+async function mostrarFichaCasa(e) {
+  const mi = ++FICHA.pedido, img = $('fichaImg'), nota = $('fichaFotoN'), m2 = a => Math.round(Math.abs(areaAnillo(a)));
+  FICHA.casa = e;
+  const parcela = parcelaDeCasa(e);
+  $('fichaK').textContent = e.simulada ? 'Casa inventada' : e.ref ? 'Casa del Catastro' : 'Casa de OpenStreetMap';
+  $('fichaT').textContent = e.ref ? 'Referencia catastral ' + e.ref : 'Sin referencia catastral';
+  $('fichaPlano').innerHTML = planoCasa(e, parcela);
+  $('fichaDatos').textContent = `Planta de la casa: ${m2(e.pts)} m² · altura: ${(e.h || 0).toFixed(1).replace('.', ',')} m` +
+    (parcela ? ` · parcela: ${m2(parcela.pts)} m²` : ' · sin parcela en los datos de esta zona');
+  img.hidden = true; img.removeAttribute('src');
+  if (!e.ref || e.simulada) { nota.textContent = e.simulada ? 'Esta casa es inventada: la zona no traía casas del Catastro, así que no tiene foto.' : 'Esta casa viene de OpenStreetMap y no tiene foto de fachada.'; return; }
+  nota.textContent = 'Pidiendo la foto de la fachada al Catastro…';
+  try {
+    const f = await fotoDeCasa(e.ref);
+    if (mi !== FICHA.pedido) return;
+    if (f.sin) nota.textContent = 'El Catastro no tiene foto de la fachada de esta parcela.';
+    else { img.src = f.url; img.hidden = false; nota.textContent = 'Foto de la fachada, del Catastro.'; }
+  } catch (err) {
+    if (mi === FICHA.pedido) nota.textContent = `La foto no ha llegado (${err.message}). Vuelve a tocar la casa en un rato.`;
+  }
+}
+function abrirFichaCasa(e) {
+  if (!FICHA.abierta) { FICHA.abierta = true; FICHA.tPausa = performance.now() / 1000; }
+  $('fichaCasa').hidden = false;
+  mostrarFichaCasa(e);
+}
+function cerrarFichaCasa() {
+  if (!FICHA.abierta) return;
+  FICHA.abierta = false;
+  FICHA.pedido++;   // una foto que llegue ya no se pinta
+  $('fichaCasa').hidden = true;
+  $('fichaImg').removeAttribute('src');
+  if (estado === 'corriendo' && carrera) {   // el tiempo de la pausa no cuenta, como con el menú
+    const pausa = performance.now() / 1000 - FICHA.tPausa;
+    tInicio += pausa;
+    if (carrera.tVuelta) carrera.tVuelta += pausa;
+  }
+}
+$('fichaX').addEventListener('click', () => cerrarFichaCasa());
+addEventListener('keydown', e => { if (FICHA.abierta && e.code === 'Escape') cerrarFichaCasa(); });
+// La casa bajo el punto que se toca: el rayo busca las mallas de las casas y, del punto que da, la casa que lo contiene
+const rcCasa = new THREE.Raycaster(), ndcCasa = new THREE.Vector2();
+function casaEnPunto(x, z) {
+  const celdas = zona.rejilla, lista = [...(celdas.get('*') || []), ...(celdas.get(Math.floor(x / TAM_CELDA) + ',' + Math.floor(z / TAM_CELDA)) || [])];
+  for (const j of lista) { const e = zona.edif[j]; if (enPoligono(e.pts, x, z) && !(e.huecos || []).some(h => enPoligono(h, x, z))) return e; }
+  return null;
+}
+function casaBajoPuntero(cx, cy) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndcCasa.set((cx - r.left) / r.width * 2 - 1, -(cy - r.top) / r.height * 2 + 1);
+  rcCasa.setFromCamera(ndcCasa, camara);
+  const hit = rcCasa.intersectObjects(grupoCasas.children, false)[0];
+  if (!hit) return null;
+  const n = hit.face.normal;
+  for (const d of [0.3, 0.8, -0.2]) { const e = casaEnPunto(hit.point.x - n.x * d, hit.point.z - n.z * d); if (e) return e; }
+  return null;
+}
+function casaTocada(ev) {
+  if (!FICHA.activa || !zona || !grupoCasas || !carrera || !(estado === 'corriendo' || estado === 'cuenta')) return;
+  const e = casaBajoPuntero(ev.clientX, ev.clientY);
+  if (e) abrirFichaCasa(e);
+}
 // Seguir: vuelve a la partida desde el menú (y si el coche estaba destrozado, lo arregla con una penalización)
 $('btnSeguir').addEventListener('click', () => {
   if (!estadoPausado || !carrera) return;
@@ -7458,6 +7600,7 @@ function valoracionDano(d) {
 }
 // Abre el menú en mitad de la partida; textoSeguir: lo que pone el botón de seguir
 function pausar(ahora, texto, textoSeguir = 'Continuar') {
+  if (FICHA.abierta) cerrarFichaCasa();
   if (estado === 'corriendo' || estado === 'cuenta') { estadoPausado = estado; tPausa = ahora; }
   mostrarMenu(texto);
   $('btnSeguir').textContent = textoSeguir;
@@ -7822,7 +7965,7 @@ function actualizarHUD(ahora) {
 let cuentaPintada = 0, guardandoZona = false;
 function bucle() {
   requestAnimationFrame(bucle);
-  const dt = Math.min(0.05, reloj.getDelta());
+  const dtReloj = reloj.getDelta(), dt = FICHA.abierta ? 0 : Math.min(0.05, dtReloj);   // con una casa abierta, la partida está parada
   const ahora = performance.now() / 1000;
   materialAgua.uniforms.uTiempo.value = ahora % 1000;   // módulo: los móviles calculan peor con números grandes
   actualizarMobiliario(ahora);
@@ -7855,7 +7998,7 @@ function bucle() {
     const encendidas = estado === 'cuenta' ? Math.min(5, Math.floor((3 - cuenta) / 3 * 5) + 1) : 0, verde = estado !== 'cuenta' && ahora - tInicio < 3;
     carrera.semaforo.forEach((m, k) => m.color.setHex(verde ? 0x22ff55 : k < encendidas ? 0xff2412 : 0x2a0806));
   }
-  if (estado === 'corriendo') { fisica(dt, coche.destrozado); actualizarCarrera(ahora, dt); }
+  if (estado === 'corriendo' && !FICHA.abierta) { fisica(dt, coche.destrozado); actualizarCarrera(ahora, dt); }
   if (estado === 'fin') fisica(dt, true);   // tras la meta, el coche frena solo
   if (coche) {
     actualizarFachadas(ahora);
@@ -8688,6 +8831,7 @@ async function arrancarLugar() {
 
 $('btnFaltan').addEventListener('click', descargarLoQueFalta);
 iniciarRender();
+renderer.domElement.addEventListener('click', casaTocada);
 arrancarLugar();
 /*RENDER-END*/
 </script>
