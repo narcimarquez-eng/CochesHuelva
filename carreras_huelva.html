@@ -2764,7 +2764,7 @@ const Restos = (() => {
     for (const k of lista) {
       const m = modelos[k], malla = new THREE.Mesh(m.geo, m.materiales);
       malla.scale.setScalar(ESC);
-      malla.position.set(x + (Math.random() - 0.5), 0.7, z + (Math.random() - 0.5));
+      malla.position.set(x + (Math.random() - 0.5), sueloEn(x, z) + 0.7, z + (Math.random() - 0.5));
       malla.castShadow = sombras;
       const v = fuerza * (0.25 + Math.random() * 0.25), a = Math.random() * 6.28;
       vivos.push({ malla, vx: nx * v * 0.6 + Math.cos(a) * v * 0.4, vy: 2 + Math.random() * 3 + fuerza * 0.1, vz: nz * v * 0.6 + Math.sin(a) * v * 0.4,
@@ -2781,8 +2781,8 @@ const Restos = (() => {
         p.vy -= 9.8 * dt;
         m.position.x += p.vx * dt; m.position.y += p.vy * dt; m.position.z += p.vz * dt;
         m.rotation.x += p.wx * dt; m.rotation.y += p.wy * dt; m.rotation.z += p.wz * dt;
-        if (m.position.y < 0.07) {   // rebota en el suelo y pierde fuerza; al final se queda tumbado
-          m.position.y = 0.07; p.vy = -p.vy * 0.3; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.5; p.wy *= 0.5; p.wz *= 0.5;
+        if (m.position.y < sueloEn(m.position.x, m.position.z) + 0.07) {   // rebota en el suelo y pierde fuerza; al final se queda tumbado
+          m.position.y = sueloEn(m.position.x, m.position.z) + 0.07; p.vy = -p.vy * 0.3; p.vx *= 0.55; p.vz *= 0.55; p.wx *= 0.5; p.wy *= 0.5; p.wz *= 0.5;
           if (Math.abs(p.vy) < 0.6 && Math.hypot(p.vx, p.vz) < 0.4) { p.quieto = true; m.rotation.x = Math.round(m.rotation.x / Math.PI) * Math.PI; m.rotation.z = Math.round(m.rotation.z / Math.PI) * Math.PI; }
         }
       }
@@ -3853,7 +3853,7 @@ function mallaFoto(foto, pistas) {
     .map(([c, f]) => localDeMercator(g.A * c + g.B * f + g.C, g.D * c + g.E * f + g.F));
   const x0 = Math.min(...esquinas.map(e => e[0])), x1 = Math.max(...esquinas.map(e => e[0]));
   const z0 = Math.min(...esquinas.map(e => e[1])), z1 = Math.max(...esquinas.map(e => e[1]));
-  const NX = 48, NZ = 48, pos = [], uv = [], idx = [];
+  const NX = Math.min(400, Math.max(8, Math.round((x1 - x0) / PASO_RELIEVE))), NZ = Math.min(400, Math.max(8, Math.round((z1 - z0) / PASO_RELIEVE))), pos = [], uv = [], idx = [];
   for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
     const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ;
     const [X, Y] = mercatorDeLocal(x, z), [u, v] = uvOrtofoto(X, Y, g, W, H);
@@ -3871,9 +3871,51 @@ function mallaFoto(foto, pistas) {
   // Lambert para que reciba sombras; el gris compensa la luz del cielo y del sol, y la foto se ve con su brillo
   const malla = new THREE.Mesh(geo, conDetalleSuelo(new THREE.MeshLambertMaterial({ map: foto.textura, side: THREE.DoubleSide, color: new THREE.Color(0.7, 0.7, 0.7) }), pistas));
   malla.receiveShadow = sombras;
+  malla.userData.normales = true;
   return malla;
 }
 // Suelo: la ortofoto donde hay; fuera de ella, el color medio de la foto (o el verde de siempre si no hay foto)
+// --- relieve: la cota del suelo de la zona (alturas.asc). Sin alturas, todo queda a cota 0 como antes ---
+let SUELO_ZONA = null;
+function sueloEn(x, z) {
+  const h = SUELO_ZONA ? SUELO_ZONA(x, z) : null;
+  return h === null || h === undefined ? 0 : h;
+}
+// Sube cada vértice de una malla estática según el suelo que tiene debajo (en coordenadas de mundo).
+// Las instanciadas suben su traslación. Una geometría compartida por varias mallas se copia antes de tocarla
+function alRelieveMalla(o) {
+  if (o.isInstancedMesh) {
+    const e = o.instanceMatrix.array;
+    for (let i = 0; i < o.count; i++) e[i * 16 + 13] += sueloEn(e[i * 16 + 12], e[i * 16 + 14]);
+    o.instanceMatrix.needsUpdate = true;
+    return;
+  }
+  if (!o.geometry || !o.geometry.attributes.position) return;
+  o.geometry = o.geometry.clone();   // las geometrías de caché se comparten: nunca se tocan en su sitio
+  const M = o.matrixWorld, Mi = new THREE.Matrix4().copy(M).invert(), pos = o.geometry.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(M);
+    v.y += sueloEn(v.x, v.z);
+    v.applyMatrix4(Mi);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  pos.needsUpdate = true;
+  if (o.userData.normales) o.geometry.computeVertexNormals();
+  o.geometry.computeBoundingSphere(); o.geometry.computeBoundingBox();
+}
+// Recorre la zona: cada malla sube al relieve, salvo las marcadas con userData.sinRelieve (agua, plano base)
+function alRelieveZona(raiz) {
+  raiz.updateMatrixWorld(true);
+  const visitar = o => {
+    if (o.userData.sinRelieve) return;
+    if ((o.isMesh || o.isLine || o.isPoints) && !o.isInstancedMesh) {
+      alRelieveMalla(o);
+    } else if (o.isInstancedMesh) alRelieveMalla(o);
+    for (const h of o.children) visitar(h);
+  };
+  visitar(raiz);
+}
+
 function construirTerreno(caja, capas, foto) {
   const grupo = new THREE.Group();
   const base = new THREE.Mesh(new THREE.PlaneGeometry(14000, 14000), foto
@@ -3881,6 +3923,7 @@ function construirTerreno(caja, capas, foto) {
     : new THREE.MeshLambertMaterial({ color: SUELO_BASE }));
   base.rotation.x = -Math.PI / 2;
   base.position.y = -1.2;
+  base.userData.sinRelieve = true;   // el plano de fondo, fuera de la zona: plano
   const pistas = pistasSuelo(caja, capas);
   grupo.add(base, construirSuelo(caja, capas, foto ? foto.media : SUELO_BASE, pistas));
   if (foto) grupo.add(mallaFoto(foto, pistas));
@@ -3890,6 +3933,7 @@ function construirTerreno(caja, capas, foto) {
 // Suelo pintado con los usos del mapa (praderas, parques, cultivos, agua) sobre la caja de la zona.
 // La luz del juego lo deja muy claro: se oscurece un poco para que los cultivos no salgan blancos
 const LUZ_SUELO = 0.72;
+const PASO_RELIEVE = 20;   // m entre vértices del suelo: lo que se ve de las lomas y las cuestas
 function construirSuelo(caja, capas, colorBase, pistas) {
   const [x0, z0, x1, z1] = caja;
   const W = x1 - x0, H = z1 - z0, esc = 2048 / Math.max(W, H);
@@ -3910,8 +3954,9 @@ function construirSuelo(caja, capas, colorBase, pistas) {
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.anisotropy = 4;
-  const suelo = new THREE.Mesh(new THREE.PlaneGeometry(W, H), conDetalleSuelo(new THREE.MeshLambertMaterial({ map: tex, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO) }), pistas));
+  const suelo = new THREE.Mesh(new THREE.PlaneGeometry(W, H, Math.max(1, Math.round(W / PASO_RELIEVE)), Math.max(1, Math.round(H / PASO_RELIEVE))), conDetalleSuelo(new THREE.MeshLambertMaterial({ map: tex, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO) }), pistas));
   suelo.rotation.x = -Math.PI / 2;
+  suelo.userData.normales = true;
   suelo.position.set((x0 + x1) / 2, -0.6, (z0 + z1) / 2);
   suelo.receiveShadow = sombras;
   return suelo;
@@ -3943,6 +3988,7 @@ function mallaPoligono(pts, y) {
 }
 function mallaAguas(aguas) {
   const grupo = new THREE.Group(), mar = [], borde = [];
+  grupo.userData.sinRelieve = true;   // el agua es plana: no sube con el terreno
   for (const a of aguas) {
     if (a.capa === 'mar') { mar.push(a.pts); continue; }   // el mar, hecho de muchos rectángulos: en una sola malla
     const geo = mallaPoligono(a.pts, a.capa === 'piscina' ? 0.06 : 0.03);
@@ -4143,7 +4189,7 @@ function escribirArboles(ramas, hojas, lista) {
   const n = Math.min(lista.length, ramas.instanceMatrix.count);
   for (let i = 0; i < n; i++) {
     const a = lista[i], esc = 0.85 + 0.3 * a.tam;
-    _matArbol.compose(_posArbol.set(a.x, 0, a.z), _giroArbol.setFromAxisAngle(_ejeArbol, a.giro), _escArbol.set(esc, esc * (0.92 + 0.16 * a.tono2), esc));
+    _matArbol.compose(_posArbol.set(a.x, sueloEn(a.x, a.z), a.z), _giroArbol.setFromAxisAngle(_ejeArbol, a.giro), _escArbol.set(esc, esc * (0.92 + 0.16 * a.tono2), esc));
     ramas.setMatrixAt(i, _matArbol);
     hojas.setMatrixAt(i, _matArbol);
   }
@@ -5207,6 +5253,28 @@ function nuevoBufer(n) {
 }
 const SIN_FACHADA = [0, -1e4, 0, 0], ARRIBA = [0, 1, 0], ABAJO = [0, -1, 0];
 const a255 = c => c.map(v => Math.round(Math.min(1, Math.max(0, v)) * 255));
+// Nivel de una casa, como en el paseo: la planta a la altura del suelo de la puerta (o la media de la huella si no hay puerta),
+// la base de las paredes bajo el punto más bajo de la huella y el alero nunca por debajo del terreno. Cuesta abajo asoma
+// el basamento y cuesta arriba la casa se mete en la ladera; la casa en sí queda a nivel y las calles escalonan entre casas.
+function nivelCasa(e) {
+  if (e.nivel) return e.nivel;
+  const r = e.pts, n = r.length, alturaEn = (x, z) => (SUELO_ZONA ? SUELO_ZONA(x, z) : null);   // fuera del MDT no hay dato: no cuenta
+  let gMin = Infinity, gMax = -Infinity, gSum = 0, gN = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  const gs = (x, z) => { const v = alturaEn(x, z); if (v === null || v === undefined) return; gMin = Math.min(gMin, v); gMax = Math.max(gMax, v); gSum += v; gN++; };
+  for (const p of r) { gs(p[0], p[1]); x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]); }
+  for (let i = 0; i < n; i++) { const p = r[i], q = r[(i + 1) % n]; gs((p[0] + q[0]) / 2, (p[1] + q[1]) / 2); }
+  const paso = Math.max(2.5, Math.max(x1 - x0, z1 - z0) / 8);   // dentro de la huella, una rejilla gruesa
+  for (let x = x0 + paso / 2; x < x1; x += paso) for (let z = z0 + paso / 2; z < z1; z += paso) if (enPoligono(r, x, z)) gs(x, z);
+  if (!gN) { gMin = 0; gMax = 0; }
+  let F0 = gN ? gSum / gN : 0;
+  if (e.puertaLado >= 0 && e.puertaU > -1e3) {   // con puerta: el suelo de la puerta
+    const p = r[e.puertaLado], q = r[(e.puertaLado + 1) % n], s = e.lados[e.puertaLado], t = Math.min(1, Math.max(0, (e.puertaU - s.u0) / (s.len || 1)));
+    const v = alturaEn(p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t);
+    if (v !== null && v !== undefined) F0 = v;
+  }
+  e.nivel = { F0, base: gMin - 0.6, eave: Math.max(F0 + e.h, gMax + 2.3) };
+  return e.nivel;
+}
 function mallaEdificios(edif, foto, porches = []) {
   const G = nuevoBufer(Math.max(4096, edif.length * 60 + porches.length * 120));
   const uvFoto = (x, z) => {   // dónde cae el punto en la foto aérea (para pintar los tejados con ella)
@@ -5214,9 +5282,9 @@ function mallaEdificios(edif, foto, porches = []) {
     const [X, Y] = mercatorDeLocal(x, z);
     return uvOrtofoto(X, Y, foto.g, foto.W, foto.H);
   };
-  const BASE = -0.3, EXT = 0.38;   // las paredes bajan un poco por debajo del suelo; el alero sale 38 cm
+  const EXT = 0.38;   // el alero sale 38 cm
   for (const e of edif) {
-    const r = e.pts, n = r.length, off = e.off, H = e.h, eave = H, A = Math.abs(areaAnillo(r));
+    const r = e.pts, n = r.length, off = e.off, H = e.h, nv = nivelCasa(e), eave = nv.eave, BASE = nv.base, F0 = nv.F0, A = Math.abs(areaAnillo(r));
     const zb = a255([...hexA01(e.colZoc), e.zh / 4]), kb = a255([...hexA01(e.colCarp), e.rec]);
     const pc = hexA01(e.colPared), wc = a255(pc), wc2 = a255(pc.map(v => v * 0.86)), roofC = a255(hexA01(e.colTecho)), cop = a255(hexA01('#ebe8e1'));
     const conFoto = !!foto && !e.simulada;
@@ -5240,7 +5308,7 @@ function mallaEdificios(edif, foto, porches = []) {
       G.tri(s[0], s[1], s[2], nr); G.tri(s[0], s[2], s[3], nr);
     };
     const pared = (P, Q, nr, ya, yb, yc, yd, ua, ub, F, col, marca) =>
-      quad([[P[0], ya, P[1]], [Q[0], yb, Q[1]], [Q[0], yc, Q[1]], [P[0], yd, P[1]]], nr, col, [[ua, ya, marca], [ub, yb, marca], [ub, yc, marca], [ua, yd, marca]], F, false);
+      quad([[P[0], ya, P[1]], [Q[0], yb, Q[1]], [Q[0], yc, Q[1]], [P[0], yd, P[1]]], nr, col, [[ua, ya - F0, marca], [ub, yb - F0, marca], [ub, yc - F0, marca], [ua, yd - F0, marca]], F, false);
     e.vw0 = G.n;   // desde aquí, sus paredes: se repintan si llega el color de su foto de fachada
     e.casillas = Parches.casillasDe(e);
     G.casillas = [...e.casillas, 1];
@@ -5366,7 +5434,9 @@ function mallaEdificios(edif, foto, porches = []) {
   geo.computeBoundingSphere();
   if (!matFachadas) matFachadas = materialFachadas();   // un solo material para todos los bloques
   for (const e of edif) e.geoMalla = geo;
-  return conSombra(new THREE.Mesh(geo, matFachadas));
+  const malla = conSombra(new THREE.Mesh(geo, matFachadas));
+  malla.userData.sinRelieve = true;   // las casas ya van a su altura (planta a nivel): el relieve no las vuelve a subir
+  return malla;
 }
 // Colores de las paredes de una casa tal como van en la malla: pared, zócalo (con su alto), carpintería (con los recercados) y parches
 function coloresMalla(e) {
@@ -5465,7 +5535,7 @@ function porchesEnBufer(G, porches, foto, uvFoto) {
   const plano = [0, 0, 0.3], blanco = a255(hexA01('#ebe7df'));
   G.casillas = [-1, -1, -1, 1];
   for (const p of porches) {
-    const e = p.casa, tj = tejadoPorche(p), conFoto = !!foto;
+    const e = p.casa, tj = tejadoPorche(p), conFoto = !!foto, oy = e ? nivelCasa(e).F0 : sueloEn(p.pts[0][0], p.pts[0][1]);
     const roofC = a255(hexA01(e ? e.colTecho : '#bdb8ae')), pared = e ? hexA01(e.colPared) : hexA01('#ece8e0');
     const wc = a255(pared), zb = a255([...hexA01(e ? e.colZoc : '#8b867c'), 0.35 / 4]), kb = a255([...hexA01(e ? e.colCarp : '#5b3b26'), 0]);
     const nl = Math.hypot(tj.k, 1), nr = tj.teja ? [tj.sx * tj.k / nl, 1 / nl, tj.sz * tj.k / nl] : ARRIBA, GROSOR = 0.32;
@@ -5477,7 +5547,7 @@ function porchesEnBufer(G, porches, foto, uvFoto) {
     for (const [arriba, dy] of [[true, 0], [false, -0.16]]) {
       const s0 = G.n;
       for (const rr of anillos) for (const q of rr) {
-        const y = tj.y(q[0], q[1]) + dy, uv = arriba && conFoto ? uvFoto(q[0], q[1]) : [-1, -1], [a, b] = uvTeja(q);
+        const y = oy + tj.y(q[0], q[1]) + dy, uv = arriba && conFoto ? uvFoto(q[0], q[1]) : [-1, -1], [a, b] = uvTeja(q);
         if (arriba) G.v(q[0], y, q[1], nr, roofC, a, b, tj.teja ? -1 : -2, zb, kb, SIN_FACHADA, uv[0], uv[1]);
         else G.v(q[0], y, q[1], ABAJO, blanco, 0, 0, 0.3, zb, kb, SIN_FACHADA, -1, -1);
       }
@@ -5492,17 +5562,17 @@ function porchesEnBufer(G, porches, foto, uvFoto) {
         if (l < 0.05) continue;
         let nx = dz / l, nz = -dx / l;
         if (enPoligono(rr, (a[0] + b[0]) / 2 + nx * 0.05, (a[1] + b[1]) / 2 + nz * 0.05) === (h === 0)) { nx = -nx; nz = -nz; }   // hacia fuera del tejado
-        const ya = tj.y(a[0], a[1]), yb = tj.y(b[0], b[1]);
+        const ya = oy + tj.y(a[0], a[1]), yb = oy + tj.y(b[0], b[1]);
         quad([[a[0], ya - GROSOR, a[1]], [b[0], yb - GROSOR, b[1]], [b[0], yb + 0.03, b[1]], [a[0], ya + 0.03, a[1]]], [nx, 0, nz], wc, [plano, plano, plano, plano]);
       }
     });
     // pilares: de sección cuadrada, del suelo a la viga, con la textura de la pared y un zócalo de 35 cm
     const m = p.lado / 2;
     for (const [x, z] of p.pilares) {
-      const H = tj.y(x, z) - GROSOR + 0.02, c = [[x - m, z - m], [x + m, z - m], [x + m, z + m], [x - m, z + m]];
+      const H = tj.y(x, z) - GROSOR + 0.02, pie = Math.min(oy, sueloEn(x, z)) - 0.3, c = [[x - m, z - m], [x + m, z - m], [x + m, z + m], [x - m, z + m]];
       for (let i = 0; i < 4; i++) {
         const a = c[i], b = c[(i + 1) % 4], n = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]][i], u0 = i * p.lado, u1 = u0 + p.lado;
-        quad([[a[0], -0.3, a[1]], [b[0], -0.3, b[1]], [b[0], H, b[1]], [a[0], H, a[1]]], n, wc, [[u0, -0.3, H], [u1, -0.3, H], [u1, H, H], [u0, H, H]]);
+        quad([[a[0], pie, a[1]], [b[0], pie, b[1]], [b[0], oy + H, b[1]], [a[0], oy + H, a[1]]], n, wc, [[u0, pie - oy, H], [u1, pie - oy, H], [u1, H, H], [u0, H, H]]);
       }
     }
   }
@@ -5650,6 +5720,7 @@ function construirMallaZona() {
     mallaQuioscos(m.quioscos), mallaTermometros(m.termometros), mallaVallas(m.vallas), mallaJuegos(m.juegos || []));
   if (!zona.foto && m.jardines.length) mallaZona.add(mallaJardines(m.jardines));
   mallaZona.add(mallaSolerias(zona));
+  alRelieveZona(mallaZona);   // el suelo, las calles y lo que hay sobre ellas, a la altura del terreno
   scene.add(mallaZona);
   aplicarHora(horaElegida);   // ventanas, farolas y quioscos encendidos según la hora
   if (!cocheMesh) {
@@ -5712,11 +5783,15 @@ async function leerAlturas(zip) {
   const v = new Float32Array(W * H);
   let k = 0;
   for (; i < lineas.length && k < v.length; i++) for (const t of lineas[i].trim().split(/\s+/)) if (t !== '') v[k++] = +t;
+  // bilineal entre los cuatro centros de celda que rodean el punto (la malla va en celdas de unos 7 m)
   return (x, z) => {
-    const [X, Y] = mercatorDeLocal(x, z), c = Math.floor((X - x0) / dx), f = H - 1 - Math.floor((Y - y0) / dy);
-    if (c < 0 || f < 0 || c >= W || f >= H) return null;
-    const a = v[f * W + c];
-    return a === nd ? null : a;
+    const [X, Y] = mercatorDeLocal(x, z), cx = (X - x0) / dx - 0.5, fy = H - 0.5 - (Y - y0) / dy;
+    if (cx < -0.5 || fy < -0.5 || cx > W - 0.5 || fy > H - 0.5) return null;
+    const c0 = Math.min(W - 2, Math.max(0, Math.floor(cx))), f0 = Math.min(H - 2, Math.max(0, Math.floor(fy)));
+    const tx = Math.min(1, Math.max(0, cx - c0)), ty = Math.min(1, Math.max(0, fy - f0));
+    const esq = [v[f0 * W + c0], v[f0 * W + c0 + 1], v[(f0 + 1) * W + c0], v[(f0 + 1) * W + c0 + 1]];
+    if (esq.some(a => a === nd)) { const buena = esq.find(a => a !== nd); return buena === undefined ? null : buena; }
+    return (esq[0] * (1 - tx) + esq[1] * tx) * (1 - ty) + (esq[2] * (1 - tx) + esq[3] * tx) * ty;
   };
 }
 
@@ -5813,6 +5888,7 @@ async function cargarZona(archivo) {
   zona.acerasUrbanas = acerasUrbanas(tramos, zona.parcelas, edif, zona.rejilla, extraerOSM(osm).rotondas);   // las calles de ciudad que el Paseo dejó sin acera
   decidirTejados(edif, zona.parcelas);   // teja o azotea: por la parcela y, si ya se miró, por la foto de fachada
   const altura = await leerAlturas(zip);
+  SUELO_ZONA = altura;   // el relieve de la zona: sueloEn(x, z) lo lee al colocar cada cosa
   zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas, pixelesFoto(foto), altura);
   ponerPilares(zona.mundo, zona.porches);
   medirAceras(tramos, edif, zona.rejilla, zona.mundo.rejVallas, zona.enCalzadaAjena);   // hasta las fachadas y las vallas
@@ -6413,6 +6489,7 @@ function actualizarTrafico(dt) {
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
   const parpadeo = Math.sin(performance.now() / 1000 * 9) > 0, luz = lucesTrafico && lucesTrafico.instanceColor;
   trafico.forEach((c, n) => {
+    const gt = sueloEn(c.x, c.z);   // la cota del suelo bajo el coche
     // frena si tiene a alguien delante; tras un golpe se queda parado unos segundos
     const { dMin, jugador } = distanciaDelante(c);
     const objetivo = Math.max(0, Math.min(1, (dMin - 6.5) / 12));
@@ -6432,19 +6509,19 @@ function actualizarTrafico(dt) {
     const t = zona.G.tramos[c.seg], rapidez = t.velocidad / 3.6 * c.k * c.factor;
     c.x = p.x + c.ox; c.z = p.z + c.oz; c.h = p.h + c.oh; c.hp = p.h;
     c.vx = Math.sin(p.h) * rapidez + c.svx; c.vz = Math.cos(p.h) * rapidez + c.svz;   // para los choques
-    m.compose(v.set(c.x, 0, c.z), q.setFromAxisAngle(eje, c.h), uno);
+    m.compose(v.set(c.x, gt, c.z), q.setFromAxisAngle(eje, c.h), uno);
     mallaTrafico[c.modelo].setMatrixAt(c.idx, m);
-    if (sombrasTrafico) { m.compose(v.set(c.x, 0.08, c.z), q, uno); sombrasTrafico.setMatrixAt(n, m); }
+    if (sombrasTrafico) { m.compose(v.set(c.x, gt + 0.08, c.z), q, uno); sombrasTrafico.setMatrixAt(n, m); }
     if (hacesTrafico && uNoche.value > 0.2) {   // de noche, faros y haz delante
-      m.compose(v.set(c.x, 0, c.z), q, uno); hacesTrafico.setMatrixAt(n, m);
+      m.compose(v.set(c.x, gt, c.z), q, uno); hacesTrafico.setMatrixAt(n, m);
       const sh = Math.sin(c.h), ch = Math.cos(c.h), fzL = c.luzZ !== undefined ? -c.luzZ : 2.1;
-      for (const lado of [-1, 1]) { const lx = lado * (c.luzX || 0.6); m.compose(v.set(c.x + lx * ch + fzL * sh, c.luzY || 0.6, c.z - lx * sh + fzL * ch), q, uno); farosTrafico.setMatrixAt(2 * n + (lado > 0 ? 1 : 0), m); }
+      for (const lado of [-1, 1]) { const lx = lado * (c.luzX || 0.6); m.compose(v.set(c.x + lx * ch + fzL * sh, gt + (c.luzY || 0.6), c.z - lx * sh + fzL * ch), q, uno); farosTrafico.setMatrixAt(2 * n + (lado > 0 ? 1 : 0), m); }
     }
     if (lucesTrafico && c.luzX !== undefined) {
       const sh = Math.sin(c.h), ch = Math.cos(c.h);
       for (const lado of [-1, 1]) {
         const lx = lado * c.luzX, i = 2 * n + (lado > 0 ? 1 : 0);
-        m.compose(v.set(c.x + lx * ch + c.luzZ * sh, c.luzY, c.z - lx * sh + c.luzZ * ch), q, uno);
+        m.compose(v.set(c.x + lx * ch + c.luzZ * sh, gt + c.luzY, c.z - lx * sh + c.luzZ * ch), q, uno);
         lucesTrafico.setMatrixAt(i, m);
         if (c.parado > 0) luz.setXYZ(i, parpadeo ? 1 : 0.25, parpadeo ? 0.55 : 0.12, 0.02);   // emergencias
         else if (c.frena) luz.setXYZ(i, 1, 0.12, 0.08);
@@ -6513,9 +6590,9 @@ function actualizarProyectiles(dt) {
   for (let i = proyectiles.length - 1; i >= 0; i--) {
     const q = proyectiles[i];
     q.t += dt;
-    const x = q.x0 + q.vx * q.t, z = q.z0 + q.vz * q.t, y = 1.4 + q.vy * q.t - 4.9 * q.t * q.t;
-    const toca = y < 1.3 && (x - coche.x) ** 2 + (z - coche.z) ** 2 < 2.25;
-    if (y <= 0 || toca) {
+    const x = q.x0 + q.vx * q.t, z = q.z0 + q.vz * q.t, yr = 1.4 + q.vy * q.t - 4.9 * q.t * q.t, y = sueloEn(x, z) + yr;
+    const toca = yr < 1.3 && (x - coche.x) ** 2 + (z - coche.z) ** 2 < 2.25;
+    if (yr <= 0 || toca) {
       if (toca) Sonido.golpe('farola', 3);
       scene.remove(q.malla); proyectiles.splice(i, 1); continue;
     }
@@ -6614,7 +6691,7 @@ function actualizarPeatones(dt) {
     const h = p.mira ? Math.atan2(p.mira.x - x, p.mira.z - z) : p.mirar ? Math.atan2(coche.x - x, coche.z - z) : pos.h;   // se vuelve a mirar el golpe o el claxon, o al coche si se enfrenta
     p.ultimo = { x, z, h };
     const e = p.escala || 1;
-    m.compose(v.set(x, bote + salto, z), q.setFromAxisAngle(eje, h), escala.set(e * (p.anchura || 1), e * (p.altura || 1), e));
+    m.compose(v.set(x, sueloEn(x, z) + bote + salto, z), q.setFromAxisAngle(eje, h), escala.set(e * (p.anchura || 1), e * (p.altura || 1), e));
     // el paso: la velocidad medida sobre el suelo mueve brazos y piernas (y se para cuando el peatón está quieto)
     const rapidez = p.px === undefined ? 0 : Math.hypot(x - p.px, z - p.pz) / Math.max(dt, 1e-3);
     p.px = x; p.pz = z;
@@ -6696,7 +6773,7 @@ function actualizarPerros(dt, ahora) {
     let salto = 0;
     if (d.salto > 0) { d.salto -= dt; salto = Math.sin(Math.max(0, d.salto) / 0.4 * Math.PI) * 0.18; }
     d.fase += dt * (4 + rap * 5);
-    B.compose(v.set(d.x, salto, d.z), q.setFromAxisAngle(eje, mira), esc.set(d.tam, d.tam, d.tam));
+    B.compose(v.set(d.x, sueloEn(d.x, d.z) + salto, d.z), q.setFromAxisAngle(eje, mira), esc.set(d.tam, d.tam, d.tam));
     M.cuerpo.setMatrixAt(i, B); M.nariz.setMatrixAt(i, B);
     CADERAS.forEach(([hx, hy, hz], k) => {
       L.makeRotationX(rap > 0.2 ? Math.sin(d.fase + (k === 0 || k === 3 ? 0 : Math.PI)) * 0.6 : 0).setPosition(hx, hy, hz);
@@ -6785,7 +6862,7 @@ function actualizarCiclistas(dt) {
     // caído: tumbado de lado; al levantarse vuelve poco a poco
     const tumbado = c.caido > 1 ? 1.4 : c.caido > 0 ? 1.4 * c.caido : 0;
     eu.set(0, c.h, tumbado, 'YXZ');
-    B.compose(v.set(c.x, tumbado ? 0.1 : 0, c.z), q.setFromEuler(eu), uno);
+    B.compose(v.set(c.x, sueloEn(c.x, c.z) + (tumbado ? 0.1 : 0), c.z), q.setFromEuler(eu), uno);
     M.bici.setMatrixAt(i, B); M.cuerpo.setMatrixAt(i, B); M.cabeza.setMatrixAt(i, B);
     for (let k = 0; k < 2; k++) {
       L.makeRotationX(Math.sin(c.fase + k * Math.PI) * 0.55 - 0.35).setPosition(k ? 0.1 : -0.1, 1.0, -0.08);
@@ -6841,8 +6918,8 @@ function crearFlechas(pts, color) {
   const mA = new Float32Array(16 * n), mC = new Float32Array(16 * n);
   flechas.forEach((f, i) => {
     const r = q.setFromAxisAngle(eje, f.h);
-    m.compose(new THREE.Vector3(f.x, 0.09, f.z), r, uno).toArray(mC, i * 16);
-    m.compose(new THREE.Vector3(f.x, 0.095, f.z), r, uno).toArray(mA, i * 16);
+    m.compose(new THREE.Vector3(f.x, sueloEn(f.x, f.z) + 0.09, f.z), r, uno).toArray(mC, i * 16);
+    m.compose(new THREE.Vector3(f.x, sueloEn(f.x, f.z) + 0.095, f.z), r, uno).toArray(mA, i * 16);
   });
   color_.count = contorno.count = 0;
   // línea fina y luminosa por el centro del camino
@@ -6850,6 +6927,7 @@ function crearFlechas(pts, color) {
   bandasH(linea, pts, -0.16, 0.16, 0.085, [1, 1, 1]);
   const matLinea = new THREE.MeshBasicMaterial({ color: new THREE.Color(...color), transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   const mLinea = new THREE.Mesh(linea.geo(), matLinea);
+  alRelieveMalla(mLinea);   // la línea sigue el suelo entre sus puntos
   for (const o of [color_, contorno, mLinea]) { o.frustumCulled = false; grupo.add(o); }
   return { grupo, pts, flechas, mA, mC, color_, contorno, matLinea, color, prog: 0 };
 }
@@ -7089,6 +7167,7 @@ function decoracionCircuito(plan, cum) {
   });
   conSombra(deco, true, false);
   decoracionKenney(plan, cum, deco, obst, luz0);   // piezas del Racing Kit (llegan un poco después)
+  alRelieveZona(deco);   // las piezas propias están a altura 0 sobre su punto: se suben al terreno (las de Kenney llegan ya a su altura)
   return { deco, semaforo, publico, obst };
 }
 // --- más decoración con piezas de Kenney Racing Kit (CC0): vallas rojas y blancas en los bordillos de la recta, torres de pancartas,
@@ -7127,7 +7206,7 @@ async function decoracionKenney(plan, cum, deco, obst, luz0) {
   const instancias = (pieza, lista, esc = ESC_RACING) => {
     if (!lista.length) return;
     const im = new THREE.InstancedMesh(pieza.geo, pieza.materiales, lista.length), e3 = new THREE.Vector3(esc, esc, esc);
-    lista.forEach((p, i) => { m.compose(v.set(p.x, p.y || 0, p.z), q.setFromAxisAngle(eje, p.h), e3); im.setMatrixAt(i, m); });
+    lista.forEach((p, i) => { m.compose(v.set(p.x, (p.y || 0) + sueloEn(p.x, p.z), p.z), q.setFromAxisAngle(eje, p.h), e3); im.setMatrixAt(i, m); });
     im.instanceMatrix.needsUpdate = true;
     im.frustumCulled = false;
     deco.add(conSombra(im, true, false));
@@ -7192,7 +7271,7 @@ function actualizarPublico(ahora) {
   for (const p of P.lista) {
     const cerca = Math.hypot(p.x - coche.x, p.z - coche.z) < 35;
     const salto = fiesta || cerca ? Math.abs(Math.sin(ahora * 9 + p.fase)) * 0.35 : Math.abs(Math.sin(ahora * 2 + p.fase)) * 0.03;
-    m.compose(v.set(p.x, salto, p.z), q.setFromAxisAngle(eje, p.h + (cerca ? Math.sin(ahora * 5 + p.fase) * 0.3 : 0)), uno);
+    m.compose(v.set(p.x, salto + sueloEn(p.x, p.z), p.z), q.setFromAxisAngle(eje, p.h + (cerca ? Math.sin(ahora * 5 + p.fase) * 0.3 : 0)), uno);
     P.mallas[p.modelo].setMatrixAt(p.idx, m);
   }
   P.mallas.forEach(im => { im.instanceMatrix.needsUpdate = true; });
@@ -7292,7 +7371,7 @@ function colocarRival(r, dt) {
     r.x = e.x - e.tz * r.off + r.ex; r.z = e.z + e.tx * r.off + r.ez;
     const hx = ad.x - ad.tz * r.off - (e.x - e.tz * r.off), hz = ad.z + ad.tx * r.off - (e.z + e.tx * r.off);
     r.h = Math.atan2(hx, hz) + r.giro;
-    r.malla.position.set(r.x, 0, r.z);
+    r.malla.position.set(r.x, sueloEn(r.x, r.z), r.z);
     r.malla.rotation.y = r.h;
     r.cuerpo.rotation.z = Math.max(-0.06, Math.min(0.06, (r.v * (r.dh || 0)) * 0.006));
     r.etiqueta.visible = Math.hypot(r.x - camara.position.x, r.z - camara.position.z) < 90;
@@ -7361,8 +7440,8 @@ function clasificacion() {
 function mostrarPodio(lista) {
   estado = 'podio';
   document.body.classList.add('podio');
-  const { plan, cum } = carrera, e = puntoRuta(plan.ruta, cum, 35), g = new THREE.Group();
-  g.position.set(e.x, 0, e.z);
+  const { plan, cum } = carrera, e = puntoRuta(plan.ruta, cum, 35), g = new THREE.Group(), suelo = sueloEn(e.x, e.z);
+  g.position.set(e.x, suelo, e.z);
   g.rotation.y = Math.atan2(e.tx, e.tz) + Math.PI;   // de cara a quien llega por la recta
   const ESCALONES = [[0, 1.4, '#f1c40f', '1'], [-4.8, 0.95, '#bdc3c7', '2'], [4.8, 0.6, '#cd7f32', '3']];
   lista.slice(0, 3).forEach((c, i) => {
@@ -7388,7 +7467,7 @@ function mostrarPodio(lista) {
   for (const r of carrera.rivales) r.malla.visible = false;
   for (const t of carrera.talleres) t.grupo.visible = false;   // el letrero de los boxes quedaría detrás del podio
   carrera.tPodio = performance.now() / 1000;
-  carrera.centroPodio = new THREE.Vector3(e.x, 1.5, e.z);
+  carrera.centroPodio = new THREE.Vector3(e.x, suelo + 1.5, e.z);
   carrera.frentePodio = [-e.tx, -e.tz];   // la cámara mira el podio desde la recta, por donde se llega
   Sonido.aplausos(6);
   // tabla de resultados
@@ -7405,10 +7484,10 @@ function actualizarPodio(ahora) {
   // de frente, desde la calzada (donde no hay casas), con un ligero vaivén y acercándose poco a poco
   const c = carrera.centroPodio, t = ahora - carrera.tPodio, [fx, fz] = carrera.frentePodio;
   const a = Math.sin(t * 0.35) * 0.35, dist = 15 - Math.min(4, t * 0.4), ca = Math.cos(a), sa = Math.sin(a);
-  camara.position.set(c.x + (fx * ca - fz * sa) * dist, 4.8, c.z + (fz * ca + fx * sa) * dist);
-  camara.lookAt(c.x + fz * 4.5, 2.2, c.z - fx * 4.5);   // un poco a la derecha: el podio queda a la izquierda de la tabla
-  if (Math.random() < 0.025) { Efectos.fuegos(c.x + (Math.random() - 0.5) * 30, 26 + Math.random() * 12, c.z + (Math.random() - 0.5) * 30); Sonido.estallido(); }
-  if (Math.random() < 0.06) Efectos.papeles(c.x + (Math.random() - 0.5) * 8, 6, c.z + (Math.random() - 0.5) * 6, 10);
+  camara.position.set(c.x + (fx * ca - fz * sa) * dist, c.y + 3.3, c.z + (fz * ca + fx * sa) * dist);
+  camara.lookAt(c.x + fz * 4.5, c.y + 0.7, c.z - fx * 4.5);   // un poco a la derecha: el podio queda a la izquierda de la tabla
+  if (Math.random() < 0.025) { Efectos.fuegos(c.x + (Math.random() - 0.5) * 30, c.y + 26 + Math.random() * 12, c.z + (Math.random() - 0.5) * 30); Sonido.estallido(); }
+  if (Math.random() < 0.06) Efectos.papeles(c.x + (Math.random() - 0.5) * 8, c.y + 6, c.z + (Math.random() - 0.5) * 6, 10);
 }
 $('podioSeguir').addEventListener('click', () => {
   $('podioPanel').style.display = 'none';
@@ -7428,17 +7507,18 @@ function crearTaller(x, z, rotulo) {
     g.font = '72px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('🔧', 64, 70);
     texturaLlaveCache = new THREE.CanvasTexture(cv);
   }
-  const grupo = new THREE.Group();
+  const grupo = new THREE.Group(), suelo = sueloEn(x, z);
   grupo.position.set(x, 0, z);
   const aro = new THREE.Mesh(new THREE.RingGeometry(5, 6, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3aa0ff, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
   const llave = new THREE.Sprite(new THREE.SpriteMaterial({ map: texturaLlaveCache, depthWrite: false }));
   llave.scale.set(2.4, 2.4, 1);
-  llave.position.y = 4.2;
+  llave.position.y = suelo + 4.2;
   const letrero = new THREE.Sprite(new THREE.SpriteMaterial({ map: texturaTexto(rotulo, '#1d78d6', '#fff', false, 256, 64), depthWrite: false }));
   letrero.scale.set(3.6, 0.9, 1);
-  letrero.position.y = 2.5;
+  letrero.position.y = suelo + 2.5;
   grupo.add(aro, llave, letrero);
   grupo.children.forEach(o => { o.frustumCulled = false; });
+  alRelieveZona(grupo);   // el aro sigue el terreno; los sprites van a la altura del suelo de arriba
   scene.add(grupo);
   return { x, z, grupo, llave };
 }
@@ -7456,7 +7536,7 @@ function colocarTalleres(rng) {
 function actualizarTalleres(ahora, dt) {
   let dentro = null;
   for (const t of carrera.talleres) {
-    t.llave.position.y = 4.2 + Math.sin(ahora * 2.2 + t.x) * 0.35;
+    t.llave.position.y = sueloEn(t.x, t.z) + 4.2 + Math.sin(ahora * 2.2 + t.x) * 0.35;
     if (Math.hypot(t.x - coche.x, t.z - coche.z) < 6.5) dentro = t;
   }
   const d = coche.dano;
@@ -7499,7 +7579,7 @@ async function nuevaCarrera() {
   };
   if (carrera.modo === 'circuito') {
     Object.assign(carrera, { cps: plan.checkpoints, siguiente: 0, vueltas: 0, tVuelta: 0, tiempos: [], longitud: plan.longitud });
-    carrera.meshes = plan.checkpoints.map(cp => { const g = crearBaliza(); g.position.set(cp.x, 0, cp.z); scene.add(g); return g; });
+    carrera.meshes = plan.checkpoints.map(cp => { const g = crearBaliza(); g.position.set(cp.x, sueloEn(cp.x, cp.z), cp.z); scene.add(g); return g; });
     const d = decoracionCircuito(plan, cum);
     Object.assign(carrera, { deco: d.deco, semaforo: d.semaforo, obstaculos: d.obst });
     scene.add(d.deco);
@@ -7523,8 +7603,8 @@ async function nuevaCarrera() {
   actualizarMalla(0);
   await iniciarTrafico();
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h);
-  camara.position.set(coche.x - fx * 13, 6, coche.z - fz * 13);
-  camara.lookAt(coche.x + fx * 6, 1.2, coche.z + fz * 6);
+  camara.position.set(coche.x - fx * 13, sueloEn(coche.x, coche.z) + 6, coche.z - fz * 13);
+  camara.lookAt(coche.x + fx * 6, sueloEn(coche.x, coche.z) + 1.2, coche.z + fz * 6);
   cuenta = 3;
   estado = 'cuenta';
 }
@@ -7544,7 +7624,7 @@ function siguienteDestino(rng = Math.random) {
   for (const e of D.camino) carrera.usados.add(zona.G.tramos[e.seg].padre);
   carrera.visitados.push([n.x, n.z]);
   const baliza = crearBaliza(0x3fd0ff);
-  baliza.position.set(n.x, 0, n.z);
+  baliza.position.set(n.x, sueloEn(n.x, n.z), n.z);
   scene.add(baliza);
   carrera.destino = { nodo: D.nodo, x: n.x, z: n.z, nombre, baliza, tInicio: performance.now() / 1000 };
   const r = rutaDesde(zona.G, zona.rejSeg, coche.x, coche.z, coche.h, D.nodo);
@@ -8001,11 +8081,13 @@ function modoVisto() {
 function actualizarMalla(dt) {
   const salto = coche.golpe > 0 ? Math.sin(coche.golpe / 0.5 * Math.PI) * 0.22 : 0;   // bote al subir al bordillo
   const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
-  cocheMesh.position.set(coche.x, 0, coche.z);
+  const suelo = sueloEn(coche.x, coche.z), hx = Math.sin(coche.h), hz = Math.cos(coche.h);
+  cocheMesh.position.set(coche.x, suelo, coche.z);
   cocheMesh.rotation.y = coche.h;
-  // la carrocería cabecea al acelerar y frenar y se inclina hacia fuera en las curvas
+  // la carrocería cabecea al acelerar y frenar, se inclina hacia fuera en las curvas y sigue la cuesta (delante y detrás)
+  const cuesta = (sueloEn(coche.x + hx * 2, coche.z + hz * 2) - sueloEn(coche.x - hx * 2, coche.z - hz * 2)) / 4;
   cuerpoCoche.position.y = salto + tiemble;
-  cuerpoCoche.rotation.x = Math.max(-0.05, Math.min(0.05, -coche.aLong * 0.0045));
+  cuerpoCoche.rotation.x = Math.max(-0.05, Math.min(0.05, -coche.aLong * 0.0045)) - Math.max(-0.25, Math.min(0.25, cuesta));
   cuerpoCoche.rotation.z = Math.max(-0.07, Math.min(0.07, coche.aLat * 0.007));
   sombraCoche.position.y = coche.acera ? 0.18 : 0.08;
   cuerpoCoche.visible = sombraCoche.visible = modoVisto() !== 2;   // dentro del coche no se ve la carrocería (los faros sí alumbran)
@@ -8040,7 +8122,7 @@ function cambiarCamara() {
 }
 function actualizarCamara(dt) {
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h), izq = [fz, -fx];   // en España el conductor va a la izquierda
-  const modo = modoVisto();
+  const modo = modoVisto(), g = sueloEn(coche.x, coche.z);   // la cámara va sobre el suelo del coche
   document.body.classList.toggle('dentro', modo === 2);
   // más ángulo de visión a más velocidad: da sensación de rapidez
   const rapido = Math.min(1, Math.abs(coche.v) / 50);
@@ -8051,18 +8133,18 @@ function actualizarCamara(dt) {
   coche.sacudida *= Math.exp(-5 * dt);
   const sk = coche.sacudida * 0.35, sac = () => (Math.random() - 0.5) * sk;
   if (modo === 2) {   // dentro: los ojos del conductor, a la izquierda del eje, en un asiento alto para ver bien la calle
-    camara.position.set(coche.x + fx * 0.1 + izq[0] * 0.36 + sac(), 1.62 + salto + tiemble + sac(), coche.z + fz * 0.1 + izq[1] * 0.36 + sac());
-    camara.lookAt(coche.x + fx * 40, 0.9 + coche.aLong * 0.02, coche.z + fz * 40);
+    camara.position.set(coche.x + fx * 0.1 + izq[0] * 0.36 + sac(), g + 1.62 + salto + tiemble + sac(), coche.z + fz * 0.1 + izq[1] * 0.36 + sac());
+    camara.lookAt(coche.x + fx * 40, g + 0.9 + coche.aLong * 0.02, coche.z + fz * 40);
     return;
   }
   const cerca = modo === 1;
   let atras = (cerca ? 7 : 13) + rapido * 1.5;
   while (atras > 2 && choca(zona.edif, zona.rejilla, coche.x - fx * atras, coche.z - fz * atras, 0.8)) atras -= 1;   // no dentro de una casa
   const alto = cerca ? 2.6 : 5.5;
-  const objetivo = new THREE.Vector3(coche.x - fx * atras, alto + Math.min(Math.abs(coche.v) / 15, 2) + salto, coche.z - fz * atras);
+  const objetivo = new THREE.Vector3(coche.x - fx * atras, g + alto + Math.min(Math.abs(coche.v) / 15, 2) + salto, coche.z - fz * atras);
   camara.position.lerp(objetivo, 1 - Math.exp(-(cerca ? 10 : 6) * dt));
   camara.position.x += sac(); camara.position.y += sac(); camara.position.z += sac();
-  camara.lookAt(coche.x + fx * (cerca ? 4 : 6), cerca ? 1.1 : 1.2, coche.z + fz * (cerca ? 4 : 6));
+  camara.lookAt(coche.x + fx * (cerca ? 4 : 6), g + (cerca ? 1.1 : 1.2), coche.z + fz * (cerca ? 4 : 6));
 }
 
 // --- HUD ---

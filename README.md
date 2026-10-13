@@ -169,6 +169,16 @@ En Huelva son 135 porches (78 cubiertos, con 1.035 pilares) y 1.810 patios. El P
 
 El Catastro numera las partes de cada respuesta a su manera (la «part4» de un trozo no es la de otro), así que al juntar los trozos las partes se reconocen ahora por su forma y no por su número. En la zona incluida había 472 casas repetidas (la misma pieza con dos números) que se dibujaban dos veces; ya no están, y en las zonas preparadas antes el juego descarta las repetidas al cargarlas.
 
+## Relieve de la zona
+
+El juego usa las alturas del terreno de la zona (`alturas.asc`, del MDT), así que el suelo, las calles y lo que hay sobre ellas siguen el desnivel:
+
+- **Suelo**: malla de unos 20 m con altura interpolada entre las cuatro celdas más cercanas. El coche va por la altura del suelo y la cámara la sigue; la carrocería se inclina con la cuesta.
+- **Casas a nivel**: la planta está a la altura del suelo de la puerta (o la media de la fachada si no hay puerta). Las paredes bajan hasta el punto más bajo de la huella, así que cuesta abajo asoma el basamento y cuesta arriba la casa se mete en la ladera; el alero siempre queda por encima del terreno. Entre una casa y otra, la calle escalona como en la realidad.
+- **Porches**: a la altura de la planta de su casa; los pilares bajan hasta el terreno que tienen debajo.
+- **Lo que va sobre el suelo**: tráfico, peatones, ciclistas, perros, árboles, farolas, restos de los choques, proyectiles, la línea de la ruta y, en las carreras, los arcos, las balizas, la tribuna, los boxes y el podio.
+- **Lo que no cambia**: el agua va plana, y la física no tiene en cuenta la cuesta (la velocidad y la potencia son las mismas en una subida que en llano; solo cambia lo que se ve). Sin datos de altura, todo queda a cero como antes.
+
 ## Casas que cortan calles
 
 Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 97 de 31 910.
