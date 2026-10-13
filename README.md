@@ -242,7 +242,7 @@ Todo esto choca con el coche como las farolas y los árboles.
 - **Golpes grabados**: chapa, metal, cristales, madera y plástico grabados de verdad, según contra qué choques (con un golpe grave sintetizado debajo). Si el navegador no puede reproducir `.ogg` (iPhone antiguo), se oyen los sintetizados de antes.
 - **Decoración de carrera**: vallas rojas y blancas en los bordillos de la recta de salida, torres con pancartas, banderas a cuadros sobre el arco, una tribuna cubierta si cabe, una carpa en los boxes y conos en los checkpoints.
 
-Las piezas son de Kenney (kenney.nl), con licencia CC0: Car Kit 3.1 (coches de los rivales en `modelos/rivales/`, vehículos de `modelos/trafico/`, restos en `modelos/restos/` y el cono), Racing Kit (`modelos/carrera/`) e Impact Sounds (`sonidos/`). Cada carpeta lleva su licencia; los modelos del Car Kit leen su textura de `Textures/colormap.png`.
+Los árboles salen de ez-tree (MIT) con texturas de Poly Haven y TextureCan (CC0), en `vendor/` y `texturas/arboles/`. Las demás piezas son de Kenney (kenney.nl), con licencia CC0: Car Kit 3.1 (coches de los rivales en `modelos/rivales/`, vehículos de `modelos/trafico/`, restos en `modelos/restos/` y el cono), Racing Kit (`modelos/carrera/`) e Impact Sounds (`sonidos/`). Cada carpeta lleva su licencia; los modelos del Car Kit leen su textura de `Textures/colormap.png`.
 
 Desde el entorno en el que se ha hecho esto no se podía llegar a Poly Haven, ambientCG ni a la API de Overpass de OpenStreetMap (la política de red los bloquea), así que no hay texturas ni cielos fotográficos de esos repositorios.
 
@@ -342,7 +342,11 @@ En el tráfico de la carrera circulan los coches de la galería y versiones lige
 
 Todo choca. En Huelva salen 60.
 
-Los árboles son modelos de Kenney Nature Kit (roble, álamo, pino y arbusto), con licencia CC0: están en `modelos/arboles/`. Los peatones y el público de las gradas son figuras humanas hechas en el propio juego (cabeza, torso, brazos y piernas con proporciones reales, con pelo, ojos y ropa de colores al azar). Caminan con el paso animado en el shader, y se paran cuando están quietos. Las licencias de cada paquete van junto a los modelos. Se dibujan solo los árboles cercanos al coche, para que el móvil no sufra.
+Los árboles son **robles, fresnos, pinos y arbustos generados con [ez-tree](https://github.com/dgreenheck/ez-tree)** (Daniel Greenheck, licencia MIT; `vendor/ez-tree.js`), con la corteza en PBR (color, normales y rugosidad de [Poly Haven](https://polyhaven.com)) y las hojas de [TextureCan](https://www.texturecan.com), las dos con licencia CC0 (`texturas/arboles/`). Cada especie tiene dos variantes, con el tamaño, el giro y el verde de cada árbol cambiados, y las hojas se mecen con el viento.
+
+Se reparten según la distancia al coche, árbol a árbol: los 160 más cercanos (80 en el móvil) llevan el árbol completo en versión ligera, de 3.000 a 5.500 triángulos cada uno; el resto, una silueta de 16 triángulos, con el tronco y tres tarjetas cruzadas con las hojas. Así el coste no crece con lo poblado que esté un barrio. Antes eran modelos de Kenney de 70 a 230 triángulos, que ya no se usan (siguen en `modelos/arboles/`).
+
+Los peatones y el público de las gradas son figuras humanas hechas en el propio juego (cabeza, torso, brazos y piernas con proporciones reales, con pelo, ojos y ropa de colores al azar). Caminan con el paso animado en el shader, y se paran cuando están quietos. Las licencias de cada paquete van junto a los modelos y las texturas.
 
 Cada peatón tiene edad, personalidad y, a veces, ocupación, y una ira de 0 a 100. El claxon (`H`), un coche parado a su lado o uno que pasa rozándole la suben; se calma cuando el coche se aleja. Según el carácter reacciona de una manera: el niño y el tímido huyen, el anciano huye despacio, el pasivo y el distraído se quedan quietos, el agresivo, el joven y el protector se enfrentan mirando al coche, el adolescente graba, el curioso saca una foto, y el agente de policía no se mueve y multa. Con ira alta gritan (con un tono según la edad), y algunos golpean el coche o le tiran objetos. Los peatones no llevan accesorios (móvil, cochecito, bastón…) porque el juego no tiene esos modelos: su carácter se nota en el movimiento, el color y el sonido.
 

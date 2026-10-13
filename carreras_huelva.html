@@ -232,6 +232,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="vendor/GLTFLoader.js"></script>
+<script src="vendor/ez-tree.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 /*CORE-START*/
@@ -3978,50 +3979,226 @@ function mallaAguas(aguas) {
 }
 
 // Árboles: troncos y copas en instancias (una sola llamada de dibujo por parte)
-// --- árboles: modelos de Kenney (modelos/arboles/, CC0) por bloques de 150 m; solo se dibujan los bloques cercanos al coche ---
-// Árboles de modelos/arboles/ (Kenney Nature Kit, CC0): sobre todo árboles altos, y algún arbusto
-const ARCHIVOS_ARBOLES = [
-  'modelos/arboles/roble.glb', 'modelos/arboles/roble.glb', 'modelos/arboles/roble.glb', 'modelos/arboles/alamo.glb',
-  'modelos/arboles/alamo.glb', 'modelos/arboles/pino.glb', 'modelos/arboles/pino.glb', 'modelos/arboles/arbusto.glb',
-];
+// --- árboles: ez-tree (MIT, Daniel Greenheck; vendor/ez-tree.js) con corteza PBR (Poly Haven, CC0) y hojas recortadas (TextureCan, CC0),
+// que se mecen con el viento. Cerca del coche, el árbol completo en versión ligera (3.000–5.500 triángulos); lejos, el tronco y tres
+// tarjetas cruzadas con las hojas (16 triángulos). Cada especie tiene dos variantes para que no sean todos iguales ---
+const ESPECIES_ARBOL = {
+  roble: { preset: 'Oak Medium', alto: 9.5, corteza: 'oak', hojas: 'oak_color.png', tinte: 0xd8e8b0 },
+  fresno: { preset: 'Ash Medium', alto: 8.5, corteza: 'oak', hojas: 'ash_color.png', tinte: 0xd8e8b0 },
+  pino: { preset: 'Pine Medium', alto: 11, corteza: 'pine', hojas: 'pine_color.png', tinte: 0xbfd8a8 },
+  arbusto: { preset: 'Bush 1', alto: 2.0, corteza: 'oak', hojas: 'oak_color.png', tinte: 0xc8e0a0 },
+};
+// Reparto de especies: los robles son los más frecuentes
+const REPARTO_ARBOLES = ['roble', 'roble', 'roble', 'fresno', 'fresno', 'pino', 'pino', 'arbusto'];
 const BLOQUE_ARBOLES = 150;    // m
 const DIST_ARBOLES = 260;      // m: más allá de esta distancia no se dibujan
-let bloquesArboles = [];       // { malla, cx, cz }
+const DIST_CERCA_ARBOL = 60;     // m: los árboles más cerca de esto (hasta el cupo) llevan el árbol completo; los demás, la silueta
+const CUPO_CERCA_ARBOL = 160;    // árboles con el modelo completo a la vez (80 en el móvil)
+const CUPO_LEJOS_ARBOL = 6000;   // árboles con la silueta, por especie
+let bloquesArboles = [];       // { malla, cx, cz } de los pinos piñoneros
+let ARBOLES_MAPA = null;       // los árboles del mapa: { celda, rejilla, cupo, cerca, lejos, grupo }
+let ARBOLES_REPARTO = { x: NaN, z: NaN, t: 0 };   // dónde se repartieron los árboles y cuándo
 const geometriasModelo = {};   // archivo → promesa de { geo, materiales }, se carga una sola vez
 function geometriaModelo(archivo) {
   if (!geometriasModelo[archivo]) geometriasModelo[archivo] = new Promise((res, rej) =>
     new THREE.GLTFLoader().load(archivo, g => res(geometriaUnida(g.scene)), undefined, rej));
   return geometriasModelo[archivo];
 }
-async function mallaArbolesModelos(arboles) {
-  const modelos = await Promise.all(ARCHIVOS_ARBOLES.map(geometriaModelo));
-  const rng = mulberry32(99), m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), c = new THREE.Color();
-  const bloques = new Map();
+// Viento: un uniform compartido (lo actualiza el bucle). Las hojas se mecen según su altura, como las de antes
+const VIENTO_ARBOL = { tiempo: { value: 0 } };
+function conViento(material, desde, amplitud) {
+  material.onBeforeCompile = sh => {
+    sh.uniforms.uTiempo = VIENTO_ARBOL.tiempo;
+    sh.uniforms.uDesde = { value: desde };
+    sh.uniforms.uAmplitud = { value: amplitud };
+    sh.vertexShader = 'uniform float uTiempo;\nuniform float uDesde;\nuniform float uAmplitud;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      {
+        float alto = max(0.0, position.y - uDesde);
+        vec3 ip = vec3(0.0);
+        #ifdef USE_INSTANCING
+          ip = instanceMatrix[3].xyz;
+        #endif
+        float fase = ip.x * 0.21 + ip.z * 0.17;
+        float vaiven = sin(uTiempo * 1.6 + fase) * 0.7 + sin(uTiempo * 2.9 + fase * 1.7) * 0.3;
+        transformed.x += vaiven * alto * uAmplitud;
+        transformed.z += cos(uTiempo * 1.3 + fase) * alto * uAmplitud * 0.6;
+      }`);
+  };
+  material.customProgramCacheKey = () => 'viento-arbol-' + desde.toFixed(2) + '-' + amplitud;
+  return material;
+}
+const TEXTURAS_ARBOL = new Map();
+// Textura de texturas/arboles/, repetida (rx, ry): la corteza se repite a lo largo y alrededor del tronco
+function texturaArbol(archivo, rx = 1, ry = 1) {
+  const clave = archivo + '|' + rx + ',' + ry;
+  if (!TEXTURAS_ARBOL.has(clave)) {
+    const t = new THREE.TextureLoader().load('texturas/arboles/' + archivo);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(rx, ry);
+    t.anisotropy = 4;
+    TEXTURAS_ARBOL.set(clave, t);
+  }
+  return TEXTURAS_ARBOL.get(clave);
+}
+const MATERIALES_ARBOL = new Map();
+// Corteza (PBR), hojas recortadas con viento y su sombra (que sigue la forma de las hojas), de una especie
+function materialesArbol(especie, escala, variante = 1) {
+  const e = ESPECIES_ARBOL[especie], clave = especie + '|' + escala.x + ',' + escala.y + '|' + variante;
+  if (MATERIALES_ARBOL.has(clave)) return MATERIALES_ARBOL.get(clave);
+  const c = e.corteza, rx = escala.x, ry = 1 / escala.y, hojas = texturaArbol(e.hojas);
+  const corteza = new THREE.MeshStandardMaterial({
+    map: texturaArbol(c + '_color_1k.jpg', rx, ry), normalMap: texturaArbol(c + '_normal_1k.jpg', rx, ry), roughnessMap: texturaArbol(c + '_roughness_1k.jpg', rx, ry),
+  });
+  const tinte = new THREE.Color(e.tinte).multiplyScalar(variante === 2 ? 0.92 : 1);   // la segunda variante, un verde algo más oscuro
+  const follaje = conViento(new THREE.MeshStandardMaterial({ map: hojas, color: tinte, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.75 }), 0.3 * e.alto, 0.022);
+  const sombra = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: hojas, alphaTest: 0.5 });
+  const out = { corteza, hojas: follaje, sombra };
+  MATERIALES_ARBOL.set(clave, out);
+  return out;
+}
+// Versión ligera del árbol de cerca: menos hojas y menos ramas (el pino, sobre todo, tiene muchísimas)
+function aligerarArbol(t, especie) {
+  t.options.leaves.count = Math.max(4, Math.round(t.options.leaves.count * 0.55));
+  t.options.branch.levels = Math.min(t.options.branch.levels, 2);
+  if (especie === 'pino') {
+    const r = t.options.branch;
+    for (const k of Object.keys(r.sections)) r.sections[k] = Math.max(3, Math.round(r.sections[k] * 0.5));
+    for (const k of Object.keys(r.segments)) r.segments[k] = Math.max(3, Math.round(r.segments[k] * 0.6));
+    for (const k of Object.keys(r.children)) r.children[k] = Math.max(1, Math.round(r.children[k] * 0.6));
+  }
+}
+const GEOMETRIAS_ARBOL = new Map();
+// Árbol de cerca: ramas y hojas de ez-tree, a la altura de la especie; las hojas con sombreado suave (normales desde el centro de la copa)
+function geometriaArbol(especie, semilla) {
+  const clave = especie + '|' + semilla;
+  if (GEOMETRIAS_ARBOL.has(clave)) return GEOMETRIAS_ARBOL.get(clave);
+  const e = ESPECIES_ARBOL[especie], t = new EZTree.Tree();
+  t.loadPreset(e.preset);
+  t.options.seed = semilla * 7919 + 13;
+  t.options.bark.textured = false;
+  aligerarArbol(t, especie);
+  t.generate();
+  const ramas = t.branchesMesh.geometry, hojas = t.leavesMesh.geometry;
+  ramas.computeBoundingBox(); hojas.computeBoundingBox();
+  const caja = ramas.boundingBox.clone().union(hojas.boundingBox), s = e.alto / Math.max(0.01, caja.max.y - caja.min.y);
+  const m = new THREE.Matrix4().makeScale(s, s, s).premultiply(new THREE.Matrix4().makeTranslation(0, -caja.min.y * s, 0));
+  ramas.applyMatrix4(m); hojas.applyMatrix4(m);
+  hojas.computeBoundingBox();
+  const centro = new THREE.Vector3(); hojas.boundingBox.getCenter(centro);
+  const pos = hojas.attributes.position, nor = hojas.attributes.normal, v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).sub(centro).normalize();
+    const nx = nor.getX(i) * 0.4 + v.x * 0.6, ny = nor.getY(i) * 0.4 + v.y * 0.6 + 0.2, nz = nor.getZ(i) * 0.4 + v.z * 0.6, l = Math.hypot(nx, ny, nz) || 1;
+    nor.setXYZ(i, nx / l, ny / l, nz / l);
+  }
+  nor.needsUpdate = true;
+  const out = { ramas, hojas, escalaCorteza: t.options.bark.textureScale };
+  GEOMETRIAS_ARBOL.set(clave, out);
+  return out;
+}
+// Une geometrías indexadas (posición, normal y uv) en una sola
+function unirIndexadas(lista) {
+  const pos = [], nor = [], uv = [], idx = [];
+  let base = 0;
+  for (const g of lista) {
+    const n = g.attributes.position.count;
+    for (let i = 0; i < n; i++) pos.push(g.attributes.position.getX(i), g.attributes.position.getY(i), g.attributes.position.getZ(i));
+    for (let i = 0; i < n; i++) nor.push(g.attributes.normal.getX(i), g.attributes.normal.getY(i), g.attributes.normal.getZ(i));
+    for (let i = 0; i < n; i++) uv.push(g.attributes.uv.getX(i), g.attributes.uv.getY(i));
+    if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(g.index.getX(i) + base);
+    else for (let i = 0; i < n; i++) idx.push(i + base);
+    base += n;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  return geo;
+}
+// Árbol de lejos: el tronco y tres tarjetas cruzadas con las hojas (16 triángulos)
+function geometriaLejana(especie) {
+  const clave = 'lejos|' + especie;
+  if (GEOMETRIAS_ARBOL.has(clave)) return GEOMETRIAS_ARBOL.get(clave);
+  const H = ESPECIES_ARBOL[especie].alto, tarjetas = [];
+  for (let k = 0; k < 3; k++) tarjetas.push(new THREE.PlaneGeometry(H * 0.62, H * 0.8).rotateY(k * Math.PI / 3).translate(0, H * 0.6, 0));
+  const tronco = new THREE.CylinderGeometry(H * 0.012, H * 0.024, H * 0.6, 5, 1, true).translate(0, H * 0.3, 0);
+  const out = { ramas: tronco, hojas: unirIndexadas(tarjetas), escalaCorteza: { x: 1, y: 1 } };
+  GEOMETRIAS_ARBOL.set(clave, out);
+  return out;
+}
+// Una parte (tronco o copa) de una especie, en instancias de capacidad fija: se rellena según dónde esté el coche
+function parteArbol(geo, material, capacidad, { sombra = false, profundidad = null } = {}) {
+  const im = new THREE.InstancedMesh(geo, material, capacidad);
+  im.frustumCulled = false;
+  im.count = 0;
+  im.castShadow = sombra && sombras;
+  if (profundidad) im.customDepthMaterial = profundidad;
+  return im;
+}
+const _matArbol = new THREE.Matrix4(), _giroArbol = new THREE.Quaternion(), _posArbol = new THREE.Vector3(), _escArbol = new THREE.Vector3(), _ejeArbol = new THREE.Vector3(0, 1, 0);
+// Escribe en las dos partes de una especie los árboles de su lista: la posición, el giro y el tamaño de cada uno
+// (sin color por instancia: con él, r128 reutiliza mal el programa de sombreado entre mallas que no lo llevan)
+function escribirArboles(ramas, hojas, lista) {
+  const n = Math.min(lista.length, ramas.instanceMatrix.count);
+  for (let i = 0; i < n; i++) {
+    const a = lista[i], esc = 0.85 + 0.3 * a.tam;
+    _matArbol.compose(_posArbol.set(a.x, 0, a.z), _giroArbol.setFromAxisAngle(_ejeArbol, a.giro), _escArbol.set(esc, esc * (0.92 + 0.16 * a.tono2), esc));
+    ramas.setMatrixAt(i, _matArbol);
+    hojas.setMatrixAt(i, _matArbol);
+  }
+  ramas.count = hojas.count = n;
+  ramas.instanceMatrix.needsUpdate = true;
+  hojas.instanceMatrix.needsUpdate = true;
+}
+// Los árboles del mapa: cada uno lleva un especie y una variante, y se dibuja con el árbol completo o con la silueta según la distancia
+function mallaArbolesEz(arboles) {
+  const rng = mulberry32(99), celda = 50, rejilla = new Map();
   for (const [x, z] of arboles) {
-    const bx = Math.floor(x / BLOQUE_ARBOLES), bz = Math.floor(z / BLOQUE_ARBOLES), k = Math.floor(rng() * modelos.length);
-    const clave = bx + ',' + bz + ',' + k;
-    if (!bloques.has(clave)) bloques.set(clave, { bx, bz, k, lista: [] });
-    bloques.get(clave).lista.push([x, z, rng(), rng()]);
+    const a = { x, z, especie: REPARTO_ARBOLES[Math.floor(rng() * REPARTO_ARBOLES.length)], variante: 1 + Math.floor(rng() * 2), giro: rng() * Math.PI * 2, tam: rng(), tono: rng(), tono2: rng() };
+    const k = Math.floor(x / celda) + ',' + Math.floor(z / celda);
+    if (!rejilla.has(k)) rejilla.set(k, []);
+    rejilla.get(k).push(a);
   }
-  const grupo = new THREE.Group(), mallas = [];
-  for (const { bx, bz, k, lista } of bloques.values()) {
-    const im = new THREE.InstancedMesh(modelos[k].geo, modelos[k].materiales, lista.length);
-    im.frustumCulled = false;
-    lista.forEach(([x, z, giro, tamano], i) => {
-      const esc = 0.85 + 0.3 * tamano;
-      m.compose(new THREE.Vector3(x, 0, z), q.setFromAxisAngle(eje, giro * Math.PI * 2), uno.set(esc, esc, esc));
-      im.setMatrixAt(i, m);
-      im.setColorAt(i, c.setRGB(0.78 + 0.12 * tamano, 0.95 + 0.05 * tamano, 0.55 + 0.1 * tamano));   // del verde azulado de los modelos a un verde más natural, con algo de variación
-    });
-    im.instanceMatrix.needsUpdate = true;
-    if (im.instanceColor) im.instanceColor.needsUpdate = true;
-    im.castShadow = sombras;
-    grupo.add(im);
-    mallas.push({ malla: im, cx: (bx + 0.5) * BLOQUE_ARBOLES, cz: (bz + 0.5) * BLOQUE_ARBOLES });
+  const grupo = new THREE.Group(), cupo = sombras ? CUPO_CERCA_ARBOL : Math.round(CUPO_CERCA_ARBOL / 2);
+  const A = { celda, rejilla, cupo, cerca: new Map(), lejos: new Map(), grupo };
+  for (const especie of Object.keys(ESPECIES_ARBOL)) {
+    for (const variante of [1, 2]) {
+      const geo = geometriaArbol(especie, variante), mat = materialesArbol(especie, geo.escalaCorteza, variante);
+      const ramas = parteArbol(geo.ramas, mat.corteza, cupo, { sombra: true }), hojas = parteArbol(geo.hojas, mat.hojas, cupo, { sombra: true, profundidad: mat.sombra });
+      A.cerca.set(especie + '|' + variante, { ramas, hojas });
+      grupo.add(ramas, hojas);
+    }
+    const lejana = geometriaLejana(especie), mat = materialesArbol(especie, lejana.escalaCorteza);
+    const ramas = parteArbol(lejana.ramas, mat.corteza, CUPO_LEJOS_ARBOL), hojas = parteArbol(lejana.hojas, mat.hojas, CUPO_LEJOS_ARBOL);
+    A.lejos.set(especie, { ramas, hojas });
+    grupo.add(ramas, hojas);
   }
-  bloquesArboles.push(...mallas);   // junto a los de los pinos
+  ARBOLES_MAPA = A;
+  ARBOLES_REPARTO = { x: NaN, z: NaN, t: 0 };
   return grupo;
 }
+// Reparte los árboles alrededor del coche: los más cercanos (hasta el cupo) con el árbol completo; los demás de la distancia, con la silueta
+function repartirArboles(x, z) {
+  const A = ARBOLES_MAPA, R = DIST_ARBOLES, c = A.celda, cerca = [], lejos = new Map();
+  for (let i = Math.floor((x - R) / c); i <= Math.floor((x + R) / c); i++)
+    for (let j = Math.floor((z - R) / c); j <= Math.floor((z + R) / c); j++)
+      for (const a of A.rejilla.get(i + ',' + j) || []) {
+        const d = Math.hypot(a.x - x, a.z - z);
+        if (d > R) continue;
+        if (d < DIST_CERCA_ARBOL) cerca.push([d, a]);
+        else { if (!lejos.has(a.especie)) lejos.set(a.especie, []); lejos.get(a.especie).push(a); }
+      }
+  cerca.sort((p, q) => p[0] - q[0]);
+  const listas = new Map();
+  cerca.forEach(([, a], k) => {
+    if (k < A.cupo) { const clave = a.especie + '|' + a.variante; if (!listas.has(clave)) listas.set(clave, []); listas.get(clave).push(a); }
+    else { if (!lejos.has(a.especie)) lejos.set(a.especie, []); lejos.get(a.especie).push(a); }
+  });
+  for (const [clave, parte] of A.cerca) escribirArboles(parte.ramas, parte.hojas, listas.get(clave) || []);
+  for (const [especie, parte] of A.lejos) escribirArboles(parte.ramas, parte.hojas, lejos.get(especie) || []);
+}
+
 // Pinos piñoneros (los pinares de la costa): tronco alto y algo torcido, copa ancha y plana en dos o tres masas
 function mallaPinos(pinos) {
   const grupo = new THREE.Group();
@@ -4056,16 +4233,24 @@ function mallaPinos(pinos) {
 function mallaArboles(todos) {
   const grupo = new THREE.Group();
   bloquesArboles = [];
+  ARBOLES_MAPA = null;
   const pinos = todos.filter(a => a[2] === 'pino'), arboles = todos.filter(a => a[2] !== 'pino');
   if (pinos.length) grupo.add(mallaPinos(pinos));
   if (!arboles.length) return grupo;
-  if (!ARCHIVOS_ARBOLES.length) return grupo.add(mallaArbolesProcedural(arboles)), grupo;
-  mallaArbolesModelos(arboles).then(g => grupo.add(g), () => grupo.add(mallaArbolesProcedural(arboles)));   // si no cargan, árboles sencillos
+  try { grupo.add(mallaArbolesEz(arboles)); }
+  catch (err) { console.warn('Árboles ez-tree: ' + err.message); grupo.add(mallaArbolesProcedural(arboles)); }   // si no carga, árboles sencillos
   return grupo;
 }
 // Solo se dibujan los bloques de árboles cercanos al coche
 function actualizarArboles() {
   for (const b of bloquesArboles) b.malla.visible = Math.hypot(b.cx - coche.x, b.cz - coche.z) < DIST_ARBOLES + BLOQUE_ARBOLES;
+  if (!ARBOLES_MAPA) return;
+  // el reparto se rehace cada 8 m o cada 0,8 s: a lo largo de la carrera no se nota y basta con pocas escrituras
+  const ahora = performance.now() / 1000;
+  if (Math.hypot(coche.x - ARBOLES_REPARTO.x, coche.z - ARBOLES_REPARTO.z) > 8 || ahora - ARBOLES_REPARTO.t > 0.8) {
+    ARBOLES_REPARTO = { x: coche.x, z: coche.z, t: ahora };
+    repartirArboles(coche.x, coche.z);
+  }
 }
 function mallaArbolesProcedural(arboles) {
   const n = arboles.length, grupo = new THREE.Group();
@@ -7968,6 +8153,7 @@ function bucle() {
   const dtReloj = reloj.getDelta(), dt = FICHA.abierta ? 0 : Math.min(0.05, dtReloj);   // con una casa abierta, la partida está parada
   const ahora = performance.now() / 1000;
   materialAgua.uniforms.uTiempo.value = ahora % 1000;   // módulo: los móviles calculan peor con números grandes
+  VIENTO_ARBOL.tiempo.value = ahora % 1000;
   actualizarMobiliario(ahora);
   actualizarBloquesFarolas();
   leerMando(ahora);

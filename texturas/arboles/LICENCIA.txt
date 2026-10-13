@@ -1,0 +1,6 @@
+Texturas de los árboles (carpeta texturas/arboles/)
+
+- Corteza (oak_*, pine_*: color, normal y rugosidad, 1k): Poly Haven (https://polyhaven.com), licencia CC0.
+- Hojas (oak_color.png, ash_color.png, pine_color.png): TextureCan (https://www.texturecan.com), licencia CC0.
+
+Estas texturas se usan con el generador de árboles ez-tree (vendor/ez-tree.js), de Daniel Greenheck, licencia MIT.
