@@ -3655,7 +3655,20 @@ function rejillaEsquinas(esquinas) {
 
 // Calzada, aceras, bordillos y arcenes de cada calle (anchos del zip; las aceras, medidas hasta las fachadas). Caminos de tierra sin aceras.
 // En los cruces, las aceras doblan la esquina (esquinasCruces)
+// Paso (m) entre puntos de las calles y de la foto aérea: el relieve se aplica por vértices, así que entre dos puntos lejanos
+// el suelo queda recto y la calzada se hunde o asoma. Con puntos a lo sumo cada 7,2 m (la rejilla de cotas) siguen al terreno
+const PASO_MALLA = 7.2;
+function remuestrar(pts, paso) {
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / paso);
+    for (let k = 1; k < n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]);
+    if (n > 0) out.push(b);
+  }
+  return out;
+}
 function mallaCarreteras(tramos, esq) {
+  tramos = tramos.map(t => ({ ...t, pts: remuestrar(t.pts, PASO_MALLA) }));
   const calzada = nuevaMalla(), aceras = nuevaMalla(), bordillos = nuevaMalla(), rigolas = nuevaMalla();
   const ACERA = [0.5, 0.48, 0.45], CANTO = [0.7, 0.68, 0.64], BORDILLO = [0.56, 0.54, 0.51], ARCEN = [0.42, 0.41, 0.39], RIGOLA = [0.6, 0.59, 0.56];
   // cara vertical (bordillo) en el desplazamiento s, de y0 a y1; mira hacia el centro de la calle
@@ -3853,11 +3866,11 @@ function mallaFoto(foto, pistas) {
     .map(([c, f]) => localDeMercator(g.A * c + g.B * f + g.C, g.D * c + g.E * f + g.F));
   const x0 = Math.min(...esquinas.map(e => e[0])), x1 = Math.max(...esquinas.map(e => e[0]));
   const z0 = Math.min(...esquinas.map(e => e[1])), z1 = Math.max(...esquinas.map(e => e[1]));
-  const NX = Math.min(400, Math.max(8, Math.round((x1 - x0) / PASO_RELIEVE))), NZ = Math.min(400, Math.max(8, Math.round((z1 - z0) / PASO_RELIEVE))), pos = [], uv = [], idx = [];
+  const NX = Math.min(900, Math.max(8, Math.round((x1 - x0) / PASO_MALLA))), NZ = Math.min(900, Math.max(8, Math.round((z1 - z0) / PASO_MALLA))), pos = [], uv = [], idx = [];
   for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
     const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ;
     const [X, Y] = mercatorDeLocal(x, z), [u, v] = uvOrtofoto(X, Y, g, W, H);
-    pos.push(x, -0.1, z); uv.push(u, v);
+    pos.push(x, -0.3, z); uv.push(u, v);   // bajo la calzada (+0,05 m) y las aceras, con margen para lo que queda entre vértices
   }
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
     const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1;

@@ -173,7 +173,7 @@ El Catastro numera las partes de cada respuesta a su manera (la «part4» de un 
 
 El juego usa las alturas del terreno de la zona (`alturas.asc`, del MDT), así que el suelo, las calles y lo que hay sobre ellas siguen el desnivel:
 
-- **Suelo**: malla de unos 20 m con altura interpolada entre las cuatro celdas más cercanas. El coche va por la altura del suelo y la cámara la sigue; la carrocería se inclina con la cuesta.
+- **Suelo**: malla de unos 20 m con altura interpolada entre las cuatro celdas más cercanas. La foto aérea y las calles tienen puntos cada 7,2 m (como la rejilla de cotas), para que la foto no asome sobre la calzada ni la calzada se hunda entre dos puntos. El coche va por la altura del suelo y la cámara la sigue; la carrocería se inclina con la cuesta.
 - **Casas a nivel**: la planta está a la altura del suelo de la puerta (o la media de la fachada si no hay puerta). Las paredes bajan hasta el punto más bajo de la huella, así que cuesta abajo asoma el basamento y cuesta arriba la casa se mete en la ladera; el alero siempre queda por encima del terreno. Entre una casa y otra, la calle escalona como en la realidad.
 - **Porches**: a la altura de la planta de su casa; los pilares bajan hasta el terreno que tienen debajo.
 - **Lo que va sobre el suelo**: tráfico, peatones, ciclistas, perros, árboles, farolas, restos de los choques, proyectiles, la línea de la ruta y, en las carreras, los arcos, las balizas, la tribuna, los boxes y el podio.
