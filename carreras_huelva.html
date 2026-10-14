@@ -3357,14 +3357,19 @@ function bandasH(m, pts, s0, s1, y, c, tu = 1, tv = 1) {
   const cum = acumulados(pts);
   const V = (x, z, s, d) => m.v(x, y, z, c, d / tu, s / tv);
   const normal = k => { const dx = pts[k + 1][0] - pts[k][0], dz = pts[k + 1][1] - pts[k][1], L = Math.hypot(dx, dz); return L < 1e-6 ? null : [-dz / L, dx / L]; };
+  // a lo ancho, franjas de unos 4 m: el terreno cambia de un lado a otro de la calle y una franja plana entre los bordes se separa de él
+  const K = Math.min(6, Math.max(1, Math.ceil(Math.abs(s1 - s0) / 4)));
   for (let k = 0; k < pts.length - 1; k++) {
     const n = normal(k);
     if (!n) continue;
     const [ax, az] = pts[k], [bx, bz] = pts[k + 1], da = cum[k], db = cum[k + 1];
-    const A0 = [ax + n[0] * s0, az + n[1] * s0], A1 = [ax + n[0] * s1, az + n[1] * s1];
-    const B0 = [bx + n[0] * s0, bz + n[1] * s0], B1 = [bx + n[0] * s1, bz + n[1] * s1];
-    V(A0[0], A0[1], s0, da); V(B1[0], B1[1], s1, db); V(B0[0], B0[1], s0, db);
-    V(A0[0], A0[1], s0, da); V(A1[0], A1[1], s1, da); V(B1[0], B1[1], s1, db);
+    for (let j = 0; j < K; j++) {
+      const sa = s0 + (s1 - s0) * j / K, sb = s0 + (s1 - s0) * (j + 1) / K;
+      const A0 = [ax + n[0] * sa, az + n[1] * sa], A1 = [ax + n[0] * sb, az + n[1] * sb];
+      const B0 = [bx + n[0] * sa, bz + n[1] * sa], B1 = [bx + n[0] * sb, bz + n[1] * sb];
+      V(A0[0], A0[1], sa, da); V(B1[0], B1[1], sb, db); V(B0[0], B0[1], sa, db);
+      V(A0[0], A0[1], sa, da); V(A1[0], A1[1], sb, da); V(B1[0], B1[1], sb, db);
+    }
   }
   // en cada vértice, un cuadrilátero une la franja de un tramo con la del siguiente (no quedan huecos en las curvas);
   // se ordena para que mire hacia arriba (si no, se vería oscuro, como cara trasera)
