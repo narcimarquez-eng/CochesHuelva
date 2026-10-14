@@ -3482,7 +3482,16 @@ function bandaVar(m, pts, cum, d0, d1, sA, sB, y, c, tu, tv) {
   }
 }
 // Triángulo con la cara de delante hacia la normal n (si no, la luz lo dejaría oscuro, como cara trasera)
+// Si el triángulo es largo (una esquina o una rotonda sacan triángulos de decenas de metros), se parte en cuatro hasta que quepa
+// en PASO_MALLA: entre dos vértices lejanos el terreno no es recto, y la calzada se hundiría o asomaría la foto aérea
 function triH(m, a, b, c, n, col, tu) {
+  const lado = (p, q) => Math.hypot(p[0] - q[0], p[2] - q[2]);
+  if (Math.max(lado(a, b), lado(b, c), lado(c, a)) > PASO_MALLA) {
+    const medio = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2];
+    const ab = medio(a, b), bc = medio(b, c), ca = medio(c, a);
+    triH(m, a, ab, ca, n, col, tu); triH(m, ab, b, bc, n, col, tu); triH(m, ca, bc, c, n, col, tu); triH(m, ab, bc, ca, n, col, tu);
+    return;
+  }
   const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
   if ((uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2] < 0) [b, c] = [c, b];
   for (const p of [a, b, c]) m.v(p[0], p[1], p[2], col, p[0] / tu, p[2] / tu, n[0], n[1], n[2]);
