@@ -6036,13 +6036,16 @@ $('destinoRuta').value = 'Moguer';
 // Las calles de la franja (la consulta a Overpass, con un segundo servidor por si el primero no responde)
 async function pedirCalles(sur, oeste, norte, este) {
   const q = `[out:json][timeout:90];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"](${sur},${oeste},${norte},${este});out body geom;`;
+  const fallos = [];
   for (const url of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
+    const servidor = new URL(url).host;
     try {
       const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
       if (r.ok) return r.json();
-    } catch (err) { /* probamos el siguiente servidor */ }
+      fallos.push(`${servidor} responde ${r.status}`);
+    } catch (err) { fallos.push(`${servidor}: ${err.message}`); }   // sin conexión, o el navegador bloquea la respuesta
   }
-  throw new Error('OpenStreetMap no respondió (Overpass); prueba más tarde');
+  throw new Error('Overpass (OpenStreetMap) no respondió: ' + fallos.join('; ') + '. Prueba con centros más cercanos o con la ruta de ejemplo');
 }
 // Overpass → calles en el formato del Paseo (calles.geojson): el juego lee de ahí el tipo, el sentido y los accesos
 function callesDeOverpass(osm) {
