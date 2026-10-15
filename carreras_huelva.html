@@ -6060,6 +6060,12 @@ function callesDeOverpass(osm) {
   }
   return { type: 'FeatureCollection', features };
 }
+// El cruce más cercano a un punto, con la distancia hasta él (nodo -1 si no hay ninguno con calles conectadas)
+function nodoMasCercano(G, x, z) {
+  let mejor = -1, d2 = Infinity;
+  G.nodos.forEach((n, i) => { if (!n.comp) return; const e = (n.x - x) ** 2 + (n.z - z) ** 2; if (e < d2) { d2 = e; mejor = i; } });
+  return { nodo: mejor, dist: Math.sqrt(d2) };
+}
 // Pide las calles entre los dos centros, calcula el camino por ellas y carga la zona a lo largo de él
 async function calcularRuta(origen, destino) {
   const sur = Math.min(origen.lat, destino.lat) - 0.02, norte = Math.max(origen.lat, destino.lat) + 0.02;
@@ -6073,13 +6079,15 @@ async function calcularRuta(origen, destino) {
   $('estado').textContent = 'Calculando el camino por las calles…';
   await new Promise(r => setTimeout(r, 0));
   const tramos = parsearCalles(geo, sentidosOSM(osm));
-  const G = construirGrafo(tramos), celdas = construirRejillaSegmentos(tramos);
+  const G = construirGrafo(tramos);
   const ini = proyectar(origen.lon, origen.lat), fin = proyectar(destino.lon, destino.lat);
-  let nodoFin = 0, cercano = Infinity;
-  G.nodos.forEach((n, i) => { const d = Math.hypot(n.x - fin[0], n.z - fin[1]); if (d < cercano) { cercano = d; nodoFin = i; } });
-  const r = rutaDesde(G, celdas, ini[0], ini[1], Math.atan2(fin[0] - ini[0], fin[1] - ini[1]), nodoFin);
-  if (!r) throw new Error('no hay camino por calles entre los dos centros');
-  RUTA_GPX = r.pts.map(([x, z]) => [ORIGEN.lat - z / K_LAT, ORIGEN.lon + x / K_LON]);   // del camino en metros a lat, lon
+  // el centro de una ciudad no siempre cae sobre una calle: se parte del cruce más cercano, sea cual sea la distancia (hasta 3 km)
+  const a = nodoMasCercano(G, ini[0], ini[1]), b = nodoMasCercano(G, fin[0], fin[1]);
+  for (const [c, nombre] of [[a, origen.nombre], [b, destino.nombre]]) if (c.nodo < 0 || c.dist > 3000) throw new Error(`no hay calles a menos de 3 km de ${nombre}`);
+  const res = a.nodo === b.nodo ? { camino: [] } : dijkstra(G, a.nodo, b.nodo);
+  if (!res) throw new Error(`no hay camino por calles entre ${origen.nombre} y ${destino.nombre}`);
+  const camino = [ini, ...(res.camino.length ? polilinea(G, res.camino) : []), fin];   // el centro, las calles y el otro centro
+  RUTA_GPX = camino.map(([x, z]) => [ORIGEN.lat - z / K_LAT, ORIGEN.lon + x / K_LON]);   // del camino en metros a lat, lon
   const zip = new JSZip();
   zip.file('calles.geojson', JSON.stringify(geo));
   zip.file('datos/osm.json', JSON.stringify(osm));
