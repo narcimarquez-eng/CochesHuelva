@@ -179,6 +179,14 @@ El juego usa las alturas del terreno de la zona (`alturas.asc`, del MDT), así q
 - **Lo que va sobre el suelo**: tráfico, peatones, ciclistas, perros, árboles, farolas, restos de los choques, proyectiles, la línea de la ruta y, en las carreras, los arcos, las balizas, la tribuna, los boxes y el podio.
 - **Lo que no cambia**: el agua va plana, y la física no tiene en cuenta la cuesta (la velocidad y la potencia son las mismas en una subida que en llano; solo cambia lo que se ve). Sin datos de altura, todo queda a cero como antes.
 
+## Modo ruta (primera versión)
+
+En el menú, el campo **Ruta** acepta un fichero GPX (de Google Maps, OpenStreetMap u otro) con el camino entre dos puntos. La zona se construye solo a lo largo de ese camino: casas, calles, árboles y farolas a 350 m a cada lado. El terreno y la foto aérea siguen siendo los de la zona completa, así que alrededor se ve el campo y el mar. El coche empieza al principio de la ruta, mirando hacia ella, y el destino es el final; al llegar, se acaba la partida. **Quitar ruta** vuelve a la zona completa.
+
+Probado con la zona de Huelva y la ruta de ejemplo `rutas/ejemplo-huelva.gpx` (una avenida de 1,6 km): de 31.813 casas a 220, de 2.421 calles a 42 y de 29.454 árboles a 465. El coche empieza en el primer punto de la ruta y el destino está en el último.
+
+Lo que queda para más adelante: solo sirve para una ruta dentro de una zona ya cargada (la zona completa tiene que estar en el zip); el agua, los parques y las vallas no se recortan todavía; y los datos no se piden en directo, así que una ruta entre dos ciudades enteras necesitará cargar el Catastro y el MDT por trozos mientras se conduce.
+
 ## Casas que cortan calles
 
 Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 97 de 31 910.
