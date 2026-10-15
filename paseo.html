@@ -3271,9 +3271,10 @@ async function buildWorld(src){
     const osmEntero=raw.osm&&!raw.osm.incompleto;   // si quedó incompleto, se vuelve a pedir (y si no llega, vale lo guardado)
     if(osmEntero)repSet('osm','ok',`Guardado en este navegador (${fmt((raw.osm.elements||[]).length)} elementos): no se ha descargado nada.`);
     const pO=osmEntero?Promise.resolve(raw.osm):fetchOSM(src.geo,area).then(j=>j&&!(j.incompleto&&raw.osm&&raw.osm.elements.length>j.elements.length)?j:(raw.osm||j));
-    const catOk=enEspana(src.geo)&&area<=CAT_MAX_KM2,catDone=raw.cat&&(!raw.cat.tiles||!(raw.cat.failed||[]).length);
+    const areaCat=src.poligono&&src.poligono.length>=3?areaPoligonoKm2(src.poligono):area;   // una zona dibujada (la franja de una ruta) cuenta lo de dentro
+    const catOk=enEspana(src.geo)&&areaCat<=CAT_MAX_KM2,catDone=raw.cat&&(!raw.cat.tiles||!(raw.cat.failed||[]).length);
     if(!enEspana(src.geo))repSet('cat','nada','Fuera de España no hay Catastro: las casas salen de OpenStreetMap.');
-    else if(!catOk)repSet('cat','nada',`La zona mide ${fmt(area,1)} km² y el Catastro solo se pide hasta ${CAT_MAX_KM2} km²: las casas salen de OpenStreetMap.`);
+    else if(!catOk)repSet('cat','nada',`La zona mide ${fmt(areaCat,1)} km² y el Catastro solo se pide hasta ${CAT_MAX_KM2} km²: las casas salen de OpenStreetMap.`);
     const pC=catDone?Promise.resolve({partes:raw.cat.partes||catPartes(raw.cat),fails:0,cached:true})
       :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles,trozoDentro(src.poligono),raw.cat&&raw.cat.failed,raw.cat&&raw.cat.porches).catch(e=>({err:e})):null;
     // parcelas: solo con Catastro; las que faltan (o todas, si catastro.php no sabía darlas) se vuelven a pedir
@@ -3948,6 +3949,9 @@ async function restoreColors(){
 /* ---------- Archivo de la zona (.zip) ---------- */
 /* Recorte de lo exportado por el polígono dibujado ([lat, lon]): dentroDe(feature) mira su centro; linea(feature) corta una calle
    en el borde y devuelve los trozos de dentro. Sin polígono, null */
+/* Área de un polígono [lat, lon] en km² */
+function areaPoligonoKm2(poli){const kx=111320*Math.cos(poli[0][0]*Math.PI/180),ky=110540;let a=0;
+  for(let i=0,k=poli.length-1;i<poli.length;k=i++)a+=poli[k][1]*kx*poli[i][0]*ky-poli[i][1]*kx*poli[k][0]*ky;return Math.abs(a)/2/1e6;}
 function recortePoligono(poli){
   if(!poli||poli.length<3)return null;
   const dentro=(lo,la)=>{let d=false;for(let i=0,k=poli.length-1;i<poli.length;k=i++){const [ai,oi]=poli[i],[ak,ok]=poli[k];if((ai>la)!==(ak>la)&&lo<(ok-oi)*(la-ai)/(ak-ai)+oi)d=!d;}return d;};
@@ -4137,7 +4141,7 @@ async function zoneExport(opts={}){
     if(opts.jugar){
       busy('Llevando la zona al juego…',0.95);
       const clave=await guardarParaCarreras(zip,zid||slug,nm,g);busy('');loading=false;
-      location.href='carreras_huelva.html?zona='+encodeURIComponent(clave);return;}
+      location.href='carreras_huelva.html?zona='+encodeURIComponent(clave)+(RUTA_JUEGO?'&ruta=1':'');return;}
     if(await download(zip,`zona-${slug}.zip`))toast(`<p>Descargado <b>zona-${esc(slug)}.zip</b> (${fmtMB(zip.size)}): cotas, alturas, ortofoto, ${fmt(calles.length)} calles, ${fmt(casas.length)} casas, mapa, curvas cada ${fmt(cv.eq)} m e informe. Para volver a verla aquí, ábrelo con <b>Abrir archivo del visor</b>.</p>`,9000);
   }catch(err){busy('');console.error(err);toast(`<p><b>No he podido preparar el archivo de la zona.</b></p><p>${esc(err.message||err)}</p>`,0);}
   loading=false;
@@ -4374,6 +4378,11 @@ $('#sZip').addEventListener('click',zoneExport);
    se lleva sola al juego. La zona se construye en 3D igualmente: ahí se miden los anchos de calles y aceras ---------- */
 const JUEGO=(()=>{const q=new URLSearchParams(location.search),la=parseFloat(q.get('lat')),lo=parseFloat(q.get('lon'));
   return {activo:q.has('jugar'),centro:isFinite(la)&&isFinite(lo)?[la,lo]:null,hecho:new Set()};})();
+/* Ruta desde el juego (paseo.html?jugar=1&ruta=1): la franja alrededor de la ruta que calculó el juego se prepara sola, como una
+   zona dibujada; al terminar vuelve al juego con &ruta=1 y allí se juega con esa ruta */
+const RUTA_JUEGO=(()=>{if(!new URLSearchParams(location.search).has('ruta'))return null;
+  try{const p=JSON.parse(localStorage.getItem('cochesHuelva.rutaPendiente')||'null');return p&&p.poligono&&p.geo?p:null;}catch(e){return null;}})();
+if(RUTA_JUEGO)window.addEventListener('load',()=>setTimeout(()=>scanZone(RUTA_JUEGO.geo,RUTA_JUEGO.nombre,{force:true,poligono:RUTA_JUEGO.poligono}),300));
 if(JUEGO.activo)setInterval(()=>{   // vale para todos los caminos: zona nueva, guardada o abierta desde un .zip
   if(W&&W.geo&&!loading&&!JUEGO.hecho.has(W)){JUEGO.hecho.add(W);busy('Preparando la zona para el juego…',0.9);zoneExport({jugar:true});}
 },400);

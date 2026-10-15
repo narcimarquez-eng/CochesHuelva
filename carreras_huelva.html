@@ -6019,8 +6019,9 @@ async function cargarZona(archivo) {
   Object.assign(Fachadas, { intentadas: new Set(), parado: false, fallos: 0, pendientes: [] });
 }
 
-// --- ruta entre dos centros de ciudad: las calles de la franja entre ellos se piden a OpenStreetMap (Overpass), se calcula el camino
-// por ellas y la zona se construye a lo largo de ese camino, como con un GPX. Los centros son aproximados ---
+// --- ruta entre dos centros de ciudad: OSRM calcula el camino por carreteras reales y el Paseo prepara una franja alrededor de él
+// (casas del Catastro, foto aérea, árboles y relieve, como cualquier zona); al volver, la zona se juega con esa ruta. Los centros
+// son aproximados ---
 const CENTROS_RUTA = [
   { nombre: 'Huelva', lat: 37.2614, lon: -6.9447 },
   { nombre: 'Moguer', lat: 37.2730, lon: -6.8380 },
@@ -6044,76 +6045,47 @@ async function pedirRutaOSRM(origen, destino) {
   if (j.code !== 'Ok' || !j.routes || !j.routes.length) throw new Error('OSRM no encuentra camino: ' + (j.message || j.code));
   return { pts: j.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon]), km: j.routes[0].distance / 1000 };
 }
-// Puntos de la ruta separados al menos m metros (para la consulta de las calles de alrededor, que no puede ser enorme)
-function puntosCada(pts, m) {
-  const out = [pts[0]];
-  let d = 0;
-  for (let k = 1; k < pts.length; k++) {
-    const [a, b] = pts[k - 1], [c, e] = pts[k];
-    d += Math.hypot((c - a) * K_LAT, (e - b) * 111320 * Math.cos(a * Math.PI / 180));
-    if (d >= m) { out.push(pts[k]); d = 0; }
+// Douglas-Peucker: quita los puntos que se separan menos de tol metros de la línea entre sus vecinos (P en metros)
+function simplificar(P, tol) {
+  if (P.length < 3) return P.slice();
+  const queda = new Uint8Array(P.length);
+  queda[0] = queda[P.length - 1] = 1;
+  const pila = [[0, P.length - 1]];
+  while (pila.length) {
+    const [i, j] = pila.pop(), [ax, ay] = P[i], [bx, by] = P[j], dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy) || 1;
+    let dmax = 0, k = -1;
+    for (let m = i + 1; m < j; m++) { const d = Math.abs((P[m][0] - ax) * dy - (P[m][1] - ay) * dx) / L; if (d > dmax) { dmax = d; k = m; } }
+    if (dmax > tol) { queda[k] = 1; pila.push([i, k], [k, j]); }
   }
-  if (out[out.length - 1] !== pts[pts.length - 1]) out.push(pts[pts.length - 1]);
-  return out;
+  return P.filter((_, m) => queda[m]);
 }
-// Las calles que pide el filtro de Overpass, como el Paseo: formulario, 70 s como mucho por servidor y otro servidor si falla.
-// Sin la cabecera de formulario Overpass rechaza la consulta y el navegador solo dice «Failed to fetch»
-async function pedirCalles(filtro) {
-  const q = `[out:json][timeout:90];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"]${filtro};out body geom;`;
-  const fallos = [];
-  for (const url of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter']) {
-    const servidor = new URL(url).host, ac = new AbortController(), plazo = setTimeout(() => ac.abort(), 70000);
-    try {
-      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ac.signal });
-      if (r.ok) { const j = await r.json(); clearTimeout(plazo); if (j && Array.isArray(j.elements)) return j; fallos.push(`${servidor}: respuesta sin datos`); continue; }
-      fallos.push(`${servidor} responde ${r.status}`);
-    } catch (err) { fallos.push(`${servidor}: ${err.name === 'AbortError' ? 'no respondió en 70 s' : err.message}`); }
-    clearTimeout(plazo);
+// Franja a r metros a cada lado de la ruta, como polígono [[lat, lon], …] para el Paseo. La ruta se simplifica antes (80 m)
+// para que el borde no se cruce en las curvas cerradas, y los extremos se alargan r metros
+const ANCHO_FRANJA = 300;
+function franjaDeRuta(pts, r) {
+  const kx = 111320 * Math.cos(pts[0][0] * Math.PI / 180), ky = K_LAT;
+  const S = simplificar(pts.map(([la, lo]) => [lo * kx, la * ky]), 80), izq = [], der = [];
+  for (let i = 0; i < S.length; i++) {
+    const a = S[Math.max(0, i - 1)], b = S[Math.min(S.length - 1, i + 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const tx = (b[0] - a[0]) / L, ty = (b[1] - a[1]) / L;
+    let [px, py] = S[i];
+    if (i === 0) { px -= tx * r; py -= ty * r; } else if (i === S.length - 1) { px += tx * r; py += ty * r; }
+    izq.push([px - ty * r, py + tx * r]); der.push([px + ty * r, py - tx * r]);
   }
-  throw new Error('Overpass no dio las calles: ' + fallos.join('; '));
+  return [...izq, ...der.reverse()].map(([x, y]) => [+(y / ky).toFixed(6), +(x / kx).toFixed(6)]);
 }
-// Overpass → calles en el formato del Paseo (calles.geojson): el juego lee de ahí el tipo, el sentido y los accesos
-function callesDeOverpass(osm) {
-  const features = [];
-  for (const el of osm.elements) {
-    if (el.type !== 'way' || !el.geometry || el.geometry.length < 2 || !el.tags || !el.tags.highway) continue;
-    const t = el.tags;
-    features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: el.geometry.map(p => [p.lon, p.lat]) }, properties: {
-      osm_id: el.id, nombre: t.name || '', tipo: t.highway, superficie: t.surface || '', carriles: t.lanes ? +t.lanes : null,
-      'osm:maxspeed': t.maxspeed, 'osm:oneway': t.oneway, 'osm:junction': t.junction, 'osm:service': t.service, 'osm:access': t.access,
-      'osm:motor_vehicle': t.motor_vehicle, 'osm:motorcar': t.motorcar, 'osm:vehicle': t.vehicle } });
-  }
-  return { type: 'FeatureCollection', features };
-}
-// La ruta de OSRM, las calles a RADIO_RUTA de ella (de Overpass) y la zona construida a lo largo de la ruta.
-// Si Overpass no da las calles, la propia ruta hace de carretera: se puede conducir igual
+// La ruta de OSRM y su franja se guardan en este navegador y se abre el Paseo, que prepara la franja y vuelve al juego
+// con ?zona=…&ruta=1; entonces arrancarLugar() pone la ruta
+const CLAVE_RUTA = 'cochesHuelva.rutaPendiente';
 async function calcularRuta(origen, destino) {
   $('estado').textContent = 'Calculando la ruta (OSRM)…';
   const ruta = await pedirRutaOSRM(origen, destino);
-  const km = ruta.km.toFixed(1).replace('.', ',');
-  $('estado').textContent = `Ruta de ${km} km. Pidiendo las calles de alrededor (OpenStreetMap)…`;
-  await new Promise(r => setTimeout(r, 0));
-  const guia = puntosCada(ruta.pts, Math.max(150, ruta.km * 1000 / 400));   // como mucho unos 400 puntos en la consulta
-  let osm = null, aviso = '';
-  try { osm = await pedirCalles(`(around:${RADIO_RUTA},${guia.map(([la, lo]) => la.toFixed(5) + ',' + lo.toFixed(5)).join(',')})`); }
-  catch (err) { aviso = err.message; }
-  const geo = osm ? callesDeOverpass(osm) : { type: 'FeatureCollection', features: [] };
-  if (!geo.features.length) {
-    geo.features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: ruta.pts.map(([la, lo]) => [lo, la]) },
-      properties: { osm_id: 0, nombre: `De ${origen.nombre} a ${destino.nombre}`, tipo: 'primary' } });
-    osm = { elements: [] };
-  }
-  const lats = ruta.pts.map(p => p[0]), lons = ruta.pts.map(p => p[1]);
-  const caja = { n: Math.max(...lats) + 0.005, s: Math.min(...lats) - 0.005, e: Math.max(...lons) + 0.006, w: Math.min(...lons) - 0.006 };
-  RUTA_GPX = ruta.pts;
-  const zip = new JSZip();
-  zip.file('calles.geojson', JSON.stringify(geo));
-  zip.file('datos/osm.json', JSON.stringify(osm));
-  zip.file('zona.json', JSON.stringify({ formato: 'paseo-relieve-zona', version: 1, nombre: `${origen.nombre} y ${destino.nombre}`, geo: caja }));
-  const anterior = ultimoArchivoZona;   // «Quitar ruta» vuelve a la zona de antes, no a esta franja
-  await cargarZona(await zip.generateAsync({ type: 'blob' }));
-  ultimoArchivoZona = anterior;
-  if (aviso) $('estado').textContent += ` ⚠ Sin las calles de alrededor (${aviso}): solo la carretera de la ruta.`;
+  const poligono = franjaDeRuta(ruta.pts, ANCHO_FRANJA), lats = poligono.map(p => p[0]), lons = poligono.map(p => p[1]);
+  const geo = { n: Math.max(...lats) + 0.001, s: Math.min(...lats) - 0.001, e: Math.max(...lons) + 0.001, w: Math.min(...lons) - 0.001 };
+  try { localStorage.setItem(CLAVE_RUTA, JSON.stringify({ ruta: ruta.pts, poligono, geo, nombre: `${origen.nombre} a ${destino.nombre}`, t: Date.now() })); }
+  catch (err) { throw new Error('no se puede guardar la ruta en este navegador (' + err.message + ')'); }
+  $('estado').textContent = `Ruta de ${ruta.km.toFixed(1).replace('.', ',')} km. Abriendo el Paseo para preparar la franja (casas del Catastro, foto aérea, árboles y relieve)…`;
+  location.href = 'paseo.html?jugar=1&ruta=1';
 }
 $('btnCalcularRuta').addEventListener('click', async () => {
   const o = CENTROS_RUTA.find(c => c.nombre === $('origenRuta').value), d = CENTROS_RUTA.find(c => c.nombre === $('destinoRuta').value);
@@ -9325,7 +9297,11 @@ async function guardarZipComoLugar(archivo) {
 }
 // Al abrir: la zona que trae el Paseo (?zona=…) o la última elegida
 async function arrancarLugar() {
-  const pedida = new URLSearchParams(location.search).get('zona');
+  const q = new URLSearchParams(location.search), pedida = q.get('zona');
+  if (pedida && q.has('ruta')) {   // la franja de una ruta, preparada en el Paseo: se juega con esa ruta
+    try { const p = JSON.parse(localStorage.getItem(CLAVE_RUTA) || 'null'); if (p && p.ruta) { RUTA_GPX = p.ruta; $('btnSinRuta').hidden = false; } localStorage.removeItem(CLAVE_RUTA); }
+    catch (err) { /* sin la ruta, la zona se abre entera */ }
+  }
   if (pedida) { lugarActual = pedida; history.replaceState(null, '', location.pathname); }
   await pintarLugares();
   await elegirLugar(lugarActual);
