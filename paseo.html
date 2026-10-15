@@ -4382,7 +4382,8 @@ const JUEGO=(()=>{const q=new URLSearchParams(location.search),la=parseFloat(q.g
    zona dibujada; al terminar vuelve al juego con &ruta=1 y allí se juega con esa ruta */
 const RUTA_JUEGO=(()=>{if(!new URLSearchParams(location.search).has('ruta'))return null;
   try{const p=JSON.parse(localStorage.getItem('cochesHuelva.rutaPendiente')||'null');return p&&p.poligono&&p.geo?p:null;}catch(e){return null;}})();
-if(RUTA_JUEGO)window.addEventListener('load',()=>setTimeout(()=>scanZone(RUTA_JUEGO.geo,RUTA_JUEGO.nombre,{force:true,poligono:RUTA_JUEGO.poligono}),300));
+if(RUTA_JUEGO){const espera=setInterval(()=>{if(loading)return;clearInterval(espera);   // en cuanto el Paseo está libre (sin esperar al «load» de la página)
+  scanZone(RUTA_JUEGO.geo,RUTA_JUEGO.nombre,{force:true,poligono:RUTA_JUEGO.poligono}).catch(e=>toast(`<p><b>No he podido preparar la franja de la ruta.</b></p><p>${esc(e.message||e)}</p>`,0));},400);}
 if(JUEGO.activo)setInterval(()=>{   // vale para todos los caminos: zona nueva, guardada o abierta desde un .zip
   if(W&&W.geo&&!loading&&!JUEGO.hecho.has(W)){JUEGO.hecho.add(W);busy('Preparando la zona para el juego…',0.9);zoneExport({jugar:true});}
 },400);
