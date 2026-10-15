@@ -6060,11 +6060,11 @@ function callesDeOverpass(osm) {
   }
   return { type: 'FeatureCollection', features };
 }
-// El cruce más cercano a un punto, con la distancia hasta él (nodo -1 si no hay ninguno con calles conectadas)
-function nodoMasCercano(G, x, z) {
-  let mejor = -1, d2 = Infinity;
-  G.nodos.forEach((n, i) => { if (!n.comp) return; const e = (n.x - x) ** 2 + (n.z - z) ** 2; if (e < d2) { d2 = e; mejor = i; } });
-  return { nodo: mejor, dist: Math.sqrt(d2) };
+// Los k cruces más cercanos a un punto (solo los de la red conectada), con su distancia
+function nodosCercanos(G, x, z, k) {
+  const lista = [];
+  G.nodos.forEach((n, i) => { if (n.comp) lista.push({ nodo: i, dist: Math.hypot(n.x - x, n.z - z) }); });
+  return lista.sort((p, q) => p.dist - q.dist).slice(0, k);
 }
 // Pide las calles entre los dos centros, calcula el camino por ellas y carga la zona a lo largo de él
 async function calcularRuta(origen, destino) {
@@ -6081,12 +6081,17 @@ async function calcularRuta(origen, destino) {
   const tramos = parsearCalles(geo, sentidosOSM(osm));
   const G = construirGrafo(tramos);
   const ini = proyectar(origen.lon, origen.lat), fin = proyectar(destino.lon, destino.lat);
-  // el centro de una ciudad no siempre cae sobre una calle: se parte del cruce más cercano, sea cual sea la distancia (hasta 3 km)
-  const a = nodoMasCercano(G, ini[0], ini[1]), b = nodoMasCercano(G, fin[0], fin[1]);
-  for (const [c, nombre] of [[a, origen.nombre], [b, destino.nombre]]) if (c.nodo < 0 || c.dist > 3000) throw new Error(`no hay calles a menos de 3 km de ${nombre}`);
-  const res = a.nodo === b.nodo ? { camino: [] } : dijkstra(G, a.nodo, b.nodo);
-  if (!res) throw new Error(`no hay camino por calles entre ${origen.nombre} y ${destino.nombre}`);
-  const camino = [ini, ...(res.camino.length ? polilinea(G, res.camino) : []), fin];   // el centro, las calles y el otro centro
+  // el centro de una ciudad no siempre cae sobre una calle, y el cruce más cercano puede estar en un sentido sin salida:
+  // se prueban los 6 cruces más cercanos de cada centro (hasta 3 km) y se toma el primer camino que exista
+  const A = nodosCercanos(G, ini[0], ini[1], 6).filter(c => c.dist <= 3000), B = nodosCercanos(G, fin[0], fin[1], 6).filter(c => c.dist <= 3000);
+  if (!A.length || !B.length) throw new Error(`no hay calles a menos de 3 km de ${!A.length ? origen.nombre : destino.nombre}`);
+  let calles = null;
+  buscar: for (const a of A) for (const b of B) {
+    const res = a.nodo === b.nodo ? { camino: [] } : dijkstra(G, a.nodo, b.nodo);
+    if (res) { calles = res.camino.length ? polilinea(G, res.camino) : []; break buscar; }
+  }
+  if (!calles) throw new Error(`no hay camino por calles entre ${origen.nombre} y ${destino.nombre} en el sentido de las calles (sentidos únicos o calles cortadas por la franja)`);
+  const camino = [ini, ...calles, fin];   // el centro, las calles y el otro centro
   RUTA_GPX = camino.map(([x, z]) => [ORIGEN.lat - z / K_LAT, ORIGEN.lon + x / K_LON]);   // del camino en metros a lat, lon
   const zip = new JSZip();
   zip.file('calles.geojson', JSON.stringify(geo));
