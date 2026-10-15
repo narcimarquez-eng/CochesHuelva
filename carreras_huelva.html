@@ -212,6 +212,7 @@
   <p class="intro">Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
   <div class="opcion"><span>Ruta</span><div class="selector"><input type="file" id="rutaGpx" accept=".gpx" style="color:#fff"> <button id="btnRutaEjemplo" type="button">Ruta de ejemplo</button> <button id="btnSinRuta" type="button" hidden>✕ Quitar ruta</button></div></div>
+  <div class="opcion"><span>De → a</span><div class="selector"><select id="origenRuta"></select> → <select id="destinoRuta"></select> <button id="btnCalcularRuta" type="button">Calcular ruta</button></div></div>
   <div id="estado"></div>
   <div id="faltan" hidden><span id="faltanTexto"></span> <button id="btnFaltan" type="button">⬇️ Descargar lo que falta</button></div>
   <div class="opcion"><span>Lugar</span><div class="selector" id="lugares"></div></div>
@@ -6018,6 +6019,78 @@ async function cargarZona(archivo) {
   Object.assign(Fachadas, { intentadas: new Set(), parado: false, fallos: 0, pendientes: [] });
 }
 
+// --- ruta entre dos centros de ciudad: las calles de la franja entre ellos se piden a OpenStreetMap (Overpass), se calcula el camino
+// por ellas y la zona se construye a lo largo de ese camino, como con un GPX. Los centros son aproximados ---
+const CENTROS_RUTA = [
+  { nombre: 'Huelva', lat: 37.2614, lon: -6.9447 },
+  { nombre: 'Moguer', lat: 37.2730, lon: -6.8380 },
+  { nombre: 'Palos de la Frontera', lat: 37.2280, lon: -6.9040 },
+  { nombre: 'Sevilla', lat: 37.3891, lon: -5.9845 },
+  { nombre: 'Cádiz', lat: 36.5271, lon: -6.2886 },
+  { nombre: 'Jerez de la Frontera', lat: 36.6850, lon: -6.1261 },
+  { nombre: 'Málaga', lat: 36.7213, lon: -4.4214 },
+  { nombre: 'Córdoba', lat: 37.8882, lon: -4.7794 },
+];
+for (const id of ['origenRuta', 'destinoRuta']) for (const c of CENTROS_RUTA) $(id).add(new Option(c.nombre, c.nombre));
+$('destinoRuta').value = 'Moguer';
+// Las calles de la franja (la consulta a Overpass, con un segundo servidor por si el primero no responde)
+async function pedirCalles(sur, oeste, norte, este) {
+  const q = `[out:json][timeout:90];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"](${sur},${oeste},${norte},${este});out body geom;`;
+  for (const url of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
+    try {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
+      if (r.ok) return r.json();
+    } catch (err) { /* probamos el siguiente servidor */ }
+  }
+  throw new Error('OpenStreetMap no respondió (Overpass); prueba más tarde');
+}
+// Overpass → calles en el formato del Paseo (calles.geojson): el juego lee de ahí el tipo, el sentido y los accesos
+function callesDeOverpass(osm) {
+  const features = [];
+  for (const el of osm.elements) {
+    if (el.type !== 'way' || !el.geometry || el.geometry.length < 2 || !el.tags || !el.tags.highway) continue;
+    const t = el.tags;
+    features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: el.geometry.map(p => [p.lon, p.lat]) }, properties: {
+      osm_id: el.id, nombre: t.name || '', tipo: t.highway, superficie: t.surface || '', carriles: t.lanes ? +t.lanes : null,
+      'osm:maxspeed': t.maxspeed, 'osm:oneway': t.oneway, 'osm:junction': t.junction, 'osm:service': t.service, 'osm:access': t.access,
+      'osm:motor_vehicle': t.motor_vehicle, 'osm:motorcar': t.motorcar, 'osm:vehicle': t.vehicle } });
+  }
+  return { type: 'FeatureCollection', features };
+}
+// Pide las calles entre los dos centros, calcula el camino por ellas y carga la zona a lo largo de él
+async function calcularRuta(origen, destino) {
+  const sur = Math.min(origen.lat, destino.lat) - 0.02, norte = Math.max(origen.lat, destino.lat) + 0.02;
+  const oeste = Math.min(origen.lon, destino.lon) - 0.03, este = Math.max(origen.lon, destino.lon) + 0.03;
+  $('estado').textContent = 'Pidiendo las calles entre los dos centros (OpenStreetMap)…';
+  await new Promise(r => setTimeout(r, 0));
+  const osm = await pedirCalles(sur, oeste, norte, este);
+  const geo = callesDeOverpass(osm);
+  if (!geo.features.length) throw new Error('OpenStreetMap no tiene calles en esa franja');
+  ponerOrigen((sur + norte) / 2, (oeste + este) / 2);   // el origen de coordenadas es el centro de la franja, como en un zip del Paseo
+  $('estado').textContent = 'Calculando el camino por las calles…';
+  await new Promise(r => setTimeout(r, 0));
+  const tramos = parsearCalles(geo, sentidosOSM(osm));
+  const G = construirGrafo(tramos), celdas = construirRejillaSegmentos(tramos);
+  const ini = proyectar(origen.lon, origen.lat), fin = proyectar(destino.lon, destino.lat);
+  let nodoFin = 0, cercano = Infinity;
+  G.nodos.forEach((n, i) => { const d = Math.hypot(n.x - fin[0], n.z - fin[1]); if (d < cercano) { cercano = d; nodoFin = i; } });
+  const r = rutaDesde(G, celdas, ini[0], ini[1], Math.atan2(fin[0] - ini[0], fin[1] - ini[1]), nodoFin);
+  if (!r) throw new Error('no hay camino por calles entre los dos centros');
+  RUTA_GPX = r.pts.map(([x, z]) => [ORIGEN.lat - z / K_LAT, ORIGEN.lon + x / K_LON]);   // del camino en metros a lat, lon
+  const zip = new JSZip();
+  zip.file('calles.geojson', JSON.stringify(geo));
+  zip.file('datos/osm.json', JSON.stringify(osm));
+  zip.file('zona.json', JSON.stringify({ formato: 'paseo-relieve-zona', version: 1, nombre: `${origen.nombre} y ${destino.nombre}`, geo: { n: norte, s: sur, e: este, w: oeste } }));
+  const anterior = ultimoArchivoZona;   // «Quitar ruta» vuelve a la zona de antes, no a esta franja
+  await cargarZona(await zip.generateAsync({ type: 'blob' }));
+  ultimoArchivoZona = anterior;
+}
+$('btnCalcularRuta').addEventListener('click', async () => {
+  const o = CENTROS_RUTA.find(c => c.nombre === $('origenRuta').value), d = CENTROS_RUTA.find(c => c.nombre === $('destinoRuta').value);
+  if (!o || !d || o === d) { $('estado').textContent = 'Elige dos centros distintos'; return; }
+  $('btnSinRuta').hidden = false;
+  try { await calcularRuta(o, d); } catch (err) { $('estado').textContent = 'Error: ' + err.message; }
+});
 // Con una ruta, la zona se vuelve a construir a lo largo de ella (si ya hay una cargada)
 async function ponerRuta(pts) {
   RUTA_GPX = pts;
