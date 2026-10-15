@@ -6033,19 +6033,44 @@ const CENTROS_RUTA = [
 ];
 for (const id of ['origenRuta', 'destinoRuta']) for (const c of CENTROS_RUTA) $(id).add(new Option(c.nombre, c.nombre));
 $('destinoRuta').value = 'Moguer';
-// Las calles de la franja (la consulta a Overpass, con un segundo servidor por si el primero no responde)
-async function pedirCalles(sur, oeste, norte, este) {
-  const q = `[out:json][timeout:90];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"](${sur},${oeste},${norte},${este});out body geom;`;
-  const fallos = [];
-  for (const url of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
-    const servidor = new URL(url).host;
-    try {
-      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q) });
-      if (r.ok) return r.json();
-      fallos.push(`${servidor} responde ${r.status}`);
-    } catch (err) { fallos.push(`${servidor}: ${err.message}`); }   // sin conexión, o el navegador bloquea la respuesta
+// La ruta entre los dos centros, por carreteras reales: la calcula el servidor público de OSRM, que tiene el mapa de toda España.
+// Devuelve [[lat, lon], …] y los km
+async function pedirRutaOSRM(origen, destino) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${origen.lon},${origen.lat};${destino.lon},${destino.lat}?overview=full&geometries=geojson`;
+  let r;
+  try { r = await fetch(url); } catch (err) { throw new Error('el servidor de rutas (OSRM) no responde: ' + err.message); }
+  if (!r.ok) throw new Error('el servidor de rutas (OSRM) responde ' + r.status);
+  const j = await r.json();
+  if (j.code !== 'Ok' || !j.routes || !j.routes.length) throw new Error('OSRM no encuentra camino: ' + (j.message || j.code));
+  return { pts: j.routes[0].geometry.coordinates.map(([lon, lat]) => [lat, lon]), km: j.routes[0].distance / 1000 };
+}
+// Puntos de la ruta separados al menos m metros (para la consulta de las calles de alrededor, que no puede ser enorme)
+function puntosCada(pts, m) {
+  const out = [pts[0]];
+  let d = 0;
+  for (let k = 1; k < pts.length; k++) {
+    const [a, b] = pts[k - 1], [c, e] = pts[k];
+    d += Math.hypot((c - a) * K_LAT, (e - b) * 111320 * Math.cos(a * Math.PI / 180));
+    if (d >= m) { out.push(pts[k]); d = 0; }
   }
-  throw new Error('Overpass (OpenStreetMap) no respondió: ' + fallos.join('; ') + '. Prueba con centros más cercanos o con la ruta de ejemplo');
+  if (out[out.length - 1] !== pts[pts.length - 1]) out.push(pts[pts.length - 1]);
+  return out;
+}
+// Las calles que pide el filtro de Overpass, como el Paseo: formulario, 70 s como mucho por servidor y otro servidor si falla.
+// Sin la cabecera de formulario Overpass rechaza la consulta y el navegador solo dice «Failed to fetch»
+async function pedirCalles(filtro) {
+  const q = `[out:json][timeout:90];way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"]${filtro};out body geom;`;
+  const fallos = [];
+  for (const url of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter']) {
+    const servidor = new URL(url).host, ac = new AbortController(), plazo = setTimeout(() => ac.abort(), 70000);
+    try {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ac.signal });
+      if (r.ok) { const j = await r.json(); clearTimeout(plazo); if (j && Array.isArray(j.elements)) return j; fallos.push(`${servidor}: respuesta sin datos`); continue; }
+      fallos.push(`${servidor} responde ${r.status}`);
+    } catch (err) { fallos.push(`${servidor}: ${err.name === 'AbortError' ? 'no respondió en 70 s' : err.message}`); }
+    clearTimeout(plazo);
+  }
+  throw new Error('Overpass no dio las calles: ' + fallos.join('; '));
 }
 // Overpass → calles en el formato del Paseo (calles.geojson): el juego lee de ahí el tipo, el sentido y los accesos
 function callesDeOverpass(osm) {
@@ -6060,46 +6085,35 @@ function callesDeOverpass(osm) {
   }
   return { type: 'FeatureCollection', features };
 }
-// Los k cruces más cercanos a un punto (solo los de la red conectada), con su distancia
-function nodosCercanos(G, x, z, k) {
-  const lista = [];
-  G.nodos.forEach((n, i) => { if (n.comp) lista.push({ nodo: i, dist: Math.hypot(n.x - x, n.z - z) }); });
-  return lista.sort((p, q) => p.dist - q.dist).slice(0, k);
-}
-// Pide las calles entre los dos centros, calcula el camino por ellas y carga la zona a lo largo de él
+// La ruta de OSRM, las calles a RADIO_RUTA de ella (de Overpass) y la zona construida a lo largo de la ruta.
+// Si Overpass no da las calles, la propia ruta hace de carretera: se puede conducir igual
 async function calcularRuta(origen, destino) {
-  const sur = Math.min(origen.lat, destino.lat) - 0.02, norte = Math.max(origen.lat, destino.lat) + 0.02;
-  const oeste = Math.min(origen.lon, destino.lon) - 0.03, este = Math.max(origen.lon, destino.lon) + 0.03;
-  $('estado').textContent = 'Pidiendo las calles entre los dos centros (OpenStreetMap)…';
+  $('estado').textContent = 'Calculando la ruta (OSRM)…';
+  const ruta = await pedirRutaOSRM(origen, destino);
+  const km = ruta.km.toFixed(1).replace('.', ',');
+  $('estado').textContent = `Ruta de ${km} km. Pidiendo las calles de alrededor (OpenStreetMap)…`;
   await new Promise(r => setTimeout(r, 0));
-  const osm = await pedirCalles(sur, oeste, norte, este);
-  const geo = callesDeOverpass(osm);
-  if (!geo.features.length) throw new Error('OpenStreetMap no tiene calles en esa franja');
-  ponerOrigen((sur + norte) / 2, (oeste + este) / 2);   // el origen de coordenadas es el centro de la franja, como en un zip del Paseo
-  $('estado').textContent = 'Calculando el camino por las calles…';
-  await new Promise(r => setTimeout(r, 0));
-  const tramos = parsearCalles(geo, sentidosOSM(osm));
-  const G = construirGrafo(tramos);
-  const ini = proyectar(origen.lon, origen.lat), fin = proyectar(destino.lon, destino.lat);
-  // el centro de una ciudad no siempre cae sobre una calle, y el cruce más cercano puede estar en un sentido sin salida:
-  // se prueban los 6 cruces más cercanos de cada centro (hasta 3 km) y se toma el primer camino que exista
-  const A = nodosCercanos(G, ini[0], ini[1], 6).filter(c => c.dist <= 3000), B = nodosCercanos(G, fin[0], fin[1], 6).filter(c => c.dist <= 3000);
-  if (!A.length || !B.length) throw new Error(`no hay calles a menos de 3 km de ${!A.length ? origen.nombre : destino.nombre}`);
-  let calles = null;
-  buscar: for (const a of A) for (const b of B) {
-    const res = a.nodo === b.nodo ? { camino: [] } : dijkstra(G, a.nodo, b.nodo);
-    if (res) { calles = res.camino.length ? polilinea(G, res.camino) : []; break buscar; }
+  const guia = puntosCada(ruta.pts, Math.max(150, ruta.km * 1000 / 400));   // como mucho unos 400 puntos en la consulta
+  let osm = null, aviso = '';
+  try { osm = await pedirCalles(`(around:${RADIO_RUTA},${guia.map(([la, lo]) => la.toFixed(5) + ',' + lo.toFixed(5)).join(',')})`); }
+  catch (err) { aviso = err.message; }
+  const geo = osm ? callesDeOverpass(osm) : { type: 'FeatureCollection', features: [] };
+  if (!geo.features.length) {
+    geo.features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: ruta.pts.map(([la, lo]) => [lo, la]) },
+      properties: { osm_id: 0, nombre: `De ${origen.nombre} a ${destino.nombre}`, tipo: 'primary' } });
+    osm = { elements: [] };
   }
-  if (!calles) throw new Error(`no hay camino por calles entre ${origen.nombre} y ${destino.nombre} en el sentido de las calles (sentidos únicos o calles cortadas por la franja)`);
-  const camino = [ini, ...calles, fin];   // el centro, las calles y el otro centro
-  RUTA_GPX = camino.map(([x, z]) => [ORIGEN.lat - z / K_LAT, ORIGEN.lon + x / K_LON]);   // del camino en metros a lat, lon
+  const lats = ruta.pts.map(p => p[0]), lons = ruta.pts.map(p => p[1]);
+  const caja = { n: Math.max(...lats) + 0.005, s: Math.min(...lats) - 0.005, e: Math.max(...lons) + 0.006, w: Math.min(...lons) - 0.006 };
+  RUTA_GPX = ruta.pts;
   const zip = new JSZip();
   zip.file('calles.geojson', JSON.stringify(geo));
   zip.file('datos/osm.json', JSON.stringify(osm));
-  zip.file('zona.json', JSON.stringify({ formato: 'paseo-relieve-zona', version: 1, nombre: `${origen.nombre} y ${destino.nombre}`, geo: { n: norte, s: sur, e: este, w: oeste } }));
+  zip.file('zona.json', JSON.stringify({ formato: 'paseo-relieve-zona', version: 1, nombre: `${origen.nombre} y ${destino.nombre}`, geo: caja }));
   const anterior = ultimoArchivoZona;   // «Quitar ruta» vuelve a la zona de antes, no a esta franja
   await cargarZona(await zip.generateAsync({ type: 'blob' }));
   ultimoArchivoZona = anterior;
+  if (aviso) $('estado').textContent += ` ⚠ Sin las calles de alrededor (${aviso}): solo la carretera de la ruta.`;
 }
 $('btnCalcularRuta').addEventListener('click', async () => {
   const o = CENTROS_RUTA.find(c => c.nombre === $('origenRuta').value), d = CENTROS_RUTA.find(c => c.nombre === $('destinoRuta').value);
