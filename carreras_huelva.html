@@ -211,6 +211,7 @@
   <h1 id="titulo">Carreras por Huelva</h1>
   <p class="intro">Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
+  <div class="opcion"><span>Ruta</span><div class="selector"><input type="file" id="rutaGpx" accept=".gpx" style="color:#fff"> <button id="btnSinRuta" type="button" hidden>✕ Quitar ruta</button></div></div>
   <div id="estado"></div>
   <div id="faltan" hidden><span id="faltanTexto"></span> <button id="btnFaltan" type="button">⬇️ Descargar lo que falta</button></div>
   <div class="opcion"><span>Lugar</span><div class="selector" id="lugares"></div></div>
@@ -5823,7 +5824,76 @@ async function leerAlturas(zip) {
 }
 
 // --- carga del zip de la zona ---
+// --- modo ruta: un GPX con el camino de una ciudad a otra. La zona se construye solo a lo largo de él: casas, calles, árboles
+// y farolas a RADIO_RUTA metros; el terreno y la foto aérea siguen siendo los de la zona, así que se ve más allá ---
+const RADIO_RUTA = 350;
+let RUTA_GPX = null;          // [[lat, lon], …] de la ruta elegida, o null
+let RUTA_LOCAL = null;        // la misma ruta en metros de la zona cargada: [[x, z], …]
+let ultimoArchivoZona = null; // el zip de la última zona: para volver a construirla con la ruta
+// Los trkpt (o rtept) de un GPX como [[lat, lon], …]
+function leerGPX(texto) {
+  const doc = new DOMParser().parseFromString(texto, 'application/xml');
+  let pts = [...doc.getElementsByTagName('trkpt')];
+  if (!pts.length) pts = [...doc.getElementsByTagName('rtept')];
+  return pts.map(p => [+p.getAttribute('lat'), +p.getAttribute('lon')]).filter(([a, b]) => isFinite(a) && isFinite(b));
+}
+// Corredor a r metros de la polilínea pts ([[x, z], …]): devuelve cerca(x, z), con una rejilla de 250 m para no mirar todos los tramos
+function corredorDeRuta(pts, r) {
+  const C = 250, celdas = new Map(), segs = [];
+  for (let k = 0; k + 1 < pts.length; k++) {
+    const [ax, az] = pts[k], [bx, bz] = pts[k + 1], s = segs.length;
+    segs.push([ax, az, bx, bz]);
+    for (let i = Math.floor((Math.min(ax, bx) - r) / C); i <= Math.floor((Math.max(ax, bx) + r) / C); i++)
+      for (let j = Math.floor((Math.min(az, bz) - r) / C); j <= Math.floor((Math.max(az, bz) + r) / C); j++) {
+        const c = i + ',' + j;
+        if (!celdas.has(c)) celdas.set(c, []);
+        celdas.get(c).push(s);
+      }
+  }
+  const dist = (x, z, [ax, az, bx, bz]) => {
+    const dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz;
+    const t = L ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L)) : 0;
+    return Math.hypot(ax + dx * t - x, az + dz * t - z);
+  };
+  return (x, z) => (celdas.get(Math.floor(x / C) + ',' + Math.floor(z / C)) || []).some(s => dist(x, z, segs[s]) <= r);
+}
+// ¿Algún punto del trozo, o el medio de uno de sus tramos, cae en el corredor?
+function alCorredor(cerca, pts) {
+  for (let i = 0; i < pts.length; i++) {
+    if (cerca(pts[i][0], pts[i][1])) return true;
+    if (i + 1 < pts.length && cerca((pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2)) return true;
+  }
+  return false;
+}
+// Del paisaje, solo los árboles y las farolas a lo largo de la ruta (con sus rejillas de choque)
+function filtrarPaisaje(m, cerca) {
+  m.arboles = m.arboles.filter(a => cerca(a[0], a[1]));
+  m.rejArboles = construirRejillaPuntos(m.arboles);
+  m.farolas = m.farolas.filter(f => cerca(f.x, f.z));
+  m.rejFarolas = construirRejillaPuntos(m.farolas.map(f => [f.x, f.z]));
+}
+// El principio de la ruta: el punto de calle más cercano a su primer punto, con el sentido de la calle que va hacia el siguiente
+function inicioDeRuta() {
+  const [x0, z0] = RUTA_LOCAL[0], [x1, z1] = RUTA_LOCAL[Math.min(RUTA_LOCAL.length - 1, 5)];
+  let mejor = null, d2 = Infinity;
+  for (const t of zona.tramos) for (let i = 0; i + 1 < t.pts.length; i++) {
+    const [ax, az] = t.pts[i], [bx, bz] = t.pts[i + 1], dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz;
+    const u = L ? Math.max(0, Math.min(1, ((x0 - ax) * dx + (z0 - az) * dz) / L)) : 0;
+    const px = ax + dx * u, pz = az + dz * u, e = (px - x0) ** 2 + (pz - z0) ** 2;
+    if (e < d2) { d2 = e; mejor = { x: px, z: pz, dx, dz }; }
+  }
+  const vx = x1 - x0, vz = z1 - z0, sg = mejor.dx * vx + mejor.dz * vz < 0 ? -1 : 1;
+  return { x: mejor.x, z: mejor.z, h: Math.atan2(sg * mejor.dx, sg * mejor.dz) };
+}
+// El final de la ruta: el nodo del grafo más cercano a su último punto
+function destinoDeRuta() {
+  const [x, z] = RUTA_LOCAL[RUTA_LOCAL.length - 1], N = zona.G.nodos;
+  let mejor = 0, d2 = Infinity;
+  for (let i = 0; i < N.length; i++) { const e = (N[i].x - x) ** 2 + (N[i].z - z) ** 2; if (e < d2) { d2 = e; mejor = i; } }
+  return { nodo: mejor, camino: [] };
+}
 async function cargarZona(archivo) {
+  ultimoArchivoZona = archivo;
   $('estado').textContent = 'Leyendo el zip…';
   const zip = await JSZip.loadAsync(archivo);
   const leer = async nombre => {
@@ -5841,7 +5911,10 @@ async function cargarZona(archivo) {
   limpiarCarrera(); coche = null; zona = null;   // si había otra zona abierta
   $('estado').textContent = 'Procesando calles…';
   await new Promise(r => setTimeout(r, 0));
-  const tramos = parsearCalles(calles, sentidosOSM(osm));
+  // con ruta: la zona se queda con lo que cae cerca de ella
+  RUTA_LOCAL = RUTA_GPX ? RUTA_GPX.map(([la, lo]) => [(lo - ORIGEN.lon) * K_LON, (ORIGEN.lat - la) * K_LAT]) : null;
+  const corredor = RUTA_LOCAL ? corredorDeRuta(RUTA_LOCAL, RADIO_RUTA) : null;
+  const tramos = parsearCalles(calles, sentidosOSM(osm)).filter(t => !corredor || alCorredor(corredor, t.pts));
   if (!tramos.length) throw new Error('la zona no trae calles por las que conducir (¿no respondió OpenStreetMap?): prepárala otra vez en el Paseo');
   const G = construirGrafo(tramos);
   // la foto aérea se carga antes que las casas: si hay que simularlas, dice dónde hay jardines y dónde campo
@@ -5851,7 +5924,7 @@ async function cargarZona(archivo) {
   $('estado').textContent = 'Cargando casas…';
   await new Promise(r => setTimeout(r, 0));
   const casas = await opcional('casas.geojson', { features: [] });   // sin casas (el Catastro no respondió) la zona se juega igual
-  let edif = parsearCasas(casas), rejilla = construirRejilla(edif);
+  let edif = parsearCasas(casas).filter(e => !corredor || alCorredor(corredor, e.pts)), rejilla = construirRejilla(edif);
   // colores de fachada sacados antes en este navegador (al conducir por aquí o por otra zona con las mismas casas)
   const guardados = await Catastro.coloresGuardados(), deZona = new Map();
   for (const c of (meta && meta.colores) || []) if (c && c.ref && c.col && !c.off) deZona.set(c.ref, c.col);   // los que trae el Paseo, con su parche
@@ -5906,7 +5979,7 @@ async function cargarZona(archivo) {
   for (const e of edif) if (e.ref) { if (!zona.porRef.has(e.ref)) zona.porRef.set(e.ref, []); zona.porRef.get(e.ref).push(e); }
   prepararCasas(edif, zona.rejilla, tramos);
   // porches (tejadillo sobre pilares) y patios, de las partes del Catastro sin plantas
-  const sinPlantas = parsearSinPlantas(casas);
+  const sinPlantas = parsearSinPlantas(casas).filter(p => !corredor || alCorredor(corredor, p.pts));
   zona.porches = prepararPorches(sinPlantas.filter(p => p.tipo === 'porche'), edif, zona.rejilla, tramos);
   zona.patios = sinPlantas.filter(p => p.tipo === 'patio');
   $('estado').textContent = 'Poniendo el paisaje (agua, parques, árboles, rotondas, vallas de los chalets)…';
@@ -5917,6 +5990,7 @@ async function cargarZona(archivo) {
   const altura = await leerAlturas(zip);
   SUELO_ZONA = altura;   // el relieve de la zona: sueloEn(x, z) lo lee al colocar cada cosa
   zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas, pixelesFoto(foto), altura);
+  if (corredor) filtrarPaisaje(zona.mundo, corredor);
   ponerPilares(zona.mundo, zona.porches);
   medirAceras(tramos, edif, zona.rejilla, zona.mundo.rejVallas, zona.enCalzadaAjena);   // hasta las fachadas y las vallas
   zona.esq = esquinasCruces(tramos);
@@ -5944,6 +6018,21 @@ async function cargarZona(archivo) {
   Object.assign(Fachadas, { intentadas: new Set(), parado: false, fallos: 0, pendientes: [] });
 }
 
+// Con una ruta, la zona se vuelve a construir a lo largo de ella (si ya hay una cargada)
+async function ponerRuta(pts) {
+  RUTA_GPX = pts;
+  $('btnSinRuta').hidden = !pts;
+  if (!ultimoArchivoZona) { $('estado').textContent = pts ? `Ruta cargada (${pts.length} puntos): ahora elige la zona` : ''; return; }
+  try { await cargarZona(ultimoArchivoZona); } catch (err) { $('estado').textContent = 'Error: ' + err.message; }
+}
+$('rutaGpx').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const pts = leerGPX(await f.text());
+  if (pts.length < 2) { $('estado').textContent = 'El GPX no trae una ruta con puntos (trkpt o rtept)'; return; }
+  await ponerRuta(pts);
+});
+$('btnSinRuta').addEventListener('click', () => { $('rutaGpx').value = ''; ponerRuta(null); });
 $('archivo').addEventListener('change', async e => {
   const f = e.target.files[0];
   if (!f) return;
@@ -7593,6 +7682,7 @@ async function nuevaCarrera() {
   const rng = mulberry32((Date.now() & 0xffffff) || 1);
   // la salida (y en el circuito, la vuelta) la busca planearVuelta: una calle libre, mirando hacia donde sigue la calle
   const plan = planearVuelta(zona.G, rng, 1200, 3500, (x, z) => !choca(zona.edif, zona.rejilla, x, z, RADIO_COCHE) && !chocaMundo(zona.mundo, x, z, RADIO_COCHE));
+  if (RUTA_LOCAL && modoJuego === 'exploracion') plan.inicio = inicioDeRuta();
   if (!plan) { mostrarMenu('No he encontrado un sitio para empezar. Pulsa otra vez.'); return; }
   limpiarCarrera();
   ocultarMenu();
@@ -7644,9 +7734,12 @@ function ponerPierna() {
 }
 // Exploración: el siguiente destino, por calles que aún no se han recorrido
 function siguienteDestino(rng = Math.random) {
-  const D = elegirDestino(zona.G, rng, carrera.nodoActual, carrera.usados, carrera.visitados);
+  // con ruta: el primer destino es el final del GPX; al llegar a él, se acaba
+  const fin = RUTA_LOCAL && carrera.rutaHecha;
+  const D = fin ? null : RUTA_LOCAL ? destinoDeRuta() : elegirDestino(zona.G, rng, carrera.nodoActual, carrera.usados, carrera.visitados);
+  if (RUTA_LOCAL && D) carrera.rutaHecha = true;
   if (carrera.destino) { scene.remove(carrera.destino.baliza); carrera.destino = null; }
-  if (!D) { mostrarAviso('No quedan destinos nuevos: ¡has visto toda la zona!', 3); return; }
+  if (!D) { mostrarAviso(fin ? '🏁 ¡Has llegado al final de la ruta!' : 'No quedan destinos nuevos: ¡has visto toda la zona!', 4); return; }
   const n = zona.G.nodos[D.nodo], nombre = nombreNodo(zona.G, D.nodo) || 'un cruce sin nombre';
   for (const e of D.camino) carrera.usados.add(zona.G.tramos[e.seg].padre);
   carrera.visitados.push([n.x, n.z]);
@@ -7655,7 +7748,7 @@ function siguienteDestino(rng = Math.random) {
   scene.add(baliza);
   carrera.destino = { nodo: D.nodo, x: n.x, z: n.z, nombre, baliza, tInicio: performance.now() / 1000 };
   const r = rutaDesde(zona.G, zona.rejSeg, coche.x, coche.z, coche.h, D.nodo);
-  Ruta.poner(r ? r.pts : polilinea(zona.G, D.camino), D.nodo);
+  Ruta.poner(r ? r.pts : (D.camino.length ? polilinea(zona.G, D.camino) : RUTA_LOCAL), D.nodo);
 }
 $('btnNueva').addEventListener('click', nuevaCarrera);
 // Botones para elegir coche, uno por cada entrada del catálogo
