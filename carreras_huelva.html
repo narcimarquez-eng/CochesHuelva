@@ -211,7 +211,7 @@
   <h1 id="titulo">Carreras por Huelva</h1>
   <p class="intro">Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
-  <div class="opcion"><span>Ruta</span><div class="selector"><input type="file" id="rutaGpx" accept=".gpx" style="color:#fff"> <button id="btnSinRuta" type="button" hidden>✕ Quitar ruta</button></div></div>
+  <div class="opcion"><span>Ruta</span><div class="selector"><input type="file" id="rutaGpx" accept=".gpx" style="color:#fff"> <button id="btnRutaEjemplo" type="button">Ruta de ejemplo</button> <button id="btnSinRuta" type="button" hidden>✕ Quitar ruta</button></div></div>
   <div id="estado"></div>
   <div id="faltan" hidden><span id="faltanTexto"></span> <button id="btnFaltan" type="button">⬇️ Descargar lo que falta</button></div>
   <div class="opcion"><span>Lugar</span><div class="selector" id="lugares"></div></div>
@@ -6033,6 +6033,17 @@ $('rutaGpx').addEventListener('change', async e => {
   await ponerRuta(pts);
 });
 $('btnSinRuta').addEventListener('click', () => { $('rutaGpx').value = ''; ponerRuta(null); });
+// La ruta de ejemplo viene con el juego: no hace falta bajarla al móvil
+$('btnRutaEjemplo').addEventListener('click', async () => {
+  try {
+    const r = await fetch('rutas/ejemplo-huelva.gpx');
+    if (!r.ok) throw new Error('no está en el sitio (' + r.status + ')');
+    const pts = leerGPX(await r.text());
+    if (pts.length < 2) throw new Error('el GPX de ejemplo no trae puntos');
+    $('rutaGpx').value = '';
+    await ponerRuta(pts);
+  } catch (err) { $('estado').textContent = 'No se pudo cargar la ruta de ejemplo: ' + err.message; }
+});
 $('archivo').addEventListener('change', async e => {
   const f = e.target.files[0];
   if (!f) return;
