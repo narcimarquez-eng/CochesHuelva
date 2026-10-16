@@ -179,15 +179,21 @@ El juego usa las alturas del terreno de la zona (`alturas.asc`, del MDT), así q
 - **Lo que va sobre el suelo**: tráfico, peatones, ciclistas, perros, árboles, farolas, restos de los choques, proyectiles, la línea de la ruta y, en las carreras, los arcos, las balizas, la tribuna, los boxes y el podio.
 - **Lo que no cambia**: el agua va plana, y la física no tiene en cuenta la cuesta (la velocidad y la potencia son las mismas en una subida que en llano; solo cambia lo que se ve). Sin datos de altura, todo queda a cero como antes.
 
-## Modo ruta (primera versión)
+## Modo ruta
 
-En el menú, el campo **Ruta** acepta un fichero GPX (de Google Maps, OpenStreetMap u otro) con el camino entre dos puntos. La zona se construye solo a lo largo de ese camino: casas, calles, árboles y farolas a 350 m a cada lado. El terreno y la foto aérea siguen siendo los de la zona completa, así que alrededor se ve el campo y el mar. El coche empieza al principio de la ruta, mirando hacia ella, y el destino es el final; al llegar, se acaba la partida. **Quitar ruta** vuelve a la zona completa.
+En el menú hay tres maneras de poner una ruta:
 
-Probado con la zona de Huelva y la ruta de ejemplo `rutas/ejemplo-huelva.gpx` (una avenida de 1,6 km): de 31.813 casas a 220, de 2.421 calles a 42 y de 29.454 árboles a 465. El coche empieza en el primer punto de la ruta y el destino está en el último.
+- **De → a**: se eligen dos centros de ciudad y **Calcular ruta** pide el camino por carreteras reales a OSRM (`router.project-osrm.org`). Con él se dibuja una franja de 300 m a cada lado y se abre el Paseo, que la prepara sola como una zona dibujada (calles, foto aérea, relieve, árboles y casas del Catastro) y vuelve al juego con la ruta puesta.
+- **Ruta de ejemplo**: `rutas/ejemplo-huelva.gpx`, una avenida de Huelva de 1,6 km.
+- **Ruta** (GPX): un fichero de Google Maps, OpenStreetMap u otro, dentro de una zona ya cargada.
 
-Lo que queda para más adelante: solo sirve para una ruta dentro de una zona ya cargada (la zona completa tiene que estar en el zip); el agua, los parques y las vallas no se recortan todavía; y los datos no se piden en directo, así que una ruta entre dos ciudades enteras necesitará cargar el Catastro y el MDT por trozos mientras se conduce.
+La zona se construye solo a lo largo del camino: casas, calles, árboles y farolas a 350 m a cada lado. El coche empieza al principio de la ruta, mirando hacia ella, y el destino es el final; al llegar, se acaba la partida. **Quitar ruta** vuelve a la zona completa.
 
-## Casas que cortan calles
+- **La franja** se saca de una rejilla (celdas de unos 37 m) con todo lo que queda a 300 m de la ruta; su borde de fuera es el polígono que se pide. Antes era un borde desplazado a cada lado, que en las curvas cerradas y en las vueltas se cruzaba consigo mismo: OpenStreetMap y el Catastro dejaban fuera esos trozos y la ruta se quedaba sin carretera. Probado con una horquilla, una ruta de 20 km con curvas y una con lazos: sin cruces y con todos los puntos de la ruta dentro.
+- **El Catastro, poco a poco**: el Paseo solo trae las casas de los primeros 5 km; el resto se pide mientras se conduce, 1,5 km por delante del coche, y se añade a la zona sin parar la partida.
+- **OpenStreetMap, más deprisa**: con Catastro, el Paseo ya no pide los edificios de OpenStreetMap (no se usan y eran la mitad de la descarga; si al final el Catastro no da casas, se piden aparte), y pregunta a los tres servidores de Overpass a la vez: vale el primero que da un mapa completo y a los demás se les corta.
+
+## Casas que cortan calles## Casas que cortan calles
 
 Algunas casas del Catastro caen encima de una calzada: son sobre todo pasajes bajo edificios (calles que en OpenStreetMap pasan por debajo de una casa) o datos que no casan. En el juego el coche iría contra una pared en mitad de la calle, así que al cargar la zona se comprueba el eje de cada calle y dos líneas a un cuarto de su ancho, cada metro y medio: si una casa tiene dos o más puntos de calzada dentro, no se pone. El menú avisa de cuántas se han quitado y en qué calles (la lista entera sale al pasar el ratón por el aviso y en la consola). En la zona incluida son 97 de 31 910.
 
@@ -269,7 +275,7 @@ Desde el entorno en el que se ha hecho esto no se podía llegar a Poly Haven, am
 **Día**, **atardecer** (sol bajo y naranja, sombras largas) o **noche** (cielo con estrellas y luna, con luz de luna suficiente para ver las calles). Al atardecer y de noche se encienden las ventanas de las casas, las farolas (con su charco de luz en el suelo) y los faros de todos los coches, que alumbran el asfalto por delante: los del jugador llegan a unos 50 m. La elección se recuerda.
 
 
-En la partida hay tráfico: coches que circulan por la derecha de las calles, frenan si tienen a alguien delante (y pitan si el jugador les corta el paso) y encienden los pilotos al frenar. Si chocas con uno, los dos rebotan según la velocidad y el ángulo del golpe; el de tráfico sale despedido, gira, se queda parado con las luces de emergencia y luego vuelve a su carril. Los peatones van por las aceras y se apartan de un salto si el coche se les echa encima. El siguiente checkpoint (o el destino, en azul) es una columna de luz; los demás solo muestran un aro en el suelo, y arriba a la derecha una flecha indica hacia dónde queda.
+En la partida hay tráfico: coches que circulan por la derecha de las calles al límite de cada una (el de OpenStreetMap; si no lo tiene, 30 a 50 km/h en la ciudad y, en las carreteras fuera de poblado, 90 en las nacionales y comarcales, 80 en las locales y 100 en las vías rápidas), frenan si tienen a alguien delante (más lejos cuanto más deprisa van) (y pitan si el jugador les corta el paso) y encienden los pilotos al frenar. Si chocas con uno, los dos rebotan según la velocidad y el ángulo del golpe; el de tráfico sale despedido, gira, se queda parado con las luces de emergencia y luego vuelve a su carril. Los peatones van por las aceras y se apartan de un salto si el coche se les echa encima. El siguiente checkpoint (o el destino, en azul) es una columna de luz; los demás solo muestran un aro en el suelo, y arriba a la derecha una flecha indica hacia dónde queda.
 
 El suelo es la ortofoto aérea de la zona (la del paseo), con sus calles, campos y ríos. Como la foto tiene unos 2 m por píxel y de cerca se ve borrosa, **donde parece césped, arena o tierra lleva encima su textura de detalle** (`texturas/cesped.jpg`, `arena.jpg` y `tierra.jpg`, hechas con `texturas/generar_suelos.py`):
 
@@ -290,7 +296,7 @@ Todo el sonido se sintetiza en el navegador (Web Audio, sin archivos): el motor 
 
 ### Controles
 
-Teclado: flechas o WASD. `H` toca el claxon. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro; la de dentro va a la altura de un asiento alto para ver bien la calle. `M` (o **Menú**) pausa la partida; **Continuar** vuelve a ella.
+Teclado: flechas o WASD. `H` toca el claxon. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro. La de dentro tiene los ojos de un conductor alto (1,85 m sobre el suelo, en su asiento) y mira un poco hacia abajo: abajo se ven el capó y las aletas del coche que llevas, y el salpicadero. La carrocería se recorta por la base del parabrisas, así que el techo y los montantes no tapan la calle. `M` (o **Menú**) pausa la partida; **Continuar** vuelve a ella.
 
 **Mando** (Bluetooth o de cable: Xbox, PlayStation o cualquiera que el navegador reconozca, en el móvil y en el ordenador). Se conecta al teléfono u ordenador como siempre y el juego lo ve en cuanto se pulsa uno de sus botones (los navegadores no lo enseñan antes); sale el aviso «Mando conectado». Con él, la ruleta y los pedales de la pantalla se esconden (vuelven al tocar la pantalla).
 
@@ -310,7 +316,7 @@ El juego se abre a **pantalla completa** y en horizontal con el primer toque (lo
 
 El panel de arriba a la izquierda está pensado para el móvil: en una sola línea van la velocidad, la marcha con las revoluciones, la señal de límite (redonda, como las de verdad, parpadea si vas más deprisa) y el daño; debajo, en letra pequeña, el nombre de la calle.
 
-En el móvil, abajo a la izquierda hay una **ruleta**: se gira con el dedo alrededor del centro (140° a cada lado es el giro completo; con las flechas, la ruleta gira sola para mostrar hacia dónde va el coche), vibra a cada muesca, un arco ámbar marca cuánto giras y al soltarla vuelve sola al centro. A la derecha están los pedales **GAS** y **FRENO**, grandes y de colores, y el botón **D/R** de la marcha. Los límites de velocidad son solo informativos.
+En el móvil, abajo a la izquierda está la **dirección**: una barra con una pastilla que se desliza a los lados. Se toca en cualquier sitio de la barra y cuenta lo que se mueve el dedo desde ahí (la pastilla no salta), así que no hay que dar vueltas como con un volante. Es firme: con poco desplazamiento gira poco (para corregir en recta sin bandazos) y el giro completo está al final del recorrido. La pastilla sigue al dedo con suavidad, vibra cada cuarto de recorrido (más en el centro), una barra ámbar marca cuánto giras y al soltarla vuelve despacio al centro. Con las flechas o el mando, se mueve sola para mostrar hacia dónde va el coche. A la derecha están los pedales **GAS** y **FRENO**, grandes y de colores, y el botón **D/R** de la marcha. Los límites de velocidad son solo informativos.
 
 El coche tiene caja automática de seis marchas. Arriba a la izquierda se ven la marcha y el tacómetro: la caja sube hacia las 6200 rpm y baja al acelerar a fondo con pocas vueltas o al frenar hasta casi parar. Para ir **marcha atrás** hay dos maneras:
 

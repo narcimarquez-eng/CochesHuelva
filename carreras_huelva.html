@@ -61,7 +61,7 @@
   button:disabled{opacity:.45}
   #arriba{position:fixed;right:calc(8px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));display:flex;gap:6px;z-index:5}
   #arriba button{padding:8px 13px;font-size:14px;background:rgba(12,18,26,.7);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:10px}
-  #salpicadero{display:none;position:fixed;left:0;right:0;bottom:0;height:17%;pointer-events:none;border-radius:50% 50% 0 0/22% 22% 0 0;background:linear-gradient(180deg,rgba(18,20,24,0) 0%,rgba(30,33,39,.94) 30%,#15171b 100%);box-shadow:inset 0 10px 18px rgba(0,0,0,.5)}
+  #salpicadero{display:none;position:fixed;left:0;right:0;bottom:0;height:6%;pointer-events:none;border-radius:50% 50% 0 0/22% 22% 0 0;background:linear-gradient(180deg,rgba(18,20,24,0) 0%,rgba(30,33,39,.94) 30%,#15171b 100%);box-shadow:inset 0 10px 18px rgba(0,0,0,.5)}
   body.dentro #salpicadero{display:block}
   #controles{position:fixed;left:0;right:0;bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;justify-content:space-between;align-items:flex-end;padding:0 14px;pointer-events:none;z-index:5}
   #controles .grupo{display:flex;gap:12px;align-items:flex-end;pointer-events:auto}
@@ -73,8 +73,12 @@
   #btnSentido{width:62px;height:62px;padding:0;border-radius:16px;font-size:26px;font-weight:900;background:rgba(12,18,26,.82);color:#fff;border:3px solid rgba(255,255,255,.92);box-shadow:0 5px 16px rgba(0,0,0,.55);touch-action:none;line-height:1}
   #btnSentido small{display:block;font-size:10px;font-weight:700;letter-spacing:.5px;opacity:.85}
   #btnSentido.atras{background:#d63a2c}
-  #ruleta{width:176px;height:176px;pointer-events:auto;touch-action:none;cursor:grab}
-  #ruleta svg{width:100%;height:100%;display:block;filter:drop-shadow(0 5px 12px rgba(0,0,0,.6))}
+  #ruleta{position:relative;width:236px;height:92px;pointer-events:auto;touch-action:none;cursor:grab;border-radius:46px;background:rgba(12,18,26,.72);border:2.5px solid rgba(255,255,255,.92);box-shadow:0 5px 16px rgba(0,0,0,.55);box-sizing:border-box}
+  #ruleta .carril{position:absolute;left:44px;right:44px;top:50%;height:6px;margin-top:-3px;border-radius:3px;background:rgba(255,255,255,.22)}
+  #ruleta .marca{position:absolute;left:50%;top:18px;bottom:18px;width:2px;margin-left:-1px;background:rgba(255,255,255,.5)}
+  #ruletaArco{position:absolute;top:50%;height:6px;margin-top:-3px;border-radius:3px;background:#f5b041;left:50%;width:0}
+  #ruletaGiro{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;background:radial-gradient(circle at 50% 38%,#3a4452,#1e242e);border:2.5px solid rgba(255,255,255,.85);box-shadow:0 3px 10px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:900;letter-spacing:2px;will-change:transform}
+  #ruletaGiro::before{content:'';position:absolute;top:7px;width:10px;height:10px;border-radius:50%;background:#f5b041;border:1.5px solid #1b1b1b}
   #estado{min-height:20px;color:#ffd166}
   #pantalla > *{flex-shrink:0}   /* con mucho texto, el menú se desplaza en vez de montar unas líneas sobre otras */
   #faltan{max-width:640px;font-size:13px;line-height:1.4;color:#cfe3ff;background:rgba(30,60,110,.45);border:1px solid rgba(140,180,255,.35);border-radius:10px;padding:6px 10px}
@@ -128,7 +132,7 @@
   #posicion{display:inline-block;background:var(--ambar);color:#1b1b1b;font-weight:900;border-radius:6px;padding:0 6px;margin-right:4px}
   #coches button{font-size:15px;padding:8px 14px;background:#4a5a6a;color:#fff}
   #coches button.activo{background:var(--ambar);color:#1b1b1b}
-  @media (max-height:520px){#ruleta{width:140px;height:140px}.pedal{width:74px;height:94px}#btnFreno{height:80px}#btnSentido{width:54px;height:54px}#vel{font-size:36px}}
+  @media (max-height:520px){#ruleta{width:204px;height:78px}#ruletaGiro{width:62px;height:62px;margin:-31px 0 0 -31px}.pedal{width:74px;height:94px}#btnFreno{height:80px}#btnSentido{width:54px;height:54px}#vel{font-size:36px}}
 </style>
 </head>
 <body>
@@ -172,19 +176,9 @@
   <button id="btnMenu" title="Menú (M)">Menú</button>
 </div>
 <div id="controles">
-  <div id="ruleta" title="Gira la ruleta con el dedo para girar el coche">
-    <svg viewBox="0 0 100 100">
-      <circle cx="50" cy="50" r="48" fill="rgba(12,18,26,.72)" stroke="rgba(255,255,255,.92)" stroke-width="2.5"/>
-      <path id="ruletaArco" d="" fill="none" stroke="#f5b041" stroke-width="5" stroke-linecap="round"/>
-      <g id="ruletaGiro">
-        <circle cx="50" cy="50" r="38" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="9" stroke-dasharray="4.97 4.97"/>
-        <circle cx="50" cy="50" r="33" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1"/>
-        <path d="M50 12 L50 24 M88 50 L76 50 M50 88 L50 76 M12 50 L24 50" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
-        <circle cx="50" cy="13" r="6.5" fill="#f5b041" stroke="#1b1b1b" stroke-width="1.5"/>
-      </g>
-      <circle cx="50" cy="50" r="17" fill="rgba(30,36,46,.95)" stroke="rgba(255,255,255,.6)" stroke-width="1.5"/>
-      <path d="M38 50 l6 -5 v10 z M62 50 l-6 -5 v10 z" fill="#fff"/>
-    </svg>
+  <div id="ruleta" title="Desliza el dedo a izquierda o derecha para girar el coche">
+    <div class="carril"></div><div class="marca"></div><div id="ruletaArco"></div>
+    <div id="ruletaGiro">‹ ›</div>
   </div>
   <div class="derecha">
   <button id="btnClaxon" title="Claxon (H)">📢</button>
@@ -259,6 +253,9 @@ const CONDUCIBLES = new Set(['motorway','motorway_link','trunk','trunk_link','pr
   'secondary','secondary_link','tertiary','tertiary_link','unclassified','residential','living_street','service']);
 const ANCHO_TIPO = { motorway: 11, trunk: 10, primary: 9, secondary: 8, tertiary: 7, unclassified: 6, residential: 6, living_street: 5, service: 4 };
 const VEL_TIPO = { motorway: 120, trunk: 90, primary: 50, secondary: 50, tertiary: 50, unclassified: 40, residential: 30, living_street: 20, service: 20 };
+// Fuera de poblado (calles que el Paseo dibuja como carretera con arcén y que no resultan ser de ciudad): las de las carreteras
+// convencionales, si OpenStreetMap no dice el límite
+const VEL_CARRETERA = { motorway: 120, trunk: 100, primary: 90, secondary: 90, tertiary: 80, unclassified: 60 };
 
 function proyectar(lon, lat) { return [(lon - ORIGEN.lon) * K_LON, -(lat - ORIGEN.lat) * K_LAT]; } // [x este, z sur]
 function tipoBase(t) { return t.replace('_link', ''); }
@@ -350,6 +347,25 @@ function acerasUrbanas(tramos, parcelas, edif, rejilla, rotondas) {
   }
   return { n, metros };
 }
+// Límite de las carreteras fuera de poblado sin límite en el mapa (después de acerasUrbanas, que pasa a calle las de ciudad):
+// el tráfico iba a 50 por ellas. Ni túneles, ni calles de un sitio con casas (las que llevan acera), ni las que van por dentro de
+// una «zona urbana» del mapa (urbanas: sus anillos) en la mitad de su largo o más
+function velocidadesDeCarretera(tramos, urbanas = []) {
+  const cajas = urbanas.map(pts => { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return { pts, x0, z0, x1, z1 }; });
+  const enUrbana = (x, z) => cajas.some(c => x >= c.x0 && x <= c.x1 && z >= c.z0 && z <= c.z1 && enPoligono(c.pts, x, z));
+  let n = 0;
+  for (const t of tramos) {
+    const v = VEL_CARRETERA[tipoBase(t.tipo)];
+    if (t.velMapa || !v || t.acera > 0 || !/con arcén/.test(t.dib) || t.tunel) continue;
+    const cum = acumulados(t.pts), L = cum[cum.length - 1], k = Math.max(2, Math.round(L / 40));
+    let dentro = 0;
+    for (let i = 0; i <= k; i++) { const e = enPolilinea(t.pts, cum, L * i / k); if (enUrbana(e.x, e.z)) dentro++; }
+    if (dentro / (k + 1) >= 0.5) continue;
+    t.velocidad = /_link$/.test(t.tipo) && !t.rotonda ? Math.min(v, 60) : t.rotonda ? Math.min(v, 40) : v;
+    n++;
+  }
+  return n;
+}
 // ¿Tiene acera la calle t por su lado sg (1 o -1)? Las rotondas, solo por fuera
 const ladoConAcera = (t, sg) => t.acera > 0 && !/tierra|grava/.test(t.dib) && (!t.soloLado || t.soloLado === sg);
 function parsearCalles(geo, sentidos = null) {
@@ -360,7 +376,8 @@ function parsearCalles(geo, sentidos = null) {
     const bt = tipoBase(p.tipo);
     const anchoDatos = typeof p.ancho_calzada_m === 'number' ? p.ancho_calzada_m : (ANCHO_TIPO[bt] || 6);
     let vel = parseInt(String(p['osm:maxspeed'] ?? ''), 10);
-    if (!(vel > 0)) vel = VEL_TIPO[bt] || 30;
+    const velMapa = vel > 0;   // el límite viene en el mapa
+    if (!velMapa) vel = VEL_TIPO[bt] || 30;
     const carrilesOSM = Number(p.carriles) > 0 ? Number(p.carriles) : 0;   // carriles reales de OpenStreetMap (0 si no se sabe)
     const sentido = sentidoDeCalle(p, sentidos);
     const cal = completarAceras(p, anchoDatos, typeof p.ancho_acera_m === 'number' ? p.ancho_acera_m : 0, sentido.unico, carrilesOSM);
@@ -371,7 +388,7 @@ function parsearCalles(geo, sentidos = null) {
     const sinPaso = /^(parking_aisle|driveway|drive-through|emergency_access)$/.test(servicio) || /^(no|private|permit)$/.test(motor) ||
       (/^(no|private|permit)$/.test(acceso) && !/^(yes|designated|destination|permissive)$/.test(motor));
     tramos.push({
-      id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho: cal.ancho, velocidad: vel,
+      id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho: cal.ancho, velocidad: vel, velMapa,
       acera: cal.acera,                                                          // ancho de cada acera (0 si no hay)
       dib: p.dibujada_como || '',                                                // calle con aceras, adoquín, camino de tierra…
       unSentido: cal.unSentido,
@@ -3117,6 +3134,7 @@ let cocheMesh = null;            // grupo del coche: posición y rumbo
 let cuerpoCoche = null;          // dentro de cocheMesh: la carrocería, que cabecea y se inclina
 let lucesCoche = null;           // halos de las luces de freno y de marcha atrás
 let sombraCoche = null;          // mancha oscura bajo el coche
+let salpicaderoCoche = null;     // dentro del coche: el salpicadero, que tapa lo que el recorte del morro deja abierto
 let cielo = null, sol = null, hemi = null, sombras = false;
 let contextoRecuperado = false;   // se pone a true si el contexto 3D vuelve tras perderse
 let coche = null;                // { x, z, h, v, dir, acera, golpe, rpm, marcha, cambio, gas, freno, tFreno, sx, sz, wGolpe, ... }
@@ -3131,8 +3149,11 @@ let avisoTexto = '', avisoHasta = 0;
 let tramoActual = null, tramoIdx = -1, dTramo2 = Infinity;
 const controles = { acel: false, freno: false, izq: false, der: false };
 const TECLAS = { ArrowUp: 'acel', KeyW: 'acel', ArrowDown: 'freno', KeyS: 'freno', ArrowLeft: 'izq', KeyA: 'izq', ArrowRight: 'der', KeyD: 'der' };
-const volante = { ang: 0, activo: false, aPrev: 0, muesca: 0 };   // ruleta táctil; ang en grados: positivo = giro a la derecha
-const GIRO_RULETA = 140;         // grados de ruleta para girar del todo
+// Mando de dirección táctil: una pastilla que se desliza a los lados. pos (de -1 a 1, positivo = derecha) es donde está la
+// pastilla y dedo, donde la pide el dedo: la pastilla lo sigue con suavidad y, al soltar, vuelve despacio al centro
+const volante = { pos: 0, dedo: 0, activo: false, x0: 0, pos0: 0, recorrido: 1, muesca: 0 };
+// Firme: poco giro con poco desplazamiento (para corregir en recta sin dar bandazos) y todo el giro al final del recorrido
+const curvaDireccion = p => Math.sign(p) * (0.35 * Math.abs(p) + 0.65 * p * p);
 
 const COLOR_HORIZONTE = 0xc4def0;
 function iniciarRender() {
@@ -3142,6 +3163,7 @@ function iniciarRender() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, movil ? 1.5 : 2));
   sombras = !movil;
   if (sombras) { renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; }
+  renderer.localClippingEnabled = true;   // dentro del coche, de la carrocería solo se ve el morro (recorteMorro)
   // Si el contexto 3D se pierde (la GPU se reinicia), se avisa y se intenta recuperar; si no vuelve, se recarga la página
   renderer.domElement.addEventListener('webglcontextlost', e => {
     e.preventDefault();
@@ -5721,9 +5743,11 @@ async function montarCoche(clave) {
   catch (err) { modelo = await cargarCoche('basico'); }   // si no se puede descargar, se usa el básico
   if (modelo.parent) modelo.parent.remove(modelo);
   const caja = new THREE.Box3().setFromObject(modelo);    // suelto, su caja queda en el espacio del coche
+  recortarMorro(false);   // el modelo que se quita, sin el recorte del morro (se puede volver a montar)
   cuerpoCoche.clear();
   cuerpoCoche.add(conSombra(modelo, true, false), lucesCoche.grupo);
   colocarLucesCoche(caja);
+  if (salpicaderoCoche) salpicaderoCoche.position.y = caja.max.y * 0.665;   // la base del parabrisas, más o menos a esa altura
   Abolladuras.preparar(modelo);
   // si el modelo trae sus propias luces (materiales «ledRojo» y «led»), el juego las enciende al frenar y de noche
   lucesCoche.leds = { rojo: [], faro: [] };
@@ -5758,7 +5782,12 @@ function construirMallaZona() {
     cuerpoCoche = new THREE.Group();
     lucesCoche = crearLucesCoche();
     sombraCoche = crearSombraCoche();
-    cocheMesh.add(cuerpoCoche, sombraCoche, lucesCoche.haz);
+    // del asiento a la base del parabrisas (un poco más, bajo el capó), oscuro y justo por encima del borde del capó recortado,
+    // para que no se vea el hueco de la carrocería (montarCoche lo pone a la altura de cada modelo)
+    salpicaderoCoche = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.16, 1.4).translate(0, -0.08, 0.3), new THREE.MeshLambertMaterial({ color: 0x1b1e24 }));
+    salpicaderoCoche.position.y = 0.94;
+    salpicaderoCoche.visible = false;
+    cocheMesh.add(cuerpoCoche, sombraCoche, lucesCoche.haz, salpicaderoCoche);
     scene.add(cocheMesh);
   }
 }
@@ -5988,6 +6017,7 @@ async function cargarZona(archivo) {
   await new Promise(r => setTimeout(r, 0));
   zona.parcelas = parcelasGeo ? parsearParcelas(parcelasGeo) : [];
   zona.acerasUrbanas = acerasUrbanas(tramos, zona.parcelas, edif, zona.rejilla, extraerOSM(osm).rotondas);   // las calles de ciudad que el Paseo dejó sin acera
+  zona.carreteras = velocidadesDeCarretera(tramos, parsearMapa(mapa).filter(c => c.capa === 'zona urbana' && c.anillo && c.anillo.length >= 3).map(c => c.anillo));   // las carreteras sin límite en el mapa, a su velocidad (las piezas del grafo la heredan)
   decidirTejados(edif, zona.parcelas);   // teja o azotea: por la parcela y, si ya se miró, por la foto de fachada
   const altura = await leerAlturas(zip);
   SUELO_ZONA = altura;   // el relieve de la zona: sueloEn(x, z) lo lee al colocar cada cosa
@@ -6060,20 +6090,70 @@ function simplificar(P, tol) {
   }
   return P.filter((_, m) => queda[m]);
 }
-// Franja a r metros a cada lado de la ruta, como polígono [[lat, lon], …] para el Paseo. La ruta se simplifica antes (80 m)
-// para que el borde no se cruce en las curvas cerradas, y los extremos se alargan r metros
+// Franja a r metros a cada lado de la ruta, como polígono [[lat, lon], …] para el Paseo. Se marca en una rejilla (celdas de r/8)
+// todo lo que queda a r metros de la ruta y se toma el borde de fuera: así no se cruza en las curvas cerradas ni en las vueltas
+// (un borde desplazado a cada lado sí se cruzaba, y el Paseo dejaba fuera trozos de la ruta, sin calles). Los escalones del borde
+// se quitan con Douglas-Peucker; para que no recorte la franja, se marca media celda más
 const ANCHO_FRANJA = 300;
 function franjaDeRuta(pts, r) {
   const kx = 111320 * Math.cos(pts[0][0] * Math.PI / 180), ky = K_LAT;
-  const S = simplificar(pts.map(([la, lo]) => [lo * kx, la * ky]), 80), izq = [], der = [];
-  for (let i = 0; i < S.length; i++) {
-    const a = S[Math.max(0, i - 1)], b = S[Math.min(S.length - 1, i + 1)], L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-    const tx = (b[0] - a[0]) / L, ty = (b[1] - a[1]) / L;
-    let [px, py] = S[i];
-    if (i === 0) { px -= tx * r; py -= ty * r; } else if (i === S.length - 1) { px += tx * r; py += ty * r; }
-    izq.push([px - ty * r, py + tx * r]); der.push([px + ty * r, py - tx * r]);
+  const S = simplificar(pts.map(([la, lo]) => [lo * kx, la * ky]), 5);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of S) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  let C = Math.max(10, r / 8);
+  while (((x1 - x0 + 2 * r) / C + 4) * ((y1 - y0 + 2 * r) / C + 4) > 3e6) C *= 1.5;   // rutas muy largas: celdas más grandes
+  const ox = x0 - r - 2 * C, oy = y0 - r - 2 * C, nx = Math.ceil((x1 - x0 + 2 * r) / C) + 4, ny = Math.ceil((y1 - y0 + 2 * r) / C) + 4;
+  const lleno = new Uint8Array(nx * ny), R = r + C / 2, R2 = R * R;
+  const marca = (ax, ay, bx, by) => {
+    const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+    const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - R - ox) / C)), i1 = Math.min(nx - 1, Math.floor((Math.max(ax, bx) + R - ox) / C));
+    const j0 = Math.max(0, Math.floor((Math.min(ay, by) - R - oy) / C)), j1 = Math.min(ny - 1, Math.floor((Math.max(ay, by) + R - oy) / C));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const k = j * nx + i;
+      if (lleno[k]) continue;
+      const px = ox + (i + 0.5) * C, py = oy + (j + 0.5) * C, t = L ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / L)) : 0;
+      const ex = ax + dx * t - px, ey = ay + dy * t - py;
+      if (ex * ex + ey * ey <= R2) lleno[k] = 1;
+    }
+  };
+  if (S.length === 1) marca(S[0][0], S[0][1], S[0][0], S[0][1]);
+  for (let k = 0; k + 1 < S.length; k++) marca(S[k][0], S[k][1], S[k + 1][0], S[k + 1][1]);
+  // bordes entre una celda llena y una vacía, con la llena a la izquierda (vértices de la rejilla: i + j·(nx+1))
+  const en = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && lleno[j * nx + i] === 1, W = nx + 1, sale = new Map(), bordes = [];
+  const borde = (a, b) => { bordes.push([a, b]); const l = sale.get(a); if (l) l.push(bordes.length - 1); else sale.set(a, [bordes.length - 1]); };
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    if (!en(i, j)) continue;
+    if (!en(i, j - 1)) borde(j * W + i, j * W + i + 1);
+    if (!en(i + 1, j)) borde(j * W + i + 1, (j + 1) * W + i + 1);
+    if (!en(i, j + 1)) borde((j + 1) * W + i + 1, (j + 1) * W + i);
+    if (!en(i - 1, j)) borde((j + 1) * W + i, j * W + i);
   }
-  return [...izq, ...der.reverse()].map(([x, y]) => [+(y / ky).toFixed(6), +(x / kx).toFixed(6)]);
+  // se recorren los anillos (en un vértice con dos salidas, la que gira a la izquierda) y se queda el de más área: el de fuera
+  const usado = new Uint8Array(bordes.length), xy = v => [ox + (v % W) * C, oy + Math.floor(v / W) * C];
+  let mejor = null, areaMejor = 0;
+  for (let e0 = 0; e0 < bordes.length; e0++) {
+    if (usado[e0]) continue;
+    const anillo = [];
+    let e = e0;
+    while (e !== undefined && !usado[e]) {
+      usado[e] = 1;
+      const [a, b] = bordes[e];
+      anillo.push(a);
+      const libres = (sale.get(b) || []).filter(k => !usado[k]);
+      if (libres.length < 2) { e = libres[0]; continue; }
+      const [ax, ay] = xy(a), [bx, by] = xy(b);
+      e = libres.reduce((m, k) => { const [cx, cy] = xy(bordes[k][1]), g = (bx - ax) * (cy - by) - (by - ay) * (cx - bx); return g > m.g ? { g, k } : m; }, { g: -Infinity, k: libres[0] }).k;
+    }
+    const P = anillo.map(xy);
+    let A = 0;
+    for (let k = 0, m = P.length - 1; k < P.length; m = k++) A += P[m][0] * P[k][1] - P[k][0] * P[m][1];
+    if (A / 2 > areaMejor) { areaMejor = A / 2; mejor = P; }
+  }
+  // sin escalones: el anillo se parte por el punto más lejano al primero y se simplifica cada mitad
+  let lejos = 0;
+  for (let k = 1; k < mejor.length; k++) if (Math.hypot(mejor[k][0] - mejor[0][0], mejor[k][1] - mejor[0][1]) > Math.hypot(mejor[lejos][0] - mejor[0][0], mejor[lejos][1] - mejor[0][1])) lejos = k;
+  const ida = simplificar(mejor.slice(0, lejos + 1), C * 0.7), vuelta = simplificar(mejor.slice(lejos).concat([mejor[0]]), C * 0.7);
+  return ida.concat(vuelta.slice(1, -1)).map(([x, y]) => [+(y / ky).toFixed(6), +(x / kx).toFixed(6)]);
 }
 // La ruta de OSRM y su franja se guardan en este navegador y se abre el Paseo, que prepara la franja y vuelve al juego
 // con ?zona=…&ruta=1; entonces arrancarLugar() pone la ruta
@@ -6184,47 +6264,44 @@ function pulsarSentido() {
   else mostrarAviso('Frena para cambiar de sentido', 1);
 }
 $('btnSentido').addEventListener('pointerdown', ev => { ev.preventDefault(); pulsarSentido(); });
-// Ruleta: el giro sigue al dedo alrededor del centro; cerca del centro el ángulo no se fía y no gira
+// Deslizador: el dedo puede tocar en cualquier sitio de la barra; cuenta lo que se mueve desde ahí (la pastilla no salta al dedo)
 const elRuleta = $('ruleta');
-const enRuleta = e => {
-  const r = elRuleta.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
-  return { a: Math.atan2(dy, dx), lejos: Math.hypot(dx, dy) > r.width * 0.12 };
-};
 elRuleta.addEventListener('pointerdown', e => {
-  try { elRuleta.setPointerCapture(e.pointerId); } catch (err) { /* sin captura, el dedo sigue funcionando sobre la ruleta */ }
-  volante.activo = true; volante.aPrev = enRuleta(e).a; e.preventDefault();
+  try { elRuleta.setPointerCapture(e.pointerId); } catch (err) { /* sin captura, el dedo sigue funcionando sobre la barra */ }
+  const r = elRuleta.getBoundingClientRect(), pastilla = $('ruletaGiro').offsetWidth || 72;
+  Object.assign(volante, { activo: true, x0: e.clientX, pos0: volante.pos, recorrido: Math.max(40, (r.width - pastilla) / 2 - 4) });
+  volante.dedo = volante.pos;
+  e.preventDefault();
 });
 elRuleta.addEventListener('pointermove', e => {
   if (!volante.activo) return;
-  const p = enRuleta(e);
-  let d = p.a - volante.aPrev;
-  if (d > Math.PI) d -= 2 * Math.PI;
-  if (d < -Math.PI) d += 2 * Math.PI;
-  if (p.lejos) volante.ang = Math.max(-GIRO_RULETA, Math.min(GIRO_RULETA, volante.ang + d * 180 / Math.PI));
-  volante.aPrev = p.a;
-  const muesca = Math.round(volante.ang / 20);   // un toque de vibración cada 20 grados, como las muescas de una ruleta
+  volante.dedo = Math.max(-1, Math.min(1, volante.pos0 + (e.clientX - volante.x0) / volante.recorrido));
+  const muesca = Math.round(volante.dedo * 4);   // un toque de vibración cada cuarto de recorrido, más marcado en el centro
   if (muesca !== volante.muesca) { volante.muesca = muesca; if (navigator.vibrate) navigator.vibrate(muesca === 0 ? 14 : 5); }
 });
 const soltarRuleta = () => { volante.activo = false; };
 elRuleta.addEventListener('pointerup', soltarRuleta);
 elRuleta.addEventListener('pointercancel', soltarRuleta);
-// Dibujo de la ruleta: el grupo gira con el dedo y un arco ámbar marca cuánto se gira
-let angRuletaPintado = null;
+// Dibujo del deslizador: la pastilla se mueve y gira un poco, y una barra ámbar marca cuánto se gira
+let posRuletaPintada = null;
 function pintarRuleta() {
-  const a = Math.round(volante.ang * 2) / 2;
-  if (a === angRuletaPintado) return;
-  angRuletaPintado = a;
-  $('ruletaGiro').setAttribute('transform', `rotate(${a} 50 50)`);
-  const R = 45, a0 = -Math.PI / 2, a1 = a0 + a * Math.PI / 180;
-  const p0 = [50 + R * Math.cos(a0), 50 + R * Math.sin(a0)], p1 = [50 + R * Math.cos(a1), 50 + R * Math.sin(a1)];
-  $('ruletaArco').setAttribute('d', Math.abs(a) < 1 ? '' : `M${p0[0].toFixed(2)} ${p0[1].toFixed(2)} A${R} ${R} 0 ${Math.abs(a) > 180 ? 1 : 0} ${a > 0 ? 1 : 0} ${p1[0].toFixed(2)} ${p1[1].toFixed(2)}`);
+  const p = Math.round(volante.pos * 200) / 200;
+  if (p === posRuletaPintada) return;
+  posRuletaPintada = p;
+  const W = elRuleta.offsetWidth;   // el recorrido de la pastilla, según lo que mide la barra (cambia con el tamaño de la pantalla)
+  if (W) volante.recorrido = Math.max(40, (W - ($('ruletaGiro').offsetWidth || 72)) / 2 - 4);
+  const px = p * volante.recorrido;
+  $('ruletaGiro').style.transform = `translateX(${px.toFixed(1)}px) rotate(${(p * 35).toFixed(1)}deg)`;
+  const arco = $('ruletaArco').style;
+  arco.width = Math.abs(px).toFixed(1) + 'px';
+  arco.marginLeft = (px < 0 ? px : 0).toFixed(1) + 'px';
 }
 // Giro de las flechas o del mando: +1 izquierda, -1 derecha (con el stick, cualquier valor entre medias)
 const giroPedido = () => ((controles.izq ? 1 : 0) - (controles.der ? 1 : 0)) || -mando.giro;
 // Giro que pide el conductor: +1 izquierda, -1 derecha. La ruleta si se está tocando (o aún vuelve al centro, si no hay tecla pulsada); si no, las flechas o el mando
 function direccion() {
   const teclas = giroPedido();
-  if (volante.activo || (teclas === 0 && Math.abs(volante.ang) > 0.5)) return -Math.max(-1, Math.min(1, volante.ang / GIRO_RULETA));
+  if (volante.activo || (teclas === 0 && Math.abs(volante.pos) > 0.005)) return -curvaDireccion(Math.max(-1, Math.min(1, volante.pos)));
   return teclas;
 }
 // --- mando (Bluetooth o de cable), con la API Gamepad del navegador: en la partida, el gatillo derecho o A (✕) acelera, el
@@ -6671,15 +6748,15 @@ function contactoTrafico(x, z, R) {
   }
   return mejor;
 }
-// ¿Qué hay delante de un coche de tráfico? Metros hasta el coche (o el jugador) más cercano en su carril
-function distanciaDelante(c) {
+// ¿Qué hay delante de un coche de tráfico? Metros hasta el coche (o el jugador) más cercano en su carril, hasta alcance metros
+function distanciaDelante(c, alcance = 20) {
   const fx = Math.sin(c.hp), fz = Math.cos(c.hp);
   let dMin = Infinity, jugador = false;
   const mira = (o, x, z, siempre) => {
     const dx = x - c.x, dz = z - c.z;
-    if (dx * dx + dz * dz > 400) return;
+    if (dx * dx + dz * dz > alcance * alcance) return;
     const a = dx * fx + dz * fz;
-    if (a < 1 || a > 20 || Math.abs(dx * fz - dz * fx) > 2) return;
+    if (a < 1 || a > alcance || Math.abs(dx * fz - dz * fx) > 2) return;
     if (!siempre && o.parado <= 0 && Math.sin(o.hp) * fx + Math.cos(o.hp) * fz < 0) return;   // los que vienen de frente van por su carril
     if (a < dMin) { dMin = a; jugador = siempre; }
   };
@@ -6702,8 +6779,9 @@ function actualizarTrafico(dt) {
   trafico.forEach((c, n) => {
     const gt = sueloEn(c.x, c.z);   // la cota del suelo bajo el coche
     // frena si tiene a alguien delante; tras un golpe se queda parado unos segundos
-    const { dMin, jugador } = distanciaDelante(c);
-    const objetivo = Math.max(0, Math.min(1, (dMin - 6.5) / 12));
+    // a más velocidad (en carretera), mira más lejos y empieza a frenar antes
+    const vMax = zona.G.tramos[c.seg].velocidad / 3.6 * c.k, { dMin, jugador } = distanciaDelante(c, Math.max(20, vMax * 2.2));
+    const objetivo = Math.max(0, Math.min(1, (dMin - 6.5) / Math.max(12, vMax * 1.5)));
     c.factor += objetivo < c.factor ? Math.max(objetivo - c.factor, -dt * 1.8) : Math.min(objetivo - c.factor, dt * 0.45);
     c.frena = objetivo < c.factor - 0.02 || c.factor < 0.05;
     if (c.parado > 0) { c.parado -= dt; c.factor = 0; }
@@ -8409,7 +8487,11 @@ function actualizarMalla(dt) {
   cuerpoCoche.rotation.x = Math.max(-0.05, Math.min(0.05, -coche.aLong * 0.0045)) - Math.max(-0.25, Math.min(0.25, cuesta));
   cuerpoCoche.rotation.z = Math.max(-0.07, Math.min(0.07, coche.aLat * 0.007));
   sombraCoche.position.y = coche.acera ? 0.18 : 0.08;
-  cuerpoCoche.visible = sombraCoche.visible = modoVisto() !== 2;   // dentro del coche no se ve la carrocería (los faros sí alumbran)
+  // dentro del coche, de la carrocería solo queda lo que está por delante del parabrisas: el capó y las aletas, abajo en la pantalla
+  const dentro = modoVisto() === 2;
+  sombraCoche.visible = lucesCoche.grupo.visible = !dentro;
+  salpicaderoCoche.visible = dentro;   // los pilotos y destellos de los faros, desde dentro, sobran (el haz sigue)
+  recortarMorro(dentro, hx, hz);
   // luces: con la trasera o el morro muy tocados, se rompen (primero una y luego las dos)
   const d = coche.dano, rotasAtras = d.detras > 85 ? 2 : d.detras > 55 ? 1 : 0, rotasDelante = d.delante > 85 ? 2 : d.delante > 55 ? 1 : 0;
   const frena = coche.freno > 0.2 || (coche.marcha === 0 && coche.atrasAuto && (controles.acel || mando.gas > 0.1)), atras = coche.marcha === 0;
@@ -8432,6 +8514,17 @@ function actualizarMalla(dt) {
   }
   if ((d.total > 85 || apagado) && dt > 0 && Math.random() < dt * 30) Efectos.llama(mx, 0.9, mz);
 }
+// El plano que corta la carrocería a 0,9 m por delante del centro del coche (la base del parabrisas en un turismo de 4,2 m): se
+// ve lo de delante. Los materiales del coche llevan el plano solo con la cámara dentro
+const recorteMorro = new THREE.Plane(), PLANOS_MORRO = [recorteMorro], SIN_PLANOS = [];
+let morroPuesto = null;
+function recortarMorro(si, hx, hz) {
+  if (si) recorteMorro.setFromNormalAndCoplanarPoint(new THREE.Vector3(hx, 0, hz), new THREE.Vector3(coche.x + hx * 0.9, 0, coche.z + hz * 0.9));
+  const clave = si ? cuerpoCoche.children[0] : null;
+  if (morroPuesto === clave) return;
+  morroPuesto = clave;
+  cuerpoCoche.traverse(o => { if (o.material) for (const m of [].concat(o.material)) { m.clippingPlanes = si ? PLANOS_MORRO : SIN_PLANOS; m.needsUpdate = true; } });
+}
 // --- cámaras: detrás, cerca y dentro del coche (la tecla C o el botón Cámara pasan de una a otra) ---
 const NOMBRES_CAMARA = ['detrás del coche', 'cerca del coche', 'dentro del coche'];
 function cambiarCamara() {
@@ -8451,9 +8544,9 @@ function actualizarCamara(dt) {
   const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
   coche.sacudida *= Math.exp(-5 * dt);
   const sk = coche.sacudida * 0.35, sac = () => (Math.random() - 0.5) * sk;
-  if (modo === 2) {   // dentro: los ojos del conductor, a la izquierda del eje, en un asiento alto para ver bien la calle
-    camara.position.set(coche.x + fx * 0.1 + izq[0] * 0.36 + sac(), g + 1.62 + salto + tiemble + sac(), coche.z + fz * 0.1 + izq[1] * 0.36 + sac());
-    camara.lookAt(coche.x + fx * 40, g + 0.9 + coche.aLong * 0.02, coche.z + fz * 40);
+  if (modo === 2) {   // dentro: los ojos de un conductor alto, a la izquierda del eje y en su asiento, mirando un poco hacia abajo: el capó, a la vista
+    camara.position.set(coche.x - fx * 0.45 + izq[0] * 0.36 + sac(), g + 1.85 + salto + tiemble + sac(), coche.z - fz * 0.45 + izq[1] * 0.36 + sac());
+    camara.lookAt(coche.x + fx * 40, g - 0.3 + coche.aLong * 0.02, coche.z + fz * 40);
     return;
   }
   const cerca = modo === 1;
@@ -8558,11 +8651,13 @@ function bucle() {
   actualizarMobiliario(ahora);
   actualizarBloquesFarolas();
   leerMando(ahora);
-  // la ruleta vuelve sola al centro; con las flechas o el mando, gira hacia donde se dirige el coche (así se ve el giro)
-  if (!volante.activo) {
+  // la pastilla sigue al dedo con suavidad y, suelta, vuelve sola al centro; con las flechas o el mando, se va hacia donde gira el
+  // coche (así se ve el giro)
+  if (volante.activo) volante.pos += (volante.dedo - volante.pos) * Math.min(1, dt * 9);
+  else {
     const teclas = giroPedido();
-    if (teclas) volante.ang += (-teclas * GIRO_RULETA - volante.ang) * Math.min(1, dt * 10);
-    else volante.ang *= Math.exp(-9 * dt);
+    if (teclas) volante.pos += (-teclas - volante.pos) * Math.min(1, dt * 10);
+    else volante.pos *= Math.exp(-5 * dt);
   }
   pintarRuleta();
   if (estado === 'cuenta') {

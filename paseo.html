@@ -1311,27 +1311,30 @@ const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.kumi
    primeras partes tampoco llegan, el servidor no está y no se insiste. Los cuartos que fallen se piden otra vez por cuartos (una vez más)
    y luego se junta todo sin repetir. Si falta algún trozo, el mapa queda incompleto (y se vuelve a pedir al preparar la zona otra vez) */
 /* Con una zona dibujada (la franja de una ruta) se pide solo lo de dentro del polígono: en una ruta larga el recuadro es enorme */
-async function fetchOSM(geo,areaKm2,poli=null){
-  const j=await fetchOSMuna(geo,areaKm2,0,poli);
-  if(j||areaKm2<0.2)return j;
+/* modo: '' todo; 'sinCasas' sin los edificios (las casas salen del Catastro y son la mitad de la descarga); 'soloCasas' solo los
+   edificios (cuando al final el Catastro no las da). El resultado lleva sinCasas o soloCasas para saber qué le falta */
+async function fetchOSM(geo,areaKm2,poli=null,modo=''){
+  const marca=j=>{if(j&&modo)j[modo]=true;return j;};
+  const j=await fetchOSMuna(geo,areaKm2,0,poli,modo);
+  if(j||areaKm2<0.2)return marca(j);
   repLog('osm','La zona entera no ha llegado: la pido en cuatro partes más pequeñas.');
-  return await fetchOSMpartes(geo,areaKm2,1,poli);
+  return marca(await fetchOSMpartes(geo,areaKm2,1,poli,modo));
 }
-async function fetchOSMpartes(geo,areaKm2,nivel,poli=null){
+async function fetchOSMpartes(geo,areaKm2,nivel,poli=null,modo=''){
   const la=(geo.n+geo.s)/2,lo=(geo.e+geo.w)/2,partes=[{n:geo.n,s:la,w:geo.w,e:lo},{n:geo.n,s:la,w:lo,e:geo.e},{n:la,s:geo.s,w:geo.w,e:lo},{n:la,s:geo.s,w:lo,e:geo.e}];
   const res=[];
-  for(const p of partes){res.push(await fetchOSMuna(p,areaKm2/4,nivel,poli));if(res.length>=2&&!res.some(Boolean))return null;}
+  for(const p of partes){res.push(await fetchOSMuna(p,areaKm2/4,nivel,poli,modo));if(res.length>=2&&!res.some(Boolean))return null;}
   if(!res.some(Boolean))return null;
-  if(nivel<2&&areaKm2/4>=0.2)for(let i=0;i<4;i++)if(!res[i]){repLog('osm','Una de las partes no ha llegado: la pido en cuatro más pequeñas.');res[i]=await fetchOSMpartes(partes[i],areaKm2/4,nivel+1,poli);}
+  if(nivel<2&&areaKm2/4>=0.2)for(let i=0;i<4;i++)if(!res[i]){repLog('osm','Una de las partes no ha llegado: la pido en cuatro más pequeñas.');res[i]=await fetchOSMpartes(partes[i],areaKm2/4,nivel+1,poli,modo);}
   const vistos=new Set(),elements=[];let len=0,incompleto=res.some(r=>!r||r.incompleto);
   for(const r of res){if(!r)continue;len+=r.__len||0;for(const e of r.elements){const k=e.type+'/'+e.id;if(vistos.has(k))continue;vistos.add(k);elements.push(e);}}
   repLog('osm',`Juntados ${fmt(elements.length)} elementos de las cuatro partes${incompleto?' (falta alguna: el mapa queda incompleto)':''}.`);
   const out={elements,__len:len};if(incompleto)out.incompleto=true;return out;
 }
-async function fetchOSMuna(geo,areaKm2,nivel,poli=null){
+async function fetchOSMuna(geo,areaKm2,nivel,poli=null,modo=''){
   const pf=poli&&poli.length>=3?`)(poly:"${poli.map(([la,lo])=>la.toFixed(5)+' '+lo.toFixed(5)).join(' ')}"`:'';   // recuadro y polígono a la vez: (s,w,n,e)(poly:"…")
   const bb=`${geo.s},${geo.w},${geo.n},${geo.e}${pf}`,big=areaKm2>45;
-  const q=`[out:json][timeout:90];(
+  const q=modo==='soloCasas'?`[out:json][timeout:90];(way["building"](${bb}););out geom;`:`[out:json][timeout:90];(
 way["natural"~"^(water|wetland|beach|sand|shingle|wood|scrub|heath|grassland|bare_rock|scree|dune)$"](${bb});
 relation["natural"~"^(water|wetland|beach|sand|wood|scrub|heath|grassland)$"](${bb});
 way["landuse"~"^(forest|orchard|vineyard|meadow|grass|village_green|farmland|farmyard|reservoir|basin|greenhouse_horticulture|plant_nursery|residential|industrial|commercial|retail)$"](${bb});
@@ -1340,24 +1343,27 @@ way["leisure"~"^(park|garden|golf_course|swimming_pool|playground)$"](${bb});
 node["leisure"="playground"](${bb});
 way["waterway"](${bb});
 way["water"](${bb});
-${big?'':`way["building"](${bb});`}
+${big||modo==='sinCasas'?'':`way["building"](${bb});`}
 way["highway"~"${big?'^(motorway|trunk|primary|secondary|tertiary)$':'.'}"](${bb});
 node["place"](${bb});
 node["natural"~"^(peak|beach|spring|cape)$"](${bb});
 node["tourism"~"^(viewpoint|attraction)$"](${bb});
 );out geom;`;
-  for(const url of OVERPASS){const host=hostDe(url),t0=performance.now();let to=0;
-    try{const ac=new AbortController();to=setTimeout(()=>ac.abort(),70000);
-      const r=await fetch(url,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'},signal:ac.signal});
-      if(!r.ok){repLog('osm',`${host}: ${(await errHTTP(r)).message}.`);clearTimeout(to);continue;}
-      const t=await r.text();clearTimeout(to);let j=null;
-      try{j=JSON.parse(t);}catch{const c=cuerpoErr(t);repLog('osm',`${host}: la respuesta no es un mapa válido${c?`: «${c}»`:' (llegó cortada o no es JSON)'}.`);continue;}
-      if(j&&/runtime error|timed out|out of memory/i.test(j.remark||'')){repLog('osm',`${host}: respuesta incompleta, el servidor cortó la consulta: «${String(j.remark).trim().slice(0,160)}».`);continue;}
-      if(j&&Array.isArray(j.elements)){j.__len=t.length;repLog('osm',`${host}: ${fmt(j.elements.length)} elementos (${fmtMB(t.length)}) en ${(performance.now()-t0)<1000?'menos de 1':fmt((performance.now()-t0)/1000,0)} s.`);return j;}
-      repLog('osm',`${host}: la respuesta no trae datos.`);}
-    catch(e){clearTimeout(to);repLog('osm',`${host}: ${e.name==='AbortError'?'no respondió en 70 s':errTxt(e)}.`);}
-  }
-  return null;
+  // a todos los servidores a la vez: vale el primero que da un mapa completo y a los demás se les corta la consulta
+  let ganador=null;const acs=OVERPASS.map(()=>new AbortController());
+  const pide=async(url,ac)=>{const host=hostDe(url),t0=performance.now(),to=setTimeout(()=>ac.abort(),70000);
+    try{const r=await fetch(url,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'},signal:ac.signal});
+      if(!r.ok){repLog('osm',`${host}: ${(await errHTTP(r)).message}.`);return null;}
+      const t=await r.text();let j=null;
+      try{j=JSON.parse(t);}catch{const c=cuerpoErr(t);repLog('osm',`${host}: la respuesta no es un mapa válido${c?`: «${c}»`:' (llegó cortada o no es JSON)'}.`);return null;}
+      if(j&&/runtime error|timed out|out of memory/i.test(j.remark||'')){repLog('osm',`${host}: respuesta incompleta, el servidor cortó la consulta: «${String(j.remark).trim().slice(0,160)}».`);return null;}
+      if(j&&Array.isArray(j.elements)){if(ganador)return null;j.__len=t.length;repLog('osm',`${host}: ${fmt(j.elements.length)} elementos (${fmtMB(t.length)}) en ${(performance.now()-t0)<1000?'menos de 1':fmt((performance.now()-t0)/1000,0)} s.`);return j;}
+      repLog('osm',`${host}: la respuesta no trae datos.`);return null;}
+    catch(e){if(!ganador)repLog('osm',`${host}: ${e.name==='AbortError'?'no respondió en 70 s':errTxt(e)}.`);return null;}
+    finally{clearTimeout(to);}};
+  await new Promise(fin=>{let quedan=OVERPASS.length;
+    OVERPASS.forEach((url,i)=>pide(url,acs[i]).then(j=>{if(j&&!ganador){ganador=j;acs.forEach((ac,k)=>{if(k!==i)ac.abort();});fin();}else if(--quedan===0||ganador)fin();}));});
+  return ganador;
 }
 function osmLayer(t){
   if(t.building)return t.building==='greenhouse'?'gh':'building';
@@ -3272,10 +3278,12 @@ async function buildWorld(src){
     const raw=src.raw||{};
     const osmEntero=raw.osm&&!raw.osm.incompleto;   // si quedó incompleto, se vuelve a pedir (y si no llega, vale lo guardado)
     if(osmEntero)repSet('osm','ok',`Guardado en este navegador (${fmt((raw.osm.elements||[]).length)} elementos): no se ha descargado nada.`);
-    const pO=osmEntero?Promise.resolve(raw.osm):fetchOSM(src.geo,src.poligono&&src.poligono.length>=3?areaPoligonoKm2(src.poligono):area,src.poligono).then(j=>j&&!(j.incompleto&&raw.osm&&raw.osm.elements.length>j.elements.length)?j:(raw.osm||j));
     const poliCat=src.poligonoCatastro||src.poligono;   // la franja de una ruta: el Catastro solo de sus primeros km (el juego pide el resto)
     const areaCat=poliCat&&poliCat.length>=3?areaPoligonoKm2(poliCat):area;   // una zona dibujada (la franja de una ruta) cuenta lo de dentro
     const catOk=enEspana(src.geo)&&areaCat<=CAT_MAX_KM2,catDone=raw.cat&&(!raw.cat.tiles||!(raw.cat.failed||[]).length);
+    const areaOSM=src.poligono&&src.poligono.length>=3?areaPoligonoKm2(src.poligono):area;
+    // con Catastro, sin los edificios de OpenStreetMap (no se usan y son la mitad de la descarga); si luego no llegan, se piden
+    const pO=osmEntero?Promise.resolve(raw.osm):fetchOSM(src.geo,areaOSM,src.poligono,catOk?'sinCasas':'').then(j=>j&&!(j.incompleto&&raw.osm&&raw.osm.elements.length>j.elements.length)?j:(raw.osm||j));
     if(!enEspana(src.geo))repSet('cat','nada','Fuera de España no hay Catastro: las casas salen de OpenStreetMap.');
     else if(!catOk)repSet('cat','nada',`La zona mide ${fmt(areaCat,1)} km² y el Catastro solo se pide hasta ${CAT_MAX_KM2} km²: las casas salen de OpenStreetMap.`);
     const pC=catDone?Promise.resolve({partes:raw.cat.partes||catPartes(raw.cat),fails:0,cached:true})
@@ -3292,9 +3300,9 @@ async function buildWorld(src){
     if(!sat){sat=await fetchSat(src.geo,Math.min(q.tex,MAXTEX),q.tiles,(f,z)=>busy(`Descargando la foto aérea (zoom ${z}) · ${Math.round(f*100)} %`,f));
       if(sat){fresh.sat=true;repSet('sat',sat.failed.length?'aviso':'ok',sat.failed.length?`${cap1(sat.src)}, zoom ${sat.z}, pero faltan ${sat.failed.length} teselas: se ven lisas y se volverán a pedir.`:`${cap1(sat.src)}, zoom ${sat.z}: completa.`);}
       else repSet('sat','fallo','No ha llegado de ninguna fuente: el suelo se pinta a partir del mapa y del relieve.');}
-    busy(raw.osm?'Leyendo el mapa guardado…':'Esperando el mapa de OpenStreetMap…',null);const osm=await pO;
+    busy(raw.osm?'Leyendo el mapa guardado…':'Esperando el mapa de OpenStreetMap…',null);let osm=await pO;
     fresh.osm=(osm&&osm!==raw.osm)?osm:null;
-    if(!osmEntero)repSet('osm',osm?'ok':'fallo',osm?`Descargado: ${fmt(osm.elements.length)} elementos (agua, vegetación, calles${area>45?'':', edificios'} y nombres de lugares).`
+    if(!osmEntero)repSet('osm',osm?'ok':'fallo',osm?`Descargado: ${fmt(osm.elements.length)} elementos (agua, vegetación, calles${area>45||osm.sinCasas?'':', edificios'} y nombres de lugares).`
       :`Ninguno de los ${OVERPASS.length} servidores lo ha dado: el agua y la vegetación salen de la foto aérea y del relieve.`);
     if(osm)feats=osmToFeatures(osm,makeProj(T));
     if(pC){busy(raw.cat?'Leyendo las casas guardadas…':'Esperando las casas del Catastro…',null);const rc=await pC;
@@ -3310,6 +3318,13 @@ async function buildWorld(src){
           const cf=rc.partes.filter(p=>!sinPlantas(p)).map(p=>({layer:'building',tags:isNaN(p.plantas)?{building:'catastro'}:{building:'catastro','building:levels':String(p.plantas)},polys:[p.ring,...p.holes].map(r=>r.map(([la,lo])=>proj(la,lo))),cat:true,ref:p.ref}));
           feats=(feats||[]).filter(f=>f.layer!=='building').concat(cf);T.catN=cf.length;
           if(rc.fails)notes.push(`El Catastro no ha dado ${rc.fails} de ${rc.total} trozos de la zona (${rc.motivo||'sin respuesta'}); ahí no salen sus casas. Lo que sí llegó queda guardado, y la próxima vez que abras la zona solo se pedirá lo que falta.`);}}}
+    // el mapa se pidió sin edificios contando con el Catastro, y no ha dado casas: los edificios de OpenStreetMap, aparte
+    if(osm&&osm.sinCasas&&!T.catN){busy('Descargando los edificios de OpenStreetMap…',null);
+      const b=await fetchOSM(src.geo,areaOSM,src.poligono,'soloCasas');
+      if(b){const vistos=new Set(osm.elements.map(e=>e.type+'/'+e.id)),elements=osm.elements.concat(b.elements.filter(e=>!vistos.has(e.type+'/'+e.id)));
+        osm={elements,__len:(osm.__len||0)+(b.__len||0),...(osm.incompleto||b.incompleto?{incompleto:true}:{})};fresh.osm=osm;
+        feats=osmToFeatures(osm,makeProj(T));repLog('osm',`Sin casas del Catastro: ${fmt(b.elements.length)} edificios de OpenStreetMap.`);}
+      else repLog('osm','Sin casas del Catastro, y los edificios de OpenStreetMap tampoco han llegado.');}
     if(pP){busy('Esperando las parcelas del Catastro…',null);const rp=await pP;
       if(rp.err)repLog('cat',`Las parcelas no han llegado: ${errCat(rp.err)}.`);
       else if(rp.viejo){fresh.par={viejo:true,tiles:{},failed:[]};repLog('cat','catastro.php no sabe dar parcelas (es la versión antigua): sin ellas, las vallas de los chalets del juego se calculan. Sube el catastro.php nuevo para tenerlas.');}
