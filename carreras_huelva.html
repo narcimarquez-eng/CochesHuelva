@@ -368,6 +368,13 @@ function velocidadesDeCarretera(tramos, urbanas = []) {
 }
 // ¿Tiene acera la calle t por su lado sg (1 o -1)? Las rotondas, solo por fuera
 const ladoConAcera = (t, sg) => t.acera > 0 && !/tierra|grava/.test(t.dib) && (!t.soloLado || t.soloLado === sg);
+// Puentes y pasos elevados (OpenStreetMap: bridge=yes o layer=1): el tablero va a esta altura sobre la calle de abajo
+const ALTO_TABLERO = 5.5, RAMPA_PUENTE = 25;
+function alturaPuente(p) {
+  const capa = parseInt(String(p['osm:layer'] ?? '0'), 10) || 0;
+  const elevado = /^(yes|viaduct|true)$/.test(String(p['osm:bridge'] || '')) || capa >= 1;
+  return elevado ? ALTO_TABLERO : 0;
+}
 function parsearCalles(geo, sentidos = null) {
   const tramos = [];
   for (const f of geo.features) {
@@ -388,7 +395,7 @@ function parsearCalles(geo, sentidos = null) {
     const sinPaso = /^(parking_aisle|driveway|drive-through|emergency_access)$/.test(servicio) || /^(no|private|permit)$/.test(motor) ||
       (/^(no|private|permit)$/.test(acceso) && !/^(yes|designated|destination|permissive)$/.test(motor));
     tramos.push({
-      id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho: cal.ancho, velocidad: vel, velMapa,
+      id: p.osm_id, nombre: p.nombre || '', tipo: p.tipo, ancho: cal.ancho, puente: alturaPuente(p), velocidad: vel, velMapa,
       acera: cal.acera,                                                          // ancho de cada acera (0 si no hay)
       dib: p.dibujada_como || '',                                                // calle con aceras, adoquín, camino de tierra…
       unSentido: cal.unSentido,
@@ -2143,7 +2150,7 @@ function nuevoCocheTrafico(G, rng, seg, fwd, s) {
 // Siguiente tramo al llegar a un nodo: uno cualquiera, sin volver por donde se venía (si no hay otro, se da la vuelta) y, si
 // se puede, sin meterse en una calle estrecha de sentido supuesto (el mapa no lo dice: podría ir al revés que en la realidad)
 function siguienteArista(G, nodo, desde, rng) {
-  const adj = G.nodos[nodo].adj;
+  const adj = G.nodos[nodo].adj.filter(e => !G.tramos[e.seg].puente);   // el tráfico no sube a los puentes
   const opciones = adj.filter(e => e.to !== desde && G.nodos[e.to].comp), seguras = opciones.filter(e => !G.tramos[e.seg].sentidoSupuesto);
   const lista = seguras.length ? seguras : opciones.length ? opciones : adj;
   return lista.length ? lista[Math.floor(rng() * lista.length)] : null;
@@ -2346,6 +2353,7 @@ function giroCoche(c, dt) {
 function construirRejillaCalzadas(tramos) {
   const C = 40, celdas = new Map(), clave = (i, j) => i + ',' + j;
   tramos.forEach((t, k) => {
+    if (t.puente) return;   // los puentes van en alto: no tapan las aceras de abajo
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (const [x, z] of t.pts) { x0 = Math.min(x0, x); z0 = Math.min(z0, z); x1 = Math.max(x1, x); z1 = Math.max(z1, z); }
     const m = t.ancho / 2 + 0.5;
@@ -3727,6 +3735,7 @@ function mallaCarreteras(tramos, esq) {
   const enOtra = construirRejillaCalzadas(tramos);
   for (let k = 0; k < tramos.length; k++) {
     const t = tramos[k];
+    if (t.puente) continue;   // los puentes se dibujan aparte, en alto (mallaPuentes)
     const h = t.ancho / 2;
     const tierra = /tierra|grava/.test(t.dib), adoquin = /adoqu/.test(t.dib);
     const asfalto = tierra ? [0.5, 0.42, 0.3] : adoquin ? [0.52, 0.5, 0.47] : COLOR_CALZADA(t);
@@ -3763,6 +3772,96 @@ function mallaCarreteras(tramos, esq) {
   return conSombra(grupo, false, true);
 }
 
+// Puentes: cada tramo elevado se trocea y cada trozo lleva su altura (rampa suave en los extremos). Los trozos con la misma
+// altura se dibujan juntos y el grupo se sube a esa altura
+function alturaTablero(L, s, alto) {
+  const r = Math.max(1, Math.min(RAMPA_PUENTE, L / 2));
+  const u = Math.max(0, Math.min(1, Math.min(s, L - s) / r));
+  return alto * u * u * (3 - 2 * u);
+}
+function trocearPuente(t) {
+  const cum = acumulados(t.pts), L = cum[cum.length - 1], trozos = [];
+  for (let d = 0; d < L - 0.05;) {
+    const enRampa = alturaTablero(L, d + 0.5, t.puente) < t.puente * 0.999;
+    const d1 = Math.min(L, d + (enRampa ? 0.6 : 4));
+    const p = subPolilinea(t.pts, cum, d, d1);
+    if (p.length >= 2) trozos.push({ p, dy: Math.round(alturaTablero(L, (d + d1) / 2, t.puente) * 10) / 10 });
+    d = d1;
+  }
+  return trozos;
+}
+function mallaPuentes(tramos) {
+  const grupo = new THREE.Group(), porAltura = new Map();
+  for (const t of tramos) {
+    if (!t.puente) continue;
+    for (const { p, dy } of trocearPuente(t)) {
+      if (!porAltura.has(dy)) porAltura.set(dy, []);
+      porAltura.get(dy).push({ ...t, pts: p });
+    }
+  }
+  for (const [dy, lista] of porAltura) {
+    const malla = mallaCarreteras(lista, null);
+    malla.position.y = dy;
+    grupo.add(malla);
+  }
+  return grupo;
+}
+// Datos de cada puente para el coche: su trazado, su largo, su anchura de barandilla y los dos extremos (con el sentido hacia dentro)
+function prepararPuentes(tramos) {
+  const dir = (a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
+  return tramos.filter(t => t.puente && t.pts.length >= 2).map(t => {
+    const pts = t.pts, cum = acumulados(pts), n = pts.length;
+    return { pts, cum, L: cum[cum.length - 1], alto: t.puente, mitad: t.ancho / 2 + (t.acera || 0) + 0.3,
+      ini: pts[0], dIni: dir(pts[0], pts[1]), fin: pts[n - 1], dFin: dir(pts[n - 1], pts[n - 2]) };
+  });
+}
+function proyectarEnPuente(P, x, z) {
+  let m = null;
+  for (let i = 0; i + 1 < P.pts.length; i++) {
+    const [ax, az] = P.pts[i], [bx, bz] = P.pts[i + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+    if (l2 < 1e-9) continue;
+    // u sin recortar: si el coche ya ha pasado un extremo, s sale fuera de [0, L] y actualizarPuente lo saca del tablero
+    const uRaw = ((x - ax) * dx + (z - az) * dz) / l2, u = Math.max(0, Math.min(1, uRaw));
+    const px = ax + dx * u, pz = az + dz * u, d = Math.hypot(x - px, z - pz);
+    if (!m || d < m.d) {
+      const l = Math.sqrt(l2), nx = -dz / l, nz = dx / l;
+      m = { d, lat: (x - ax) * nx + (z - az) * nz, s: P.cum[i] + l * uRaw, px, pz, nx, nz };
+    }
+  }
+  return m;
+}
+// El coche sube al tablero al entrar por un extremo, de frente y a 5 m como mucho. En el tablero no choca con lo de abajo,
+// los costados son una barandilla que lo devuelve al centro y sale por el extremo: el tablero le da la altura
+function actualizarPuente(c) {
+  if (!zona || !zona.puentes || !zona.puentes.length) return;
+  if (c.puente != null) {
+    const P = zona.puentes[c.puente], q = proyectarEnPuente(P, c.x, c.z), fx = Math.sin(c.h), fz = Math.cos(c.h);
+    // sale solo si ya ha pasado un extremo y mira hacia fuera (al entrar desde fuera, s es un poco negativo y mira hacia dentro)
+    const saleIni = q && q.s < -1.5 && fx * P.dIni[0] + fz * P.dIni[1] < 0;
+    const saleFin = q && q.s > P.L + 1.5 && fx * P.dFin[0] + fz * P.dFin[1] < 0;
+    if (!q || saleIni || saleFin) { c.puente = null; c.alto = 0; return; }
+    if (Math.abs(q.lat) > P.mitad) {
+      const sg = Math.sign(q.lat);
+      c.x = q.px + q.nx * sg * P.mitad; c.z = q.pz + q.nz * sg * P.mitad;
+      c.v *= 0.9; c.sx = c.sz = 0;
+    }
+    c.alto = alturaTablero(P.L, Math.max(0, Math.min(P.L, q.s)), P.alto);
+    return;
+  }
+  const fx = Math.sin(c.h), fz = Math.cos(c.h);
+  for (let i = 0; i < zona.puentes.length; i++) {
+    const P = zona.puentes[i];
+    for (const extremo of [0, 1]) {
+      const a = extremo ? P.fin : P.ini, d = extremo ? P.dFin : P.dIni;
+      if (Math.hypot(c.x - a[0], c.z - a[1]) > 5 || fx * d[0] + fz * d[1] < 0.5) continue;
+      const q = proyectarEnPuente(P, c.x, c.z);
+      if (!q || Math.abs(q.lat) > P.mitad) continue;
+      c.puente = i; c.acera = false;
+      c.alto = alturaTablero(P.L, Math.max(0, Math.min(P.L, q.s)), P.alto);
+      return;
+    }
+  }
+}
 // Marcas viales: línea central, bordes y pasos de cebra (franjas blancas sobre la calzada)
 function mallaMarcas(marcas) {
   const m = nuevaMalla(), BLANCO = [0.95, 0.95, 0.92];
@@ -5961,7 +6060,7 @@ function construirMallaZona() {
   matsNoche = []; fuentes = []; bloquesFarolas = [];
   mallaZona = new THREE.Group();
   const m = zona.mundo;
-  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos, zona.esq), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif, zona.porches || []));
+  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos, zona.esq), mallaPuentes(zona.tramos), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif, zona.porches || []));
   mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaLucesFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas),
     mallaQuioscos(m.quioscos), mallaTermometros(m.termometros), mallaVallas(m.vallas), mallaJuegos(m.juegos || []));
   if (!zona.foto && m.jardines.length) mallaZona.add(mallaJardines(m.jardines));
@@ -6196,7 +6295,7 @@ async function cargarZona(archivo) {
   }
   $('estado').textContent = 'Construyendo la zona…';
   await new Promise(r => setTimeout(r, 0));
-  zona = { nombre: nombreLugar, tramos, G, edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan, simuladas,
+  zona = { nombre: nombreLugar, tramos, G, puentes: prepararPuentes(tramos), edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan, simuladas,
     datos: { zip, meta, catastro, parcelas: parcelasDatos || (parcelasGeo ? { tiles: {}, failed: [] } : null) } };
   zona.porRef = new Map();
   for (const e of edif) if (e.ref) { if (!zona.porRef.has(e.ref)) zona.porRef.set(e.ref, []); zona.porRef.get(e.ref).push(e); }
@@ -6660,7 +6759,7 @@ function callesCerca(R, cumple) {
 }
 // Un coche de tráfico nuevo en una calle cercana, a más de 60 m del jugador
 function colocarCoche(c) {
-  const candidatos = segmentosCerca(RADIO_TRAFICO, t => t.ancho >= 5);
+  const candidatos = segmentosCerca(RADIO_TRAFICO, t => t.ancho >= 5 && !t.puente);
   if (!candidatos.length) return;
   for (let k = 0; k < 20; k++) {
     const seg = candidatos[Math.floor(rngTrafico() * candidatos.length)];
@@ -8180,6 +8279,7 @@ async function nuevaCarrera() {
     x: plan.inicio.x, z: plan.inicio.z, h: plan.inicio.h, v: 0, dir: 0, acera: false, golpe: 0, rpm: FISICA.ralenti, marcha: 1, cambio: 0, gas: 0, freno: 0, tFreno: 0,
     atrasAuto: false, sx: 0, sz: 0, wGolpe: 0, exceso: 0, derrape: 0, roce: 0, sacudida: 0, aLong: 0, aLat: 0, vPrev: 0, ultimoGolpe: 0,
     dano: { delante: 0, detras: 0, izq: 0, der: 0, total: 0 }, destrozado: false, potencia: 1, agarreDano: 1,
+    puente: null, alto: 0,
   };
   if (carrera.modo === 'circuito') {
     Object.assign(carrera, { cps: plan.checkpoints, siguiente: 0, vueltas: 0, tVuelta: 0, tiempos: [], longitud: plan.longitud });
@@ -8651,13 +8751,14 @@ function fisica(dt, soloFrenar = false) {
   for (let i = 0; i < pasos; i++) {
     const px = c.x, pz = c.z;
     c.x += (Math.sin(c.h) * c.v + c.sx) * h; c.z += (Math.cos(c.h) * c.v + c.sz) * h;
-    const g = resolverChoques(c);
+    const g = c.puente != null ? null : resolverChoques(c);
     if (g && (!peor || g.impacto > peor.impacto)) peor = g;
     if (Math.hypot(c.x - px, c.z - pz) > 2) { c.x = px; c.z = pz; c.v *= -0.2; c.sx = c.sz = 0; }   // empujado demasiado lejos: vuelve atrás
   }
   if (peor) efectoGolpe(peor);
-  bordillos(c, x0, z0);
-  golpearCiclistas(c);
+  if (c.puente == null) bordillos(c, x0, z0);
+  actualizarPuente(c);
+  if (c.puente == null) golpearCiclistas(c);   // los ciclistas van a ras de suelo: el coche de arriba no los atropella
   // aceleraciones para inclinar la carrocería y para los derrapes
   c.aLong += ((c.v - c.vPrev) / dt - c.aLong) * Math.min(1, dt * 6);
   c.aLat += (c.v * w - c.aLat) * Math.min(1, dt * 6);
@@ -8670,6 +8771,7 @@ function efectosConduccion(c, dt) {
   const frenada = c.freno > 0.75 && vAbs > 9 ? Math.min(1, (vAbs - 9) / 12 + 0.4) : 0;
   const patinazo = c.marcha === 1 && c.gas > 0.9 && vAbs < 7 && vAbs > 0.3 ? 0.6 : 0;
   c.derrape = Math.max(frenada, Math.min(1, c.exceso / 6), Math.min(1, (lado - 1.2) / 3), patinazo);
+  if (c.puente != null) return;   // en el tablero no hay huellas ni humo: se pintarían a ras de suelo, debajo del puente
   const fx = Math.sin(c.h), fz = Math.cos(c.h), rx = Math.cos(c.h), rz = -Math.sin(c.h);
   const ruedas = [[0.82, -1.3], [-0.82, -1.3], [0.82, 1.3], [-0.82, 1.3]];
   ruedas.forEach(([l, a], i) => {
@@ -8689,7 +8791,7 @@ function modoVisto() {
 function actualizarMalla(dt) {
   const salto = coche.golpe > 0 ? Math.sin(coche.golpe / 0.5 * Math.PI) * 0.22 : 0;   // bote al subir al bordillo
   const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
-  const suelo = sueloEn(coche.x, coche.z), hx = Math.sin(coche.h), hz = Math.cos(coche.h);
+  const suelo = coche.puente != null ? 0.05 + coche.alto : sueloEn(coche.x, coche.z), hx = Math.sin(coche.h), hz = Math.cos(coche.h);
   cocheMesh.position.set(coche.x, suelo, coche.z);
   cocheMesh.rotation.y = coche.h;
   // la carrocería cabecea al acelerar y frenar, se inclina hacia fuera en las curvas y sigue la cuesta (delante y detrás)
@@ -8745,7 +8847,7 @@ function cambiarCamara() {
 }
 function actualizarCamara(dt) {
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h), izq = [fz, -fx];   // en España el conductor va a la izquierda
-  const modo = modoVisto(), g = sueloEn(coche.x, coche.z);   // la cámara va sobre el suelo del coche
+  const modo = modoVisto(), g = coche.puente != null ? 0.05 + coche.alto : sueloEn(coche.x, coche.z);   // la cámara va sobre el suelo del coche (o el tablero)
   document.body.classList.toggle('dentro', modo === 2);
   // más ángulo de visión a más velocidad: da sensación de rapidez
   const rapido = Math.min(1, Math.abs(coche.v) / 50);
