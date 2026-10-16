@@ -2328,6 +2328,35 @@ function molduraCintura(material) {
   }
   return grupo;
 }
+// Marcas de paneles: puertas (borde delantero, borde trasero y umbral), capó y maletero.
+// Cada punto se busca con un rayo sobre la carrocería real, así las líneas siguen su curva.
+function marcasPaneles(cuerpo, material) {
+  const grupo = new THREE.Group();
+  const sobre = (origen, dir) => {
+    const hit = new THREE.Raycaster(origen, dir.clone().normalize()).intersectObject(cuerpo)[0];
+    if (!hit) return null;
+    const n = hit.face.normal.clone();
+    if (n.dot(dir) > 0) n.negate();
+    return hit.point.addScaledVector(n, 0.004);
+  };
+  const ladoPunto = (s, z, y) => sobre(new THREE.Vector3(s * 4, y, z), new THREE.Vector3(-s, 0, 0));
+  const techoPunto = (x, z) => sobre(new THREE.Vector3(x, 4, z), new THREE.Vector3(0, -1, 0));
+  const tramo = (a, b, n = 8) => Array.from({ length: n + 1 }, (_, k) => a + (b - a) * k / n);
+  const dibujar = puntos => {
+    const pts = puntos.filter(Boolean);
+    if (pts.length < 2) return;
+    grupo.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 4, 0.005, 6, false), material));
+  };
+  for (const s of [-1, 1]) {
+    dibujar(tramo(0.32, 0.97).map(y => ladoPunto(s, 0.85, y)));     // borde delantero de la puerta
+    dibujar(tramo(0.32, 0.97).map(y => ladoPunto(s, -0.15, y)));    // borde trasero de la puerta
+    dibujar(tramo(0.85, -0.15).map(z => ladoPunto(s, z, 0.32)));    // umbral
+    dibujar(tramo(1.0, 1.85).map(z => techoPunto(s * 0.6, z)));     // bordes del capó
+    dibujar(tramo(-1.95, -2.15).map(z => techoPunto(s * 0.45, z))); // bordes del maletero
+  }
+  dibujar(tramo(-0.45, 0.45).map(x => techoPunto(x, -2.15)));      // tapa del maletero
+  return grupo;
+}
 // Entorno de reflejos (cielo degradado con paneles de luz) para que la pintura y el cromo se vean metálicos; se genera una vez
 let entornoReflejos = null;
 function entornoCoche() {
@@ -2376,7 +2405,7 @@ function construirCoche(color) {
 
   // carrocería: pintura y cristal en la misma superficie, con la moldura de cintura encima del borde
   const carroceria = new THREE.Mesh(geometriaCarroceria(color, 0x1f2a35), pintura);
-  g.add(carroceria, molduraCintura(moldura));
+  g.add(carroceria, molduraCintura(moldura), marcasPaneles(carroceria, moldura));
   // piezas sobre la superficie: un rayo desde fuera las apoya en la carrocería real y las orienta con su normal
   const sobreSuperficie = (origen, direccion, geo, mat, grosor) => {
     const dir = direccion.clone().normalize();
