@@ -44,7 +44,7 @@ Activa GitHub Pages en Settings → Pages, eligiendo la rama del juego y la carp
 
 En la pantalla de inicio se elige el coche: el básico, uno de la galería, CarConcept o ToyCar.
 
-El básico es un turismo a escala real (4,5 m de largo, 1,8 m de ancho, 1,46 m de alto y ejes a 2,7 m) hecho en el propio juego con cajas, extrusiones y cilindros, sin archivo de modelo. La pintura, los cristales, la rejilla, los neumáticos, las llantas y la matrícula usan las texturas `texturas/coche-*.jpg`, generadas con un script de Python (Pillow) para este proyecto.
+El básico es un turismo a escala real (4,5 m de largo, 1,8 m de ancho, 1,46 m de alto y ejes a 2,7 m) hecho en el propio juego, sin archivo de modelo. La carrocería es una superficie suave que se construye con anillos transversales a lo largo del coche, así que el techo, la cintura y los hombros salen redondeados. La pintura es metálica con barniz, con reflejos de un entorno que se genera en el juego; los cristales son oscuros y brillantes, y una moldura negra recorre la cintura. Las texturas `texturas/coche-*.jpg` (pintura, rejilla, neumáticos, llantas y matrícula) se generaron con un script de Python (Pillow) para este proyecto.
 
 La galería son ocho turismos de Kenney Car Kit, © Kenney (kenney.nl), licencia CC0 1.0: Berlina, Hatchback, Deportivo, SUV, SUV de lujo, Taxi, Patrulla y Furgoneta. Están en `modelos/coches/`, con sus datos en `catalogo.json`. Miden 4,2 m de largo y el frontal mira a +Z, que es el sentido en el que avanza el juego.
 
