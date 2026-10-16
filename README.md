@@ -331,7 +331,9 @@ Activa GitHub Pages en Settings → Pages, eligiendo la rama del juego y la carp
 
 ## Coches
 
-En la pantalla de inicio se elige el coche: el básico (una caja roja), el **SUV compacto**, uno de la galería, CarConcept o ToyCar.
+En la pantalla de inicio se elige el coche: el básico, el **SUV compacto**, uno de la galería, CarConcept o ToyCar.
+
+El básico es un turismo a escala real (4,5 m de largo, 1,8 m de ancho, 1,46 m de alto y ejes a 2,7 m) hecho en el propio juego, sin archivo de modelo. La carrocería es una superficie suave que se construye con anillos transversales a lo largo del coche, así que el techo, la cintura y los hombros salen redondeados. La pintura es metálica con barniz, con reflejos de un entorno que se genera en el juego; los cristales son oscuros y brillantes, una moldura negra recorre la cintura y líneas oscuras marcan puertas, capó y maletero. Las texturas `texturas/coche-*.jpg` (pintura, rejilla, neumáticos, llantas y matrícula) se generaron con un script de Python (Pillow) para este proyecto.
 
 Los rivales del circuito llevan coches de carreras y deportivos de Kenney Car Kit 3.1 (CC0): `race`, `race-future`, `sedan-sports` y `hatchback-sports`.
 

@@ -5629,33 +5629,225 @@ function porchesEnBufer(G, porches, foto, uvFoto) {
     }
   }
 }
+// Perfil a lo largo del coche: interpolación Hermite entre puntos [z, valor] (suave, sin esquinas)
+function perfilSuave(puntos) {
+  const pendiente = i => {
+    const a = puntos[Math.max(0, i - 1)], b = puntos[Math.min(puntos.length - 1, i + 1)];
+    return (b[1] - a[1]) / (b[0] - a[0]);
+  };
+  return z => {
+    const n = puntos.length - 1;
+    if (z <= puntos[0][0]) return puntos[0][1];
+    if (z >= puntos[n][0]) return puntos[n][1];
+    let i = 0;
+    while (puntos[i + 1][0] < z) i++;
+    const [z0, y0] = puntos[i], [z1, y1] = puntos[i + 1];
+    const h = z1 - z0, t = (z - z0) / h, t2 = t * t, t3 = t2 * t;
+    const m0 = pendiente(i) * h, m1 = pendiente(i + 1) * h;
+    return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * m1;
+  };
+}
+// Carrocería: medidas en metros. E = forma del corte transversal (menor = más cuadrado); CINTURA = línea de cristales
+const CARROCERIA = { H: 2.25, ANCHO_MAX: 0.9, BAJO: 0.2, E: 0.5, CINTURA: 0.98, N: 140, M: 96 };
+const techoCarroceria = perfilSuave([
+  [-2.25, 0.9], [-2.0, 0.98], [-1.7, 1.15], [-1.25, 1.42], [-0.5, 1.46], [0.0, 1.42],
+  [0.45, 1.22], [0.95, 0.98], [1.6, 0.88], [2.1, 0.76], [2.25, 0.62]
+]);
+const suaveCarroceria = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// Sección transversal en z: escala de la planta g (1 en el centro, 0 en morro y cola) y corte vertical (centro yc, semialtura hh)
+function seccionCarroceria(z) {
+  const { H, BAJO } = CARROCERIA;
+  const g = Math.sqrt(Math.max(0, 1 - Math.pow(Math.abs(z) / H, 14)));
+  const yt = techoCarroceria(z);
+  const recorte = (1 - g) * (yt - BAJO) / 2;
+  const lo = BAJO + recorte, hi = yt - recorte;
+  return { g, yc: (lo + hi) / 2, hh: (hi - lo) / 2 };
+}
+// Semiancho de la carrocería a la altura y en la sección z (el habitáculo se estrecha hacia el techo)
+function semianchoEn(z, y) {
+  const { ANCHO_MAX, E } = CARROCERIA;
+  const { g, yc, hh } = seccionCarroceria(z);
+  if (hh < 1e-6) return 0;
+  const q = Math.max(-1, Math.min(1, (y - yc) / hh));
+  const seno = Math.sign(q) * Math.pow(Math.abs(q), 1 / E);
+  const coseno = Math.sqrt(Math.max(0, 1 - seno * seno));
+  return ANCHO_MAX * g * Math.pow(coseno, E) * (1 - 0.13 * suaveCarroceria(0.95, 1.45, y));
+}
+// Carrocería como superficie suave: anillos transversales (superelipse) a lo largo del coche.
+// El color va por vértice: la pintura en el color del coche y, en la zona de cristales (parabrisas, laterales y luneta),
+// un tono oscuro que se funde en el borde, así no quedan dientes entre cristal y pintura.
+function geometriaCarroceria(colPintura, colCristal) {
+  const { H, N, M, ANCHO_MAX, E, CINTURA } = CARROCERIA;
+  const W = M + 1, pos = [], uvs = [];
+  for (let i = 0; i <= N; i++) {
+    const z = H * Math.cos(Math.PI * i / N);                                  // de morro (+H) a cola (-H), más anillos en los extremos
+    const { g, yc, hh } = seccionCarroceria(z);
+    for (let j = 0; j <= M; j++) {                                            // la columna M repite la 0 para cerrar la costura de la textura
+      const a = 2 * Math.PI * j / M, c = Math.cos(a), s = Math.sin(a);
+      const y = yc + hh * Math.sign(s) * Math.pow(Math.abs(s), E);
+      const x = ANCHO_MAX * g * Math.sign(c) * Math.pow(Math.abs(c), E) * (1 - 0.13 * suaveCarroceria(0.95, 1.45, y));
+      pos.push(x, y, z);
+      uvs.push(j / M, i / N);
+    }
+  }
+  const indices = [];
+  for (let i = 0; i < N; i++) for (let j = 0; j < M; j++) {
+    const a = i * W + j, b = a + 1, c = a + W, d = c + 1;
+    indices.push(a, c, b, b, c, d);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const nor = geo.attributes.normal;
+  // en la costura, las dos columnas iguales comparten la media de sus normales (sin línea de sombra)
+  for (let i = 0; i <= N; i++) {
+    const k0 = i * W, k1 = i * W + M;
+    const nx = nor.getX(k0) + nor.getX(k1), ny = nor.getY(k0) + nor.getY(k1), nz = nor.getZ(k0) + nor.getZ(k1);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nor.setXYZ(k0, nx / l, ny / l, nz / l);
+    nor.setXYZ(k1, nx / l, ny / l, nz / l);
+  }
+  // color por vértice: el cristal sube suave dentro de su zona, así que el borde se difumina en un triángulo
+  const cp = new THREE.Color(colPintura), cc = new THREE.Color(colCristal), colores = [];
+  for (let k = 0; k < pos.length / 3; k++) {
+    const z = pos[3 * k + 2], y = pos[3 * k + 1], ny = nor.getY(k);
+    const w = (1 - suaveCarroceria(0.96, 1.04, z)) * suaveCarroceria(-2.0, -1.9, z)
+            * suaveCarroceria(CINTURA - 0.02, CINTURA + 0.02, y) * (1 - suaveCarroceria(0.9, 0.97, ny));
+    const c = cp.clone().lerp(cc, w);
+    colores.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colores, 3));
+  return geo;
+}
+// Moldura negra de la línea de cintura: tapa el borde entre pintura y cristal, a cada lado del coche
+function molduraCintura(material) {
+  const grupo = new THREE.Group();
+  for (const s of [-1, 1]) {
+    const puntos = [];
+    for (let z = 1.0; z >= -1.95; z -= 0.05) puntos.push(new THREE.Vector3(s * (semianchoEn(z, CARROCERIA.CINTURA) + 0.012), CARROCERIA.CINTURA, z));
+    grupo.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(puntos), 120, 0.022, 8, false), material));
+  }
+  return grupo;
+}
+// Marcas de paneles: puertas (borde delantero, borde trasero y umbral), capó y maletero.
+// Cada punto se busca con un rayo sobre la carrocería real, así las líneas siguen su curva.
+function marcasPaneles(cuerpo, material) {
+  const grupo = new THREE.Group();
+  const sobre = (origen, dir) => {
+    const hit = new THREE.Raycaster(origen, dir.clone().normalize()).intersectObject(cuerpo)[0];
+    if (!hit) return null;
+    const n = hit.face.normal.clone();
+    if (n.dot(dir) > 0) n.negate();
+    return hit.point.addScaledVector(n, 0.004);
+  };
+  const ladoPunto = (s, z, y) => sobre(new THREE.Vector3(s * 4, y, z), new THREE.Vector3(-s, 0, 0));
+  const techoPunto = (x, z) => sobre(new THREE.Vector3(x, 4, z), new THREE.Vector3(0, -1, 0));
+  const tramo = (a, b, n = 8) => Array.from({ length: n + 1 }, (_, k) => a + (b - a) * k / n);
+  const dibujar = puntos => {
+    const pts = puntos.filter(Boolean);
+    if (pts.length < 2) return;
+    grupo.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 4, 0.005, 6, false), material));
+  };
+  for (const s of [-1, 1]) {
+    dibujar(tramo(0.32, 0.97).map(y => ladoPunto(s, 0.85, y)));     // borde delantero de la puerta
+    dibujar(tramo(0.32, 0.97).map(y => ladoPunto(s, -0.15, y)));    // borde trasero de la puerta
+    dibujar(tramo(0.85, -0.15).map(z => ladoPunto(s, z, 0.32)));    // umbral
+    dibujar(tramo(1.0, 1.85).map(z => techoPunto(s * 0.6, z)));     // bordes del capó
+    dibujar(tramo(-1.95, -2.15).map(z => techoPunto(s * 0.45, z))); // bordes del maletero
+  }
+  dibujar(tramo(-0.45, 0.45).map(x => techoPunto(x, -2.15)));      // tapa del maletero
+  return grupo;
+}
+// Entorno de reflejos (cielo degradado con paneles de luz) para que la pintura y el cromo se vean metálicos; se genera una vez
+let entornoReflejos = null;
+function entornoCoche() {
+  if (!renderer) return null;
+  if (!entornoReflejos) {
+    const esc = new THREE.Scene();
+    const R = 60, cielo = new THREE.SphereGeometry(R, 32, 16), pos = cielo.attributes.position, colores = [];
+    const arriba = new THREE.Color(0xf2f6fa), horizonte = new THREE.Color(0x9aa6b2), suelo = new THREE.Color(0x2a2e34), c = new THREE.Color();
+    for (let k = 0; k < pos.count; k++) {
+      const t = pos.getY(k) / R;   // -1 suelo, 1 cenit
+      if (t >= 0) c.copy(horizonte).lerp(arriba, t); else c.copy(horizonte).lerp(suelo, -t);
+      colores.push(c.r, c.g, c.b);
+    }
+    cielo.setAttribute('color', new THREE.Float32BufferAttribute(colores, 3));
+    esc.add(new THREE.Mesh(cielo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+    for (const [w, h, x, y, z] of [[60, 60, 0, 48, 0], [30, 40, -46, 18, 10], [30, 40, 46, 18, -6], [70, 22, 0, 22, 46], [70, 22, 0, 22, -46]]) {
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }));
+      panel.position.set(x, y, z);
+      panel.lookAt(0, 0, 0);
+      esc.add(panel);
+    }
+    const pm = new THREE.PMREMGenerator(renderer);
+    entornoReflejos = pm.fromScene(esc, 0.02).texture;
+    pm.dispose();
+  }
+  return entornoReflejos;
+}
+// Coche básico: turismo a escala real (4,5 m de largo, 1,8 m de ancho, 1,46 m de alto, ejes a 2,7 m)
+// con carrocería de superficie suave, materiales metálicos y texturas de texturas/coche-*.jpg
 function construirCoche(color) {
   const g = new THREE.Group();
-  const pintura = new THREE.MeshPhongMaterial({ color, specular: 0x555555, shininess: 60 });
-  const cristal = new THREE.MeshPhongMaterial({ color: 0x1c2733, specular: 0xaaaaaa, shininess: 90 });
-  const negro = new THREE.MeshLambertMaterial({ color: 0x151515 });
-  const caja = (w, h, l, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat); m.position.set(x, y, z); g.add(m); return m; };
-  // carrocería: perfil lateral (morro, capó, parabrisas, techo, luneta y maletero) extruido a lo ancho de 1,8 m
-  // los puntos son [z, y] con el morro en +z; la ventanilla es una capa más estrecha y oscura a cada lado
-  const perfil = (puntos, ancho) => {
-    const s = new THREE.Shape(); puntos.forEach(([z, y], i) => (i ? s.lineTo(-z, y) : s.moveTo(-z, y)));
-    const geo = new THREE.ExtrudeGeometry(s, { depth: ancho, bevelEnabled: false }).rotateY(Math.PI / 2).translate(-ancho / 2, 0, 0);
-    return new THREE.Mesh(geo, pintura);
+  const E = 2.7, VIA = 1.62, RUEDA = 0.315, ANCHO_RUEDA = 0.205;   // metros
+  const tex = nombre => texturaImagen('texturas/' + nombre);
+  const env = entornoCoche();
+  const acabado = { map: tex('coche-pintura.jpg'), metalness: 0.6, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.05, envMap: env, envMapIntensity: 1.0 };
+  const pintura = new THREE.MeshPhysicalMaterial({ ...acabado, color: 0xffffff, vertexColors: true });   // carrocería: el color va por vértice
+  const pinturaPieza = new THREE.MeshPhysicalMaterial({ ...acabado, color });                           // retrovisores y piezas sueltas
+  const cromo = new THREE.MeshStandardMaterial({ color: 0xe4e9ef, metalness: 1, roughness: 0.14, envMap: env, envMapIntensity: 1.3 });
+  const negro = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide });
+  const moldura = new THREE.MeshStandardMaterial({ color: 0x121417, roughness: 0.45, metalness: 0.3 });
+  const rejilla = new THREE.MeshStandardMaterial({ color: 0x4a4f56, map: tex('coche-rejilla.jpg'), metalness: 0.6, roughness: 0.3, envMap: env });
+  const goma = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, map: tex('coche-neumatico.jpg'), roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
+  const llanta = new THREE.MeshStandardMaterial({ color: 0xffffff, map: tex('coche-llanta.jpg'), metalness: 0.9, roughness: 0.28, envMap: env, envMapIntensity: 1.2 });
+  const faro = new THREE.MeshBasicMaterial({ color: 0xfff6d8 }), piloto = new THREE.MeshBasicMaterial({ color: 0xb01414 });
+  const matricula = new THREE.MeshBasicMaterial({ map: tex('coche-matricula.jpg') });
+
+  // carrocería: pintura y cristal en la misma superficie, con la moldura de cintura encima del borde
+  const carroceria = new THREE.Mesh(geometriaCarroceria(color, 0x1f2a35), pintura);
+  g.add(carroceria, molduraCintura(moldura), marcasPaneles(carroceria, moldura));
+  // piezas sobre la superficie: un rayo desde fuera las apoya en la carrocería real y las orienta con su normal
+  const sobreSuperficie = (origen, direccion, geo, mat, grosor) => {
+    const dir = direccion.clone().normalize();
+    const hit = new THREE.Raycaster(origen, dir).intersectObject(carroceria)[0];
+    if (!hit) return null;
+    const n = hit.face.normal.clone();
+    if (n.dot(dir) > 0) n.negate();
+    const m = new THREE.Mesh(geo, mat);
+    m.position.copy(hit.point).addScaledVector(n, grosor);
+    m.lookAt(m.position.clone().add(n));   // el +Z de la pieza apunta hacia fuera, y su arriba queda hacia arriba (el texto se lee derecho)
+    g.add(m);
+    return m;
   };
-  const carroceria = [[-2.1, 0.32], [2.1, 0.32], [2.1, 0.62], [1.85, 0.8], [0.9, 0.92], [0.42, 1.36], [0.12, 1.42], [-0.85, 1.42], [-1.35, 1.2], [-2.1, 0.95]];
-  const ventanilla = [[0.84, 0.95], [0.4, 1.32], [0.12, 1.36], [-0.8, 1.36], [-1.26, 1.16], [-0.84, 0.98]];
-  g.add(perfil(carroceria, 1.8));
-  const vent = perfil(ventanilla, 1.82); vent.material = cristal; g.add(vent);
-  const faro = new THREE.MeshBasicMaterial({ color: 0xfff6d8 }), piloto = new THREE.MeshBasicMaterial({ color: 0x9c1010 });
-  for (const x of [-0.68, 0.68]) { caja(0.42, 0.14, 0.04, faro, x, 0.72, 2.11); caja(0.42, 0.14, 0.04, piloto, x, 0.74, -2.11); }
-  caja(0.5, 0.1, 0.03, new THREE.MeshLambertMaterial({ color: 0xe8e8e8 }), 0, 0.5, 2.13);   // matrícula
-  const ruedaGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 18).rotateZ(Math.PI / 2);
-  const llantaGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.27, 10).rotateZ(Math.PI / 2);
-  const llantaMat = new THREE.MeshPhongMaterial({ color: 0xb8bcc2, specular: 0xffffff, shininess: 80 });
-  for (const [x, z] of [[-0.86, 1.3], [0.86, 1.3], [-0.86, -1.3], [0.86, -1.3]]) {
-    const r = new THREE.Mesh(ruedaGeo, negro); r.position.set(x, 0.36, z);
-    const l = new THREE.Mesh(llantaGeo, llantaMat); l.position.set(x * 1.01, 0.36, z);
-    g.add(r, l);
+  const lenteFaro = () => new THREE.SphereGeometry(0.1, 14, 8).scale(1.9, 0.75, 0.4);
+  for (const s of [-1, 1]) {
+    sobreSuperficie(new THREE.Vector3(s * 0.6, 0.7, 4), new THREE.Vector3(0, 0, -1), lenteFaro(), faro, 0.01);
+    sobreSuperficie(new THREE.Vector3(s * 0.6, 0.8, -4), new THREE.Vector3(0, 0, 1), lenteFaro(), piloto, 0.01);
+    sobreSuperficie(new THREE.Vector3(s * 3, 0.9, 0.7), new THREE.Vector3(-s, 0, 0), new THREE.SphereGeometry(0.08, 16, 10).scale(1.4, 0.9, 1.1), pinturaPieza, 0.03);   // retrovisores
+  }
+  sobreSuperficie(new THREE.Vector3(0, 0.5, 4), new THREE.Vector3(0, 0, -1), new THREE.PlaneGeometry(0.95, 0.16), rejilla, 0.008);
+  sobreSuperficie(new THREE.Vector3(0, 0.3, 4), new THREE.Vector3(0, 0, -1), new THREE.PlaneGeometry(0.52, 0.11), matricula, 0.006);
+  sobreSuperficie(new THREE.Vector3(0, 0.5, -4), new THREE.Vector3(0, 0, 1), new THREE.PlaneGeometry(0.52, 0.11), matricula, 0.006);
+  for (const x of [-0.3, 0.3]) sobreSuperficie(new THREE.Vector3(x, 0.3, -4), new THREE.Vector3(0, 0, 1), new THREE.CylinderGeometry(0.035, 0.035, 0.07, 12).rotateX(Math.PI / 2), cromo, 0.03);   // escape
+
+  // ruedas: neumático con flancos, llanta de cinco radios y pasarruedas oscuros (media corona sobre el eje)
+  const banda = new THREE.CylinderGeometry(RUEDA, RUEDA, ANCHO_RUEDA, 28, 1, true).rotateZ(Math.PI / 2);
+  const flanco = new THREE.RingGeometry(0.2, RUEDA, 28).rotateY(Math.PI / 2);
+  const aro = new THREE.CylinderGeometry(0.2, 0.2, ANCHO_RUEDA - 0.02, 28).rotateZ(Math.PI / 2);
+  for (const x of [-VIA / 2, VIA / 2]) for (const z of [-E / 2, E / 2]) {
+    const pasarruedas = new THREE.RingGeometry(RUEDA, RUEDA + 0.045, 24, 1, 0, Math.PI).rotateY(x > 0 ? Math.PI / 2 : -Math.PI / 2);
+    const arco = new THREE.Mesh(pasarruedas, negro);
+    arco.position.set(Math.sign(x) * 0.905, RUEDA, z);
+    g.add(arco);
+    const rueda = new THREE.Group();
+    rueda.position.set(x, RUEDA, z);
+    rueda.add(new THREE.Mesh(banda, goma));
+    for (const s of [-1, 1]) { const f = new THREE.Mesh(flanco, goma); f.position.x = s * ANCHO_RUEDA / 2; rueda.add(f); }
+    rueda.add(new THREE.Mesh(aro, [cromo, llanta, llanta]));
+    g.add(rueda);
   }
   return g;
 }
@@ -5685,7 +5877,7 @@ function colocarLucesCoche(caja) {
   lucesCoche.atras.forEach((a, i) => a.position.set(i ? x - 0.3 : 0.3 - x, y - 0.08, z));
   lucesCoche.faros.forEach((f, i) => f.position.set(i ? x : -x, caja.min.y + alto * 0.4, caja.max.z + 0.05));
 }
-// --- coches: el básico (caja roja) y modelos GLB, que se descargan al elegirlos ---
+// --- coches: el básico (geometría propia con texturas) y modelos GLB, que se descargan al elegirlos ---
 // Galería de coches (Kenney y Quaternius, CC0): modelos/coches/catalogo.json con los mismos datos
 const GALERIA = [
   { id: 'suv-compacto', nombre: 'SUV compacto', archivo: 'modelos/coches/suv-compacto.glb', trafico: false },   // 58 500 triángulos: solo para el jugador
