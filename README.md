@@ -183,7 +183,7 @@ El juego usa las alturas del terreno de la zona (`alturas.asc`, del MDT), así q
 
 En el menú hay tres maneras de poner una ruta:
 
-- **De → a**: se eligen dos centros de ciudad y **Calcular ruta** pide el camino por carreteras reales a OSRM (`router.project-osrm.org`). Con él se dibuja una franja de 300 m a cada lado y se abre el Paseo, que la prepara sola como una zona dibujada (calles, foto aérea, relieve, árboles y casas del Catastro) y vuelve al juego con la ruta puesta.
+- **De → a**: se escribe o elige una localidad. La lista trae ocho centros; cualquier otra de España se busca con Nominatim (OpenStreetMap). **Calcular ruta** pide el camino por carreteras reales a OSRM (`router.project-osrm.org`). Con él se dibuja una franja de 300 m a cada lado y se abre el Paseo, que la prepara sola como una zona dibujada (calles, foto aérea, relieve, árboles y casas del Catastro) y vuelve al juego con la ruta puesta. La ruta queda guardada con su zona: al abrirla otra vez desde **Lugares**, la carrera sigue esa ruta.
 - **Ruta de ejemplo**: `rutas/ejemplo-huelva.gpx`, una avenida de Huelva de 1,6 km.
 - **Ruta** (GPX): un fichero de Google Maps, OpenStreetMap u otro, dentro de una zona ya cargada.
 

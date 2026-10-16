@@ -206,7 +206,7 @@
   <p class="intro">Elige el modo: un <b>circuito</b> de tres vueltas con su salida y sus arcos, o <b>exploración</b>, una ruta por la ciudad de destino en destino sin repetir calles. Cuida el coche: los golpes le quitan potencia y velocidad. Los talleres (llave azul) lo arreglan.</p>
   <input type="file" id="archivo" accept=".zip" style="color:#fff">
   <div class="opcion"><span>Ruta</span><div class="selector"><input type="file" id="rutaGpx" accept=".gpx" style="color:#fff"> <button id="btnRutaEjemplo" type="button">Ruta de ejemplo</button> <button id="btnSinRuta" type="button" hidden>✕ Quitar ruta</button></div></div>
-  <div class="opcion"><span>De → a</span><div class="selector"><select id="origenRuta"></select> → <select id="destinoRuta"></select> <button id="btnCalcularRuta" type="button">Calcular ruta</button></div></div>
+  <div class="opcion"><span>De → a</span><div class="selector"><input id="origenRuta" list="localidadesRuta" placeholder="Origen" size="14"> → <input id="destinoRuta" list="localidadesRuta" placeholder="Destino" size="14"> <datalist id="localidadesRuta"></datalist> <button id="btnCalcularRuta" type="button">Calcular ruta</button></div></div>
   <div id="estado"></div>
   <div id="faltan" hidden><span id="faltanTexto"></span> <button id="btnFaltan" type="button">⬇️ Descargar lo que falta</button></div>
   <div class="opcion"><span>Lugar</span><div class="selector" id="lugares"></div></div>
@@ -6255,7 +6255,8 @@ const CENTROS_RUTA = [
   { nombre: 'Málaga', lat: 36.7213, lon: -4.4214 },
   { nombre: 'Córdoba', lat: 37.8882, lon: -4.7794 },
 ];
-for (const id of ['origenRuta', 'destinoRuta']) for (const c of CENTROS_RUTA) $(id).add(new Option(c.nombre, c.nombre));
+for (const c of CENTROS_RUTA) $('localidadesRuta').appendChild(new Option(c.nombre));
+$('origenRuta').value = 'Huelva';
 $('destinoRuta').value = 'Moguer';
 // La ruta entre los dos centros, por carreteras reales: la calcula el servidor público de OSRM, que tiene el mapa de toda España.
 // Devuelve [[lat, lon], …] y los km
@@ -6368,9 +6369,27 @@ async function calcularRuta(origen, destino) {
   $('estado').textContent = `Ruta de ${ruta.km.toFixed(1).replace('.', ',')} km. Abriendo el Paseo para preparar la franja (casas del Catastro, foto aérea, árboles y relieve)…`;
   location.href = 'paseo.html?jugar=1&ruta=1';
 }
+// Una localidad: de la lista de centros o cualquiera de España, que busca Nominatim (OpenStreetMap)
+const sinAcentos = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+async function localidadRuta(texto) {
+  const t = (texto || '').trim();
+  if (!t) throw new Error('escribe una localidad');
+  const conocida = CENTROS_RUTA.find(c => sinAcentos(c.nombre) === sinAcentos(t));
+  if (conocida) return conocida;
+  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=es&accept-language=es&q=' + encodeURIComponent(t);
+  let r;
+  try { r = await fetch(url); } catch (err) { throw new Error('no se pudo buscar «' + t + '» (' + err.message + ')'); }
+  if (!r.ok) throw new Error('el buscador de lugares responde ' + r.status);
+  const j = await r.json();
+  if (!j.length) throw new Error('no encuentro «' + t + '» en España');
+  return { nombre: t, lat: +j[0].lat, lon: +j[0].lon };
+}
 $('btnCalcularRuta').addEventListener('click', async () => {
-  const o = CENTROS_RUTA.find(c => c.nombre === $('origenRuta').value), d = CENTROS_RUTA.find(c => c.nombre === $('destinoRuta').value);
-  if (!o || !d || o === d) { $('estado').textContent = 'Elige dos centros distintos'; return; }
+  $('estado').textContent = 'Buscando las localidades…';
+  let o, d;
+  try { o = await localidadRuta($('origenRuta').value); d = await localidadRuta($('destinoRuta').value); }   // una a una: el buscador pide no saturarlo
+  catch (err) { $('estado').textContent = 'Error: ' + err.message; return; }
+  if (sinAcentos(o.nombre) === sinAcentos(d.nombre)) { $('estado').textContent = 'Elige dos localidades distintas'; return; }
   $('btnSinRuta').hidden = false;
   try { await calcularRuta(o, d); } catch (err) { $('estado').textContent = 'Error: ' + err.message; }
 });
@@ -9685,9 +9704,11 @@ async function elegirLugar(id) {
   try { localStorage.setItem('cochesHuelva.lugar', id); } catch (err) { /* nada */ }
   $('btnNueva').disabled = true;
   pintarLugares();
+  RUTA_GPX = null; $('btnSinRuta').hidden = true;   // la ruta es de cada zona: no se arrastra la de la anterior
   if (id === 'huelva') return cargarZonaIncluida();
   const z = await Zonas.leer(id);
   if (!z) { lugarActual = 'huelva'; return cargarZonaIncluida(); }
+  if (z.ruta) { RUTA_GPX = z.ruta; $('btnSinRuta').hidden = false; }
   mostrarMenu(`Abriendo ${z.nombre}…`);
   try { await cargarZona(z.blob); }
   catch (err) { $('estado').textContent = 'Error: ' + err.message; }
@@ -9706,9 +9727,12 @@ async function guardarZipComoLugar(archivo) {
 // Al abrir: la zona que trae el Paseo (?zona=…) o la última elegida
 async function arrancarLugar() {
   const q = new URLSearchParams(location.search), pedida = q.get('zona');
-  if (pedida && q.has('ruta')) {   // la franja de una ruta, preparada en el Paseo: se juega con esa ruta
-    try { const p = JSON.parse(localStorage.getItem(CLAVE_RUTA) || 'null'); if (p && p.ruta) { RUTA_GPX = p.ruta; $('btnSinRuta').hidden = false; } localStorage.removeItem(CLAVE_RUTA); }
-    catch (err) { /* sin la ruta, la zona se abre entera */ }
+  if (pedida && q.has('ruta')) {   // la franja de una ruta, preparada en el Paseo: la ruta queda guardada con la zona para volver a jugarla
+    try {
+      const p = JSON.parse(localStorage.getItem(CLAVE_RUTA) || 'null'), z = p && p.ruta ? await Zonas.leer(pedida) : null;
+      if (z) await Zonas.guardar({ ...z, ruta: p.ruta });
+    } catch (err) { /* sin la ruta, la zona se abre entera */ }
+    localStorage.removeItem(CLAVE_RUTA);
   }
   if (pedida) { lugarActual = pedida; history.replaceState(null, '', location.pathname); }
   await pintarLugares();
