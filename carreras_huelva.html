@@ -7791,9 +7791,10 @@ function actualizarCatastroRuta(ahora) {
   const t = CatRuta.cola.splice(k, 1)[0], z = zona;
   CatRuta.enCurso++;
   Catastro.casasDeTrozo(CatRuta.srs, CatRuta.huso, t.j)
-    .then(partes => { if (zona === z) { CatRuta.hechos++; anadirCasasCatastro(partes); } })
+    .then(partes => { if (zona === z) { CatRuta.hechos++; try { anadirCasasCatastro(partes); } catch (err) { console.warn('Casas del Catastro en la ruta:', String(err && err.stack || err)); CatRuta.errores = (CatRuta.errores || 0) + 1; } } })
     .catch(err => {
       if (zona !== z) return;
+      console.warn('Trozo del Catastro en la ruta:', t.j.key, err && err.message);
       if (Catastro.partible(t.j) && !(err instanceof TypeError)) for (const h of Catastro.hijosDeTrozo(t.j)) CatRuta.cola.push({ ...t, j: h, radio: t.radio / 2 });   // en cuatro, como el Paseo
       else CatRuta.fallos++;
     })
