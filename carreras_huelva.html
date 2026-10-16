@@ -759,7 +759,7 @@ function dentroDeOtraCasa(edif, rejilla, x, z, self) {
 }
 
 // Para cada casa: tipo de cada pared (0 medianera, 1 patio o campo, 2 calle), puerta y colores
-function prepararCasas(edif, rejilla, tramos, base = 0) {
+function prepararCasas(edif, rejilla, tramos, base = 0, todas = edif) {   // todas: la lista de la rejilla (si edif son solo las que llegan nuevas)
   const calles = construirRejillaCalles(tramos);
   rejillaVecinasConColor(edif);
   edif.forEach((e, i) => {
@@ -779,7 +779,7 @@ function prepararCasas(edif, rejilla, tramos, base = 0) {
       let tipo = 0;
       if (l >= 0.9) {
         let dentro = 0;
-        for (const fr of [0.2, 0.5, 0.8]) if (dentroDeOtraCasa(edif, rejilla, p[0] + dx * fr + nx * 0.7, p[1] + dz * fr + nz * 0.7, idx)) dentro++;
+        for (const fr of [0.2, 0.5, 0.8]) if (dentroDeOtraCasa(todas, rejilla, p[0] + dx * fr + nx * 0.7, p[1] + dz * fr + nz * 0.7, idx)) dentro++;
         if (dentro < 2) tipo = cercaDeCalle(calles, mx + nx * 3, mz + nz * 3, 8) ? 2 : 1;
       }
       if (l > mayorL) { mayorL = l; mayor = i; }
@@ -7816,17 +7816,19 @@ function anadirCasasCatastro(partes) {
     e.zocaloFr = c ? (c.zocaloFr || Catastro.zocaloFraccion(c)) : null;
     e.fotoTejado = (c && c.tejado) || null;
     e.foto4 = !!(c && (c.v >= Catastro.VERSION_COLOR || (c.sin && !c.porque)));
-    if (e.ref) { if (!zona.porRef.has(e.ref)) zona.porRef.set(e.ref, []); zona.porRef.get(e.ref).push(e); }
   }
-  const base = zona.edif.length;
-  zona.edif.push(...nuevas);
-  zona.rejilla = construirRejilla(zona.edif);
-  prepararCasas(nuevas, zona.rejilla, zona.tramos, base);
+  // se preparan aparte y solo entran en la zona si todo ha ido bien (una casa a medias no se queda en ella)
+  const base = zona.edif.length, todas = zona.edif.concat(nuevas), rejilla = construirRejilla(todas);
+  prepararCasas(nuevas, rejilla, zona.tramos, base, todas);
   decidirTejados(nuevas, zona.parcelas);
   tejadosDeFoto(nuevas, zona.foto);
-  const b = { casas: nuevas, porches: [] };
-  for (const e of nuevas) e.bloque = b;
-  if (grupoCasas) grupoCasas.add(b.malla = mallaEdificios(nuevas, zona.foto, []));
+  const b = { casas: nuevas, porches: [] }, malla = mallaEdificios(nuevas, zona.foto, []);
+  zona.edif.push(...nuevas); zona.rejilla = rejilla;   // en la misma lista: la rejilla nueva va en su mismo orden
+  for (const e of nuevas) {
+    e.bloque = b;
+    if (e.ref) { if (!zona.porRef.has(e.ref)) zona.porRef.set(e.ref, []); zona.porRef.get(e.ref).push(e); }
+  }
+  if (grupoCasas) grupoCasas.add(b.malla = malla);
   quitarArbolesDentro(nuevas);
   CatRuta.casas += nuevas.length;
 }
