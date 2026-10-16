@@ -759,10 +759,11 @@ function dentroDeOtraCasa(edif, rejilla, x, z, self) {
 }
 
 // Para cada casa: tipo de cada pared (0 medianera, 1 patio o campo, 2 calle), puerta y colores
-function prepararCasas(edif, rejilla, tramos) {
+function prepararCasas(edif, rejilla, tramos, base = 0) {
   const calles = construirRejillaCalles(tramos);
   rejillaVecinasConColor(edif);
-  edif.forEach((e, idx) => {
+  edif.forEach((e, i) => {
+    const idx = base + i;
     // todas las casas con el mismo sentido de giro que en el Paseo (área positiva; los patios, al revés): así su fachada sale hacia fuera
     if (areaAnillo(e.pts) < 0) e.pts.reverse();
     e.huecos = (e.huecos || []).map(hr => (areaAnillo(hr) > 0 ? hr.slice().reverse() : hr));
@@ -6077,12 +6078,20 @@ function franjaDeRuta(pts, r) {
 // La ruta de OSRM y su franja se guardan en este navegador y se abre el Paseo, que prepara la franja y vuelve al juego
 // con ?zona=…&ruta=1; entonces arrancarLugar() pone la ruta
 const CLAVE_RUTA = 'cochesHuelva.rutaPendiente';
+const KM_CATASTRO_INICIAL = 5;   // casas del Catastro que trae el Paseo al entrar; el resto, mientras se conduce
 async function calcularRuta(origen, destino) {
   $('estado').textContent = 'Calculando la ruta (OSRM)…';
   const ruta = await pedirRutaOSRM(origen, destino);
   const poligono = franjaDeRuta(ruta.pts, ANCHO_FRANJA), lats = poligono.map(p => p[0]), lons = poligono.map(p => p[1]);
   const geo = { n: Math.max(...lats) + 0.001, s: Math.min(...lats) - 0.001, e: Math.max(...lons) + 0.001, w: Math.min(...lons) - 0.001 };
-  try { localStorage.setItem(CLAVE_RUTA, JSON.stringify({ ruta: ruta.pts, poligono, geo, nombre: `${origen.nombre} a ${destino.nombre}`, t: Date.now() })); }
+  const primeros = [ruta.pts[0]];   // los primeros KM_CATASTRO_INICIAL km de la ruta
+  for (let k = 1, d = 0; k < ruta.pts.length && d < KM_CATASTRO_INICIAL * 1000; k++) {
+    const [a, b] = ruta.pts[k - 1], [c, e] = ruta.pts[k];
+    d += Math.hypot((c - a) * K_LAT, (e - b) * 111320 * Math.cos(a * Math.PI / 180));
+    primeros.push(ruta.pts[k]);
+  }
+  const poligonoCatastro = primeros.length < ruta.pts.length ? franjaDeRuta(primeros, ANCHO_FRANJA) : poligono;
+  try { localStorage.setItem(CLAVE_RUTA, JSON.stringify({ ruta: ruta.pts, poligono, poligonoCatastro, geo, nombre: `${origen.nombre} a ${destino.nombre}`, t: Date.now() })); }
   catch (err) { throw new Error('no se puede guardar la ruta en este navegador (' + err.message + ')'); }
   $('estado').textContent = `Ruta de ${ruta.km.toFixed(1).replace('.', ',')} km. Abriendo el Paseo para preparar la franja (casas del Catastro, foto aérea, árboles y relieve)…`;
   location.href = 'paseo.html?jugar=1&ruta=1';
@@ -7735,6 +7744,106 @@ function colocarTalleres(rng) {
     carrera.talleres.push(crearTaller(n.x, n.z, 'TALLER'));
   }
 }
+// --- modo ruta: las casas del Catastro llegan mientras se conduce. El Paseo trae las de los primeros km (KM_CATASTRO_INICIAL);
+// del resto de la franja, los trozos que quedan entre CAT_RUTA_DETRAS m por detrás y CAT_RUTA_DELANTE m por delante del coche se piden
+// de dos en dos, y sus casas entran en un bloque nuevo sin rehacer la zona. No se guardan: otra vez se vuelven a pedir ---
+const CAT_RUTA_DELANTE = 1500, CAT_RUTA_DETRAS = 300;
+const CatRuta = { zona: null, cola: [], enCurso: 0, t: 0, hechos: 0, fallos: 0, casas: 0 };
+// Firma de una casa que no depende del sentido de sus puntos (las de los bordes de dos trozos llegan dos veces)
+function firmaCasa(e) {
+  let cx = 0, cz = 0;
+  for (const p of e.pts) { cx += p[0]; cz += p[1]; }
+  return e.pts.length + ':' + Math.round(cx / e.pts.length * 2) + ',' + Math.round(cz / e.pts.length * 2);
+}
+// Dónde cae un trozo a lo largo de la ruta: s (m desde el principio) y su distancia a ella
+function trozoEnRuta(j) {
+  const [x0, y0, x1, y1] = j.bb, [la, lo] = Catastro.deUTM((x0 + x1) / 2, (y0 + y1) / 2, CatRuta.huso), [x, z] = proyectar(lo, la);
+  const r = sEnRuta(x, z);
+  return { j, s: r.s, dist: r.dist, radio: Math.hypot(x1 - x0, y1 - y0) / 2 };
+}
+function sEnRuta(x, z) {
+  let dist = Infinity, s = 0;
+  for (let i = 0; i + 1 < RUTA_LOCAL.length; i++) {
+    const [ax, az] = RUTA_LOCAL[i], [bx, bz] = RUTA_LOCAL[i + 1], dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz;
+    const t = L ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L)) : 0, d = Math.hypot(ax + dx * t - x, az + dz * t - z);
+    if (d < dist) { dist = d; s = CatRuta.cum[i] + Math.sqrt(L) * t; }
+  }
+  return { s, dist };
+}
+function prepararCatastroRuta() {
+  Object.assign(CatRuta, { zona, cola: [], enCurso: 0, t: 0, hechos: 0, fallos: 0, casas: 0, colores: null });
+  const d = zona && zona.datos;
+  if (!RUTA_LOCAL || !d || !d.meta || !d.meta.geo || !d.catastro || !enEspana(d.meta.geo)) return;
+  const cat = d.catastro.leer(), { zona: huso, srs, jobs } = Catastro.trozos(d.meta);
+  Object.assign(CatRuta, { huso, srs, cum: acumulados(RUTA_LOCAL), corredor: corredorDeRuta(RUTA_LOCAL, RADIO_RUTA), firmas: new Set(zona.edif.map(firmaCasa)) });
+  CatRuta.cola = Catastro.trozosPendientes(jobs, cat.tiles, cat.failed).map(trozoEnRuta).filter(t => t.dist <= RADIO_RUTA + t.radio);
+  const z = zona;
+  Catastro.coloresGuardados().then(m => { if (CatRuta.zona === z) CatRuta.colores = m; }).catch(() => {});
+}
+function actualizarCatastroRuta(ahora) {
+  if (CatRuta.zona !== zona) prepararCatastroRuta();
+  if (!CatRuta.cola.length || CatRuta.enCurso >= 2 || ahora - CatRuta.t < 0.5) return;
+  CatRuta.t = ahora;
+  const sc = sEnRuta(coche.x, coche.z).s;
+  let k = -1;
+  CatRuta.cola.forEach((t, i) => { if (t.s >= sc - CAT_RUTA_DETRAS && t.s <= sc + CAT_RUTA_DELANTE && (k < 0 || t.s < CatRuta.cola[k].s)) k = i; });
+  if (k < 0) return;
+  const t = CatRuta.cola.splice(k, 1)[0], z = zona;
+  CatRuta.enCurso++;
+  Catastro.casasDeTrozo(CatRuta.srs, CatRuta.huso, t.j)
+    .then(partes => { if (zona === z) { CatRuta.hechos++; anadirCasasCatastro(partes); } })
+    .catch(err => {
+      if (zona !== z) return;
+      if (Catastro.partible(t.j) && !(err instanceof TypeError)) for (const h of Catastro.hijosDeTrozo(t.j)) CatRuta.cola.push({ ...t, j: h, radio: t.radio / 2 });   // en cuatro, como el Paseo
+      else CatRuta.fallos++;
+    })
+    .finally(() => { if (zona === z) CatRuta.enCurso--; });
+}
+// Casas nuevas del Catastro: las de la franja que aún no estaban, con sus colores guardados, en un bloque nuevo
+function anadirCasasCatastro(partes) {
+  let nuevas = parsearCasas({ features: partes.map(rasgoDeParte).filter(Boolean) })
+    .filter(e => alCorredor(CatRuta.corredor, e.pts) && !CatRuta.firmas.has(firmaCasa(e)));
+  if (!nuevas.length) return;
+  const cortan = casasQueCortanCalles(nuevas, construirRejilla(nuevas), zona.tramos);   // como al cargar: las que cortan una calle no se ponen
+  if (cortan.quitar.size) nuevas = nuevas.filter((_, k) => !cortan.quitar.has(k));
+  if (!nuevas.length) return;
+  for (const e of nuevas) {
+    CatRuta.firmas.add(firmaCasa(e));
+    const c = e.ref && CatRuta.colores && CatRuta.colores.get(e.ref);
+    if (c && !c.sin && !e.pared) { e.pared = c.pared; e.zoc = c.zocalo; e.carp = c.carpinteria; }
+    e.parche = (c && c.parche) || null; e.parcheAlto = (c && c.parcheAlto) || null; e.parcheZocalo = (c && c.parcheZocalo) || null;
+    e.zocaloFr = c ? (c.zocaloFr || Catastro.zocaloFraccion(c)) : null;
+    e.fotoTejado = (c && c.tejado) || null;
+    e.foto4 = !!(c && (c.v >= Catastro.VERSION_COLOR || (c.sin && !c.porque)));
+    if (e.ref) { if (!zona.porRef.has(e.ref)) zona.porRef.set(e.ref, []); zona.porRef.get(e.ref).push(e); }
+  }
+  const base = zona.edif.length;
+  zona.edif.push(...nuevas);
+  zona.rejilla = construirRejilla(zona.edif);
+  prepararCasas(nuevas, zona.rejilla, zona.tramos, base);
+  decidirTejados(nuevas, zona.parcelas);
+  tejadosDeFoto(nuevas, zona.foto);
+  const b = { casas: nuevas, porches: [] };
+  for (const e of nuevas) e.bloque = b;
+  if (grupoCasas) grupoCasas.add(b.malla = mallaEdificios(nuevas, zona.foto, []));
+  quitarArbolesDentro(nuevas);
+  CatRuta.casas += nuevas.length;
+}
+// Los árboles que quedan dentro de una casa recién llegada se quitan
+function quitarArbolesDentro(casas) {
+  const A = ARBOLES_MAPA;
+  if (!A) return;
+  const rej = construirRejilla(casas);
+  for (const e of casas) {
+    const [x0, z0, x1, z1] = e.bbox;
+    for (let i = Math.floor(x0 / A.celda); i <= Math.floor(x1 / A.celda); i++)
+      for (let j = Math.floor(z0 / A.celda); j <= Math.floor(z1 / A.celda); j++) {
+        const k = i + ',' + j, l = A.rejilla.get(k);
+        if (l) A.rejilla.set(k, l.filter(a => !dentroDeOtraCasa(casas, rej, a.x, a.z, -1)));
+      }
+  }
+  if (ARBOLES_REPARTO) ARBOLES_REPARTO.x = NaN;   // se reparten otra vez enseguida
+}
 function actualizarTalleres(ahora, dt) {
   let dentro = null;
   for (const t of carrera.talleres) {
@@ -7999,6 +8108,7 @@ $('btnSeguir').addEventListener('click', () => {
 function actualizarCarrera(ahora, dt) {
   carrera.recorrido += Math.abs(coche.v) * dt;
   actualizarTalleres(ahora, dt);
+  if (RUTA_LOCAL) actualizarCatastroRuta(ahora);
   if (tramoIdx >= 0 && carrera.usados) carrera.usados.add(tramoIdx);
   // coche destrozado: a los tres segundos, al menú (con la opción de arreglarlo)
   if (coche.destrozado) {
@@ -8938,6 +9048,16 @@ function pintarFaltan() {
   $('btnFaltan').hidden = !descargable;
   caja.hidden = false;
 }
+// Una parte del Catastro (de Catastro.casasDeTrozo) como casa en GeoJSON, igual que las da el Paseo; null si no tiene forma
+function rasgoDeParte(p) {
+  const r7 = v => Math.round(v * 1e7) / 1e7, cerrar = r => { if (r[0][0] !== r[r.length - 1][0] || r[0][1] !== r[r.length - 1][1]) r.push(r[0]); return r; };
+  const ring = p.ring.map(([la, lo]) => [r7(lo), r7(la)]);
+  if (ring.length < 3) return null;
+  cerrar(ring);
+  const sin = p.plantas === 0;   // porche o patio, como los da el Paseo
+  return { type: 'Feature', properties: { referencia_catastral: p.ref, plantas: isNaN(p.plantas) ? null : p.plantas, altura_aprox_m: isNaN(p.plantas) || sin ? null : +(p.plantas * 3.1 + 0.7).toFixed(1), fuente: 'Catastro', ...(sin ? { tipo: p.bajo > 0 ? 'patio' : 'porche', plantas_bajo_rasante: p.bajo || 0 } : {}) },
+    geometry: { type: 'Polygon', coordinates: [ring, ...p.holes.map(h => cerrar(h.map(([la, lo]) => [r7(lo), r7(la)])))] } };
+}
 // Descarga lo que falta, lo mete en el zip de la zona, la guarda en este navegador y la vuelve a abrir
 async function descargarLoQueFalta() {
   const d = zona && zona.datos, f = zona && zona.faltan;
@@ -9005,14 +9125,12 @@ async function descargarLoQueFalta() {
     if (nuevos.length) {
       const casas = JSON.parse(await zip.file('casas.geojson').async('string')), vistas = new Set(casas.features.map(ft => ft.geometry && ft.geometry.coordinates[0].length + JSON.stringify(ft.geometry.coordinates[0][0])));   // por su forma (un porche empieza a veces donde su casa)
       for (const p of nuevos) {
-        const ring = p.ring.map(([la, lo]) => [r7(lo), r7(la)]);
-        if (ring.length < 3) continue;
-        if (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1]) ring.push(ring[0]);
-        if (vistas.has(ring.length + JSON.stringify(ring[0]))) continue;
-        vistas.add(ring.length + JSON.stringify(ring[0]));
-        const sin = p.plantas === 0;   // porche o patio, como los da el Paseo
-        casas.features.push({ type: 'Feature', properties: { referencia_catastral: p.ref, plantas: isNaN(p.plantas) ? null : p.plantas, altura_aprox_m: isNaN(p.plantas) || sin ? null : +(p.plantas * 3.1 + 0.7).toFixed(1), fuente: 'Catastro', ...(sin ? { tipo: p.bajo > 0 ? 'patio' : 'porche', plantas_bajo_rasante: p.bajo || 0 } : {}) },
-          geometry: { type: 'Polygon', coordinates: [ring, ...p.holes.map(h => { const r = h.map(([la, lo]) => [r7(lo), r7(la)]); if (r[0][0] !== r[r.length - 1][0] || r[0][1] !== r[r.length - 1][1]) r.push(r[0]); return r; })] } });
+        const f = rasgoDeParte(p);
+        if (!f) continue;
+        const ring = f.geometry.coordinates[0], firma = ring.length + JSON.stringify(ring[0]);
+        if (vistas.has(firma)) continue;
+        vistas.add(firma);
+        casas.features.push(f);
       }
       zip.file('casas.geojson', JSON.stringify(casas));
     }

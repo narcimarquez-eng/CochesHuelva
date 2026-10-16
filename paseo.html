@@ -1310,25 +1310,27 @@ const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.kumi
 /* OpenStreetMap: si ningún servidor da la zona entera (suele ser por tiempo en las zonas grandes), se pide por cuartos; si las dos
    primeras partes tampoco llegan, el servidor no está y no se insiste. Los cuartos que fallen se piden otra vez por cuartos (una vez más)
    y luego se junta todo sin repetir. Si falta algún trozo, el mapa queda incompleto (y se vuelve a pedir al preparar la zona otra vez) */
-async function fetchOSM(geo,areaKm2){
-  const j=await fetchOSMuna(geo,areaKm2,0);
+/* Con una zona dibujada (la franja de una ruta) se pide solo lo de dentro del polígono: en una ruta larga el recuadro es enorme */
+async function fetchOSM(geo,areaKm2,poli=null){
+  const j=await fetchOSMuna(geo,areaKm2,0,poli);
   if(j||areaKm2<0.2)return j;
   repLog('osm','La zona entera no ha llegado: la pido en cuatro partes más pequeñas.');
-  return await fetchOSMpartes(geo,areaKm2,1);
+  return await fetchOSMpartes(geo,areaKm2,1,poli);
 }
-async function fetchOSMpartes(geo,areaKm2,nivel){
+async function fetchOSMpartes(geo,areaKm2,nivel,poli=null){
   const la=(geo.n+geo.s)/2,lo=(geo.e+geo.w)/2,partes=[{n:geo.n,s:la,w:geo.w,e:lo},{n:geo.n,s:la,w:lo,e:geo.e},{n:la,s:geo.s,w:geo.w,e:lo},{n:la,s:geo.s,w:lo,e:geo.e}];
   const res=[];
-  for(const p of partes){res.push(await fetchOSMuna(p,areaKm2/4,nivel));if(res.length>=2&&!res.some(Boolean))return null;}
+  for(const p of partes){res.push(await fetchOSMuna(p,areaKm2/4,nivel,poli));if(res.length>=2&&!res.some(Boolean))return null;}
   if(!res.some(Boolean))return null;
-  if(nivel<2&&areaKm2/4>=0.2)for(let i=0;i<4;i++)if(!res[i]){repLog('osm','Una de las partes no ha llegado: la pido en cuatro más pequeñas.');res[i]=await fetchOSMpartes(partes[i],areaKm2/4,nivel+1);}
+  if(nivel<2&&areaKm2/4>=0.2)for(let i=0;i<4;i++)if(!res[i]){repLog('osm','Una de las partes no ha llegado: la pido en cuatro más pequeñas.');res[i]=await fetchOSMpartes(partes[i],areaKm2/4,nivel+1,poli);}
   const vistos=new Set(),elements=[];let len=0,incompleto=res.some(r=>!r||r.incompleto);
   for(const r of res){if(!r)continue;len+=r.__len||0;for(const e of r.elements){const k=e.type+'/'+e.id;if(vistos.has(k))continue;vistos.add(k);elements.push(e);}}
   repLog('osm',`Juntados ${fmt(elements.length)} elementos de las cuatro partes${incompleto?' (falta alguna: el mapa queda incompleto)':''}.`);
   const out={elements,__len:len};if(incompleto)out.incompleto=true;return out;
 }
-async function fetchOSMuna(geo,areaKm2,nivel){
-  const bb=`${geo.s},${geo.w},${geo.n},${geo.e}`,big=areaKm2>45;
+async function fetchOSMuna(geo,areaKm2,nivel,poli=null){
+  const pf=poli&&poli.length>=3?`)(poly:"${poli.map(([la,lo])=>la.toFixed(5)+' '+lo.toFixed(5)).join(' ')}"`:'';   // recuadro y polígono a la vez: (s,w,n,e)(poly:"…")
+  const bb=`${geo.s},${geo.w},${geo.n},${geo.e}${pf}`,big=areaKm2>45;
   const q=`[out:json][timeout:90];(
 way["natural"~"^(water|wetland|beach|sand|shingle|wood|scrub|heath|grassland|bare_rock|scree|dune)$"](${bb});
 relation["natural"~"^(water|wetland|beach|sand|wood|scrub|heath|grassland)$"](${bb});
@@ -3270,16 +3272,17 @@ async function buildWorld(src){
     const raw=src.raw||{};
     const osmEntero=raw.osm&&!raw.osm.incompleto;   // si quedó incompleto, se vuelve a pedir (y si no llega, vale lo guardado)
     if(osmEntero)repSet('osm','ok',`Guardado en este navegador (${fmt((raw.osm.elements||[]).length)} elementos): no se ha descargado nada.`);
-    const pO=osmEntero?Promise.resolve(raw.osm):fetchOSM(src.geo,area).then(j=>j&&!(j.incompleto&&raw.osm&&raw.osm.elements.length>j.elements.length)?j:(raw.osm||j));
-    const areaCat=src.poligono&&src.poligono.length>=3?areaPoligonoKm2(src.poligono):area;   // una zona dibujada (la franja de una ruta) cuenta lo de dentro
+    const pO=osmEntero?Promise.resolve(raw.osm):fetchOSM(src.geo,src.poligono&&src.poligono.length>=3?areaPoligonoKm2(src.poligono):area,src.poligono).then(j=>j&&!(j.incompleto&&raw.osm&&raw.osm.elements.length>j.elements.length)?j:(raw.osm||j));
+    const poliCat=src.poligonoCatastro||src.poligono;   // la franja de una ruta: el Catastro solo de sus primeros km (el juego pide el resto)
+    const areaCat=poliCat&&poliCat.length>=3?areaPoligonoKm2(poliCat):area;   // una zona dibujada (la franja de una ruta) cuenta lo de dentro
     const catOk=enEspana(src.geo)&&areaCat<=CAT_MAX_KM2,catDone=raw.cat&&(!raw.cat.tiles||!(raw.cat.failed||[]).length);
     if(!enEspana(src.geo))repSet('cat','nada','Fuera de España no hay Catastro: las casas salen de OpenStreetMap.');
     else if(!catOk)repSet('cat','nada',`La zona mide ${fmt(areaCat,1)} km² y el Catastro solo se pide hasta ${CAT_MAX_KM2} km²: las casas salen de OpenStreetMap.`);
     const pC=catDone?Promise.resolve({partes:raw.cat.partes||catPartes(raw.cat),fails:0,cached:true})
-      :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles,trozoDentro(src.poligono),raw.cat&&raw.cat.failed,raw.cat&&raw.cat.porches).catch(e=>({err:e})):null;
+      :catOk?fetchCatastro(src.geo,raw.cat&&raw.cat.tiles,trozoDentro(poliCat),raw.cat&&raw.cat.failed,raw.cat&&raw.cat.porches).catch(e=>({err:e})):null;
     // parcelas: solo con Catastro; las que faltan (o todas, si catastro.php no sabía darlas) se vuelven a pedir
     const parDone=raw.par&&!raw.par.viejo&&!(raw.par.failed||[]).length;
-    const pP=catOk&&!parDone?fetchParcelas(src.geo,raw.par&&raw.par.tiles,trozoDentro(src.poligono),raw.par&&raw.par.failed).catch(e=>({err:e})):null;
+    const pP=catOk&&!parDone?fetchParcelas(src.geo,raw.par&&raw.par.tiles,trozoDentro(poliCat),raw.par&&raw.par.failed).catch(e=>({err:e})):null;
     fresh={sat:false,osm:null,cat:null,par:null};
     if(raw.sat&&raw.sat.blob){busy('Abriendo la foto aérea guardada…',null);sat=await satFromBlob(raw.sat);let n0=0,n=0;
       if(!sat)repLog('sat','La foto guardada no se ha podido leer: la vuelvo a descargar.');
@@ -3924,7 +3927,7 @@ async function scanZone(g,name,opts={}){
     const pN=name?Promise.resolve(name):reverseName(g);
     const dem=await fetchDEM(g,(f,msg)=>busy(msg,f));
     const nm=(await pN)||coordName(g);
-    const src={kind:'zona',name:nm,W:dem.W,H:dem.H,h:dem.h,wM:dem.wM,hM:dem.hM,geo:g,seaBase:0,demSrc:dem.src,zoneId:id,demIncomplete:dem.incomplete,poligono:opts.poligono||null};
+    const src={kind:'zona',name:nm,W:dem.W,H:dem.H,h:dem.h,wM:dem.wM,hM:dem.hM,geo:g,seaBase:0,demSrc:dem.src,zoneId:id,demIncomplete:dem.incomplete,poligono:opts.poligono||null,poligonoCatastro:opts.poligonoCatastro||null};
     const r=await loadSrc(src);
     if(dem.note)r.notes.unshift(dem.note);
     loading=false;
@@ -4383,7 +4386,7 @@ const JUEGO=(()=>{const q=new URLSearchParams(location.search),la=parseFloat(q.g
 const RUTA_JUEGO=(()=>{if(!new URLSearchParams(location.search).has('ruta'))return null;
   try{const p=JSON.parse(localStorage.getItem('cochesHuelva.rutaPendiente')||'null');return p&&p.poligono&&p.geo?p:null;}catch(e){return null;}})();
 if(RUTA_JUEGO){const espera=setInterval(()=>{if(loading)return;clearInterval(espera);   // en cuanto el Paseo está libre (sin esperar al «load» de la página)
-  scanZone(RUTA_JUEGO.geo,RUTA_JUEGO.nombre,{force:true,poligono:RUTA_JUEGO.poligono}).catch(e=>toast(`<p><b>No he podido preparar la franja de la ruta.</b></p><p>${esc(e.message||e)}</p>`,0));},400);}
+  scanZone(RUTA_JUEGO.geo,RUTA_JUEGO.nombre,{force:true,poligono:RUTA_JUEGO.poligono,poligonoCatastro:RUTA_JUEGO.poligonoCatastro||null}).catch(e=>toast(`<p><b>No he podido preparar la franja de la ruta.</b></p><p>${esc(e.message||e)}</p>`,0));},400);}
 if(JUEGO.activo)setInterval(()=>{   // vale para todos los caminos: zona nueva, guardada o abierta desde un .zip
   if(W&&W.geo&&!loading&&!JUEGO.hecho.has(W)){JUEGO.hecho.add(W);busy('Preparando la zona para el juego…',0.9);zoneExport({jugar:true});}
 },400);
