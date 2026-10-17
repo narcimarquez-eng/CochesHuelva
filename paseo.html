@@ -3814,6 +3814,45 @@ async function fetchIGN(g,cols,rows,cell,onProg){
   if(fails===jobs.length)throw new Error(`no ha dado ningún bloque (${[...errs.keys()][0]})`);
   return {grid,cols,rows,cov,fails,total:jobs.length,falta};
 }
+/* Alturas finas a lo largo de una ruta (una zona dibujada): el MDT05 del IGN a su resolución (unos 5 m), solo en las teselas de
+   FINO_T × FINO_T celdas que tocan la franja (la rejilla general de la zona, en una ruta larga, queda en una cota cada 14-20 m).
+   Rejilla en grados desde la esquina noroeste del recuadro (lat0 = g.n, lon0 = g.w). Se piden bloques de 4 × 4 teselas (512
+   celdas, como fetchIGN) y se guardan solo las teselas que tocan la franja, en Uint16: cota = FINO_BASE + v · FINO_PASO
+   (65535: sin dato, como el mar). Devuelve null si no llega ninguna */
+const FINO_T=128,FINO_BASE=-100,FINO_PASO=0.1;
+async function fetchDEMfino(g,poli,onProg){
+  const latM=(g.n+g.s)/2,kx=111320*Math.cos(latM*Math.PI/180),ky=110540,dLat=5/ky,dLon=5/kx;
+  const cols=Math.ceil((g.e-g.w)/dLon),rows=Math.ceil((g.n-g.s)/dLat),tx=Math.ceil(cols/FINO_T),ty=Math.ceil(rows/FINO_T),lado=FINO_T*5;
+  // la franja en metros desde la esquina noroeste; una tesela vale si su centro está dentro o a menos de 3/4 de su lado del borde
+  const Pm=poli.map(([la,lo])=>[(lo-g.w)*kx,(g.n-la)*ky]),rad=lado*0.75;
+  const dentro=(x,y)=>{let d=false;for(let i=0,j=Pm.length-1;i<Pm.length;j=i++){const [xi,yi]=Pm[i],[xj,yj]=Pm[j];if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi)d=!d;}return d;};
+  const cerca=(x,y)=>{for(let i=0,j=Pm.length-1;i<Pm.length;j=i++){const [ax,ay]=Pm[j],[bx,by]=Pm[i],dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy,u=L?clamp(((x-ax)*dx+(y-ay)*dy)/L,0,1):0;if(Math.hypot(ax+dx*u-x,ay+dy*u-y)<rad)return true;}return false;};
+  const usar=new Uint8Array(tx*ty);
+  for(let j=0;j<ty;j++)for(let i=0;i<tx;i++){const x=(i+0.5)*lado,y=(j+0.5)*lado;if(dentro(x,y)||cerca(x,y))usar[j*tx+i]=1;}
+  const B=4,jobs=[];
+  for(let bj=0;bj<ty;bj+=B)for(let bi=0;bi<tx;bi+=B){let alguna=false;for(let j=bj;j<Math.min(ty,bj+B);j++)for(let i=bi;i<Math.min(tx,bi+B);i++)if(usar[j*tx+i])alguna=true;if(alguna)jobs.push([bi,bj]);}
+  if(!jobs.length)return null;
+  const cov=IGN_COV.find(c=>c[1]===5),hechas=new Map();let k=0,done=0,fails=0;const errs=new Map();
+  onProg(0,`Alturas de la ruta a 5 m (${cov[2]} del IGN)…`);
+  async function worker(){while(k<jobs.length){const [bi,bj]=jobs[k++],c0=bi*FINO_T,r0=bj*FINO_T,c1=Math.min(cols,c0+B*FINO_T),r1=Math.min(rows,r0+B*FINO_T),cw=c1-c0,ch=r1-r0;
+    let blk=null,last=null;
+    for(let a=0;a<2&&!blk;a++){try{blk=parseAsc(await ignGet(ignURL(cov[0],g.w+c0*dLon,g.n-r1*dLat,g.w+c1*dLon,g.n-r0*dLat,cw,ch)),cw,ch);}catch(e){last=e;}}
+    if(!blk){fails++;cuenta(errs,errTxt(last));}
+    else for(let j=bj;j<Math.min(ty,bj+B);j++)for(let i=bi;i<Math.min(tx,bi+B);i++){
+      if(!usar[j*tx+i])continue;
+      const v=new Uint16Array(FINO_T*FINO_T).fill(65535);let alguno=false;
+      for(let r=0;r<FINO_T;r++){const rr=j*FINO_T+r-r0;if(rr>=ch)break;
+        for(let c=0;c<FINO_T;c++){const cc=i*FINO_T+c-c0;if(cc>=cw)break;const h=blk[rr*cw+cc];if(isNaN(h))continue;v[r*FINO_T+c]=clamp(Math.round((h-FINO_BASE)/FINO_PASO),0,65534);alguno=true;}}
+      if(alguno)hechas.set(j*tx+i,{i,j,v});}
+    done++;onProg(done/jobs.length,`Alturas de la ruta a 5 m (${cov[2]} del IGN): ${done} de ${jobs.length} bloques`);}}
+  await Promise.all(Array.from({length:4},worker));
+  repLog('alt',`Alturas de la ruta a 5 m (${cov[2]} del IGN): ${hechas.size} teselas de ${FINO_T*5} m en ${jobs.length-fails} de ${jobs.length} bloques.`);
+  for(const x of agrupa(errs))repLog('alt',`Bloques finos que fallaron tras 2 intentos: ${x}.`);
+  if(!hechas.size)return null;
+  const lista=[...hechas.values()],datos=new Uint16Array(lista.length*FINO_T*FINO_T);
+  lista.forEach((q,n)=>datos.set(q.v,n*FINO_T*FINO_T));
+  return {lat0:g.n,lon0:g.w,dLat,dLon,T:FINO_T,base:FINO_BASE,paso:FINO_PASO,teselas:lista.map(q=>[q.i,q.j]),datos:datos.buffer,incompleta:fails>0};
+}
 async function fetchTerr(g,W,H){
   const tr=z=>{const x0=Math.floor(lon2px(g.w,z)/256),x1=Math.floor(lon2px(g.e,z)/256),y0=Math.floor(lat2px(g.n,z)/256),y1=Math.floor(lat2px(g.s,z)/256);return {x0,x1,y0,y1,n:(x1-x0+1)*(y1-y0+1)};};
   let z=14;while(z>6&&tr(z).n>36)z--;
@@ -3893,6 +3932,7 @@ async function saveZone(src){
   const T=W,prev=(await DB.get('datos',src.zoneId))||{};
   const rec={dem:prev.dem||{W:src.W,H:src.H,h:src.h.buffer.slice(0),src:src.demSrc,incomplete:!!src.demIncomplete},sat:prev.sat||null,osm:prev.osm||null,cat:prev.cat||null,par:prev.par||null,poligono:prev.poligono||src.poligono||null};
   if(src.demFresh){rec.dem={W:src.W,H:src.H,h:src.h.buffer.slice(0),src:src.demSrc,incomplete:false};src.demFresh=false;}
+  rec.demFino=src.demFino||prev.demFino||null;   // las alturas finas de una ruta
   const f=T.fresh||{};
   if(f.osm)rec.osm=f.osm;if(f.cat)rec.cat=f.cat;if(f.par&&!(f.par.viejo&&rec.par&&!rec.par.viejo))rec.par=f.par;
   if(f.sat&&T.satCanvas){busy('Guardando la zona en este navegador…',null);const blob=await new Promise(r=>{try{T.satCanvas.toBlob(r,'image/jpeg',0.86);}catch(e){r(null);}});busy('');
@@ -3927,11 +3967,13 @@ async function openZone(meta,opts={}){
       if(nd)repSet('alt','ok',`Completadas ahora: ${nd.src}. Ya están guardadas.`);
       else repSet('alt','aviso',`Uso las guardadas (${d.dem.src}), a las que les faltan trozos del IGN. He intentado completarlas y no ha sido posible${why?`: ${why}`:''}.`);}
     else repSet('alt','ok',`Guardadas en este navegador (${d.dem.src}): no se ha descargado nada.`);
+    let demFino=d.demFino||null,finoNuevo=false;const poliZ=d.poligono||meta.poligono||null;
+    if((!demFino||demFino.incompleta)&&poliZ&&enEspana(meta.geo)){const f=await fetchDEMfino(meta.geo,poliZ,(f,m)=>busy(m,f)).catch(()=>null);if(f&&(!demFino||f.teselas.length>=demFino.teselas.length)){demFino=f;finoNuevo=true;}}
     const src={kind:'zona',name:meta.name,W:d.dem.W,H:d.dem.H,h:nd?nd.h:new Float32Array(d.dem.h),wM:meta.wM,hM:meta.hM,geo:meta.geo,seaBase:0,
-      demSrc:nd?nd.src:d.dem.src,demIncomplete:nd?false:!!d.dem.incomplete,demFresh:!!nd,zoneId:meta.id,poligono:d.poligono||meta.poligono||null,raw:{sat:d.sat,osm:d.osm,cat:d.cat,par:d.par}};
+      demSrc:nd?nd.src:d.dem.src,demIncomplete:nd?false:!!d.dem.incomplete,demFresh:!!nd,demFino,zoneId:meta.id,poligono:poliZ,raw:{sat:d.sat,osm:d.osm,cat:d.cat,par:d.par}};
     const r=await loadSrc(src);
     meta.used=Date.now();await DB.put('zonas',meta,meta.id);
-    const fr=nd||(W.fresh&&(W.fresh.sat||W.fresh.osm||W.fresh.cat));
+    const fr=nd||finoNuevo||(W.fresh&&(W.fresh.sat||W.fresh.osm||W.fresh.cat));
     loading=false;if(fr)await saveZone(src);
     const ahora=((savedCache.find(z=>z.id===meta.id)||meta).missing)||[],hecho=antes.filter(x=>!ahora.includes(x));
     let msg=opts.zip?`Abierta «${esc(meta.name)}» desde el archivo .zip; queda guardada en este navegador`:`${opts.auto?'Abierta tu última zona':'Abierta'}, «${esc(meta.name)}», con lo guardado en este navegador`;
@@ -3953,8 +3995,10 @@ async function scanZone(g,name,opts={}){
     const id='z'+Date.now().toString(36)+Math.floor(Math.random()*1296).toString(36);
     const pN=name?Promise.resolve(name):reverseName(g);
     const dem=await fetchDEM(g,(f,msg)=>busy(msg,f));
+    // una ruta: además, el MDT de 5 m a lo largo de la franja (si falla, vale la rejilla general)
+    const demFino=opts.poligono&&enEspana(g)?await fetchDEMfino(g,opts.poligono,(f,msg)=>busy(msg,f)).catch(e=>{repLog('alt',`Alturas de la ruta a 5 m: ${errTxt(e)}.`);return null;}):null;
     const nm=(await pN)||coordName(g);
-    const src={kind:'zona',name:nm,W:dem.W,H:dem.H,h:dem.h,wM:dem.wM,hM:dem.hM,geo:g,seaBase:0,demSrc:dem.src,zoneId:id,demIncomplete:dem.incomplete,poligono:opts.poligono||null,poligonoCatastro:opts.poligonoCatastro||null};
+    const src={kind:'zona',name:nm,W:dem.W,H:dem.H,h:dem.h,wM:dem.wM,hM:dem.hM,geo:g,seaBase:0,demSrc:dem.src,zoneId:id,demIncomplete:dem.incomplete,demFino,poligono:opts.poligono||null,poligonoCatastro:opts.poligonoCatastro||null};
     const r=await loadSrc(src);
     if(dem.note)r.notes.unshift(dem.note);
     loading=false;
@@ -4163,6 +4207,9 @@ async function zoneExport(opts={}){
       ortofoto:foto&&satM?{archivo:'ortofoto.jpg',fuente:satM.src||null,clave:satM.key||null,zoom:satM.z||null,geom:satM.geom||null,faltan:(satM.failed||[]).slice()}:null,
       osm:osm?'datos/osm.json':null,catastro:cat?'datos/catastro.json':null,parcelas:par?'datos/parcelas.json':null,
       colores:[...colBy.values()].map(c=>({ref:c.ref,col:c.col,off:!!c.off}))};
+    const fino=(rec&&rec.demFino)||src.demFino||null;   // una ruta: el MDT de 5 m a lo largo de la franja
+    if(fino){files.push({name:'alturas_ruta.bin',data:fino.datos.slice(0)});
+      zona.alturasRuta={archivo:'alturas_ruta.bin',formato:'Uint16 LE: cota = base + v·paso; 65535 sin dato; teselas de T×T celdas, filas de norte a sur',lat0:fino.lat0,lon0:fino.lon0,dLat:fino.dLat,dLon:fino.dLon,T:fino.T,base:fino.base,paso:fino.paso,teselas:fino.teselas};}
     files.push({name:'zona.json',data:JSON.stringify(zona)});
     files.push({name:'informe.txt',data:(repTexto()||'Sin informe de carga.').replace(/\n/g,'\r\n')+'\r\n'});
     files.push({name:'LEEME.txt',data:leeme(nm,g,cv.eq,!!foto,!!cat,!!osm,!!par).replace(/\n/g,'\r\n')});

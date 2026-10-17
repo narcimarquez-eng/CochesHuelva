@@ -6413,6 +6413,31 @@ function rellenarHuecos(v, W, H, nd) {
     cola = sig;
   }
 }
+// Alturas finas de una ruta (alturas_ruta.bin, del Paseo): el MDT05 del IGN, de unos 5 m, solo a lo largo de la franja. Teselas
+// de T × T celdas en grados desde la esquina noroeste del recuadro (lat0, lon0), en Uint16 (cota = base + v · paso; 65535 sin
+// dato). Devuelve cota(x, z), o null donde no hay (fuera de las teselas o sin dato: ahí vale la rejilla general de alturas.asc)
+async function leerAlturasRuta(zip, meta) {
+  const a = meta && meta.alturasRuta, f = a && zip.file(a.archivo);
+  if (!f || !a.teselas || !a.teselas.length) return null;
+  const buf = await f.async('arraybuffer'), T = a.T, n = T * T, teselas = new Map();
+  if (buf.byteLength < a.teselas.length * n * 2) return null;
+  a.teselas.forEach(([i, j], k) => teselas.set(i * 65536 + j, new Uint16Array(buf, k * n * 2, n)));
+  const celda = (c, r) => {
+    const t = teselas.get(Math.floor(c / T) * 65536 + Math.floor(r / T));
+    if (!t) return NaN;
+    const v = t[(r % T) * T + (c % T)];
+    return v === 65535 ? NaN : a.base + v * a.paso;
+  };
+  return (x, z) => {
+    const lat = ORIGEN.lat - z / K_LAT, lon = ORIGEN.lon + x / K_LON;
+    const fc = (lon - a.lon0) / a.dLon - 0.5, fr = (a.lat0 - lat) / a.dLat - 0.5;
+    if (fc < 0 || fr < 0) return null;
+    const c0 = Math.floor(fc), r0 = Math.floor(fr), u = fc - c0, w = fr - r0;
+    const v00 = celda(c0, r0), v10 = celda(c0 + 1, r0), v01 = celda(c0, r0 + 1), v11 = celda(c0 + 1, r0 + 1);
+    if (isNaN(v00 + v10 + v01 + v11)) return null;
+    return (v00 * (1 - u) + v10 * u) * (1 - w) + (v01 * (1 - u) + v11 * u) * w;
+  };
+}
 async function leerAlturas(zip) {
   const f = zip.file('alturas.asc');
   if (!f) return null;
@@ -6603,7 +6628,10 @@ async function cargarZona(archivo) {
   zona.acerasUrbanas = acerasUrbanas(tramos, zona.parcelas, edif, zona.rejilla, extraerOSM(osm).rotondas);   // las calles de ciudad que el Paseo dejó sin acera
   zona.carreteras = velocidadesDeCarretera(tramos, parsearMapa(mapa).filter(c => c.capa === 'zona urbana' && c.anillo && c.anillo.length >= 3).map(c => c.anillo));   // las carreteras sin límite en el mapa, a su velocidad (las piezas del grafo la heredan)
   decidirTejados(edif, zona.parcelas);   // teja o azotea: por la parcela y, si ya se miró, por la foto de fachada
-  const altura = await leerAlturas(zip);
+  const general = await leerAlturas(zip), fina = await leerAlturasRuta(zip, meta);
+  // con una ruta, el MDT de 5 m a lo largo de ella; fuera de sus teselas, la rejilla general
+  const altura = fina ? (general ? (x, z) => { const h = fina(x, z); return h !== null ? h : general(x, z); } : fina) : general;
+  zona.alturasFinas = fina ? meta.alturasRuta.teselas.length : 0;
   SUELO_ZONA = altura;   // el relieve de la zona: sueloEn(x, z) lo lee al colocar cada cosa
   perfilarPuentes(zona.puentes, tramos);   // la cota de cada tablero, con el relieve ya puesto
   // en una ruta, los árboles de la foto se buscan a lo largo de ella, con la foto a su resolución
