@@ -4128,19 +4128,18 @@ function pistasSuelo(caja, capas) {
 // En una ruta larga la foto cubre un recuadro enorme y la rejilla de 900 × 900 se quedaba en puntos cada 15 m o más: el suelo
 // no seguía a la calzada. Con ruta, la malla va cada PASO_MALLA m en los cuadros (de 6 × 6 celdas) a menos de RADIO_RUTA + 80 m
 // de ella, y cada 6 celdas en el resto, medio metro más abajo (no se pisan donde se tocan)
-function mallaFoto(foto, pistas) {
-  const { g, W, H } = foto;
-  const esquinas = [[-0.5, -0.5], [W - 0.5, -0.5], [-0.5, H - 0.5], [W - 0.5, H - 0.5]]
-    .map(([c, f]) => localDeMercator(g.A * c + g.B * f + g.C, g.D * c + g.E * f + g.F));
-  const x0 = Math.min(...esquinas.map(e => e[0])), x1 = Math.max(...esquinas.map(e => e[0]));
-  const z0 = Math.min(...esquinas.map(e => e[1])), z1 = Math.max(...esquinas.map(e => e[1]));
+// Rejilla del suelo sobre el rectángulo (x0, z0)-(x1, z1), con uv de uvDe(x, z): sin ruta, cada PASO_MALLA m (900 × 900 como
+// mucho); con ruta, cada PASO_MALLA m en los cuadros (de 6 × 6 celdas) a menos de RADIO_RUTA + 80 m de ella, y cada 6 celdas en el
+// resto, medio metro más abajo (no se pisan donde se tocan). En una ruta larga la rejilla de 900 × 900 se quedaba en puntos
+// cada 15 m o más y el suelo no seguía a la calzada
+function rejillaSuelo(x0, z0, x1, z1, uvDe, y = -0.3) {
   const pos = [], uv = [], idx = [];
-  const rejilla = (NX, NZ, usar, y) => {   // celdas (i, j) de una rejilla NX × NZ sobre la foto; usar(i, j) dice cuáles se ponen
+  const rejilla = (NX, NZ, usar, y) => {   // celdas (i, j) de una rejilla NX × NZ sobre el rectángulo; usar(i, j) dice cuáles se ponen
     const indice = new Map(), vertice = (i, j) => {
       const k = j * (NX + 1) + i;
       let n = indice.get(k);
       if (n === undefined) {
-        const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ, [X, Y] = mercatorDeLocal(x, z), [u, v] = uvOrtofoto(X, Y, g, W, H);
+        const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ, [u, v] = uvDe(x, z);
         n = pos.length / 3; indice.set(k, n);
         pos.push(x, y, z); uv.push(u, v);   // bajo la calzada (+0,05 m) y las aceras, con margen para lo que queda entre vértices
       }
@@ -4154,7 +4153,7 @@ function mallaFoto(foto, pistas) {
   };
   if (!RUTA_LOCAL) {
     const NX = Math.min(900, Math.max(8, Math.round((x1 - x0) / PASO_MALLA))), NZ = Math.min(900, Math.max(8, Math.round((z1 - z0) / PASO_MALLA)));
-    rejilla(NX, NZ, () => true, -0.3);
+    rejilla(NX, NZ, () => true, y);
   } else {
     const B = 6, NX = Math.max(B, Math.ceil((x1 - x0) / PASO_MALLA / B) * B), NZ = Math.max(B, Math.ceil((z1 - z0) / PASO_MALLA / B) * B);
     const bx = NX / B, bz = NZ / B, cerca = new Uint8Array(bx * bz), wb = (x1 - x0) / bx, hb = (z1 - z0) / bz, R = RADIO_RUTA + 80 + Math.hypot(wb, hb) / 2;
@@ -4164,14 +4163,23 @@ function mallaFoto(foto, pistas) {
         for (let p = Math.max(0, Math.floor((Math.min(ax, cx) - R - x0) / wb)); p <= Math.min(bx - 1, Math.floor((Math.max(ax, cx) + R - x0) / wb)); p++)
           if (!cerca[q * bx + p] && distSeg2(x0 + (p + 0.5) * wb, z0 + (q + 0.5) * hb, ax, az, cx, cz) < R * R) cerca[q * bx + p] = 1;
     }
-    rejilla(NX, NZ, (i, j) => cerca[Math.floor(j / B) * bx + Math.floor(i / B)] === 1, -0.3);
-    rejilla(bx, bz, (p, q) => cerca[q * bx + p] === 0, -0.8);
+    rejilla(NX, NZ, (i, j) => cerca[Math.floor(j / B) * bx + Math.floor(i / B)] === 1, y);
+    rejilla(bx, bz, (p, q) => cerca[q * bx + p] === 0, y - 0.5);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(pos.length).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));   // suelo plano: normal hacia arriba
   geo.setIndex(idx);
+  return geo;
+}
+function mallaFoto(foto, pistas) {
+  const { g, W, H } = foto;
+  const esquinas = [[-0.5, -0.5], [W - 0.5, -0.5], [-0.5, H - 0.5], [W - 0.5, H - 0.5]]
+    .map(([c, f]) => localDeMercator(g.A * c + g.B * f + g.C, g.D * c + g.E * f + g.F));
+  const x0 = Math.min(...esquinas.map(e => e[0])), x1 = Math.max(...esquinas.map(e => e[0]));
+  const z0 = Math.min(...esquinas.map(e => e[1])), z1 = Math.max(...esquinas.map(e => e[1]));
+  const geo = rejillaSuelo(x0, z0, x1, z1, (x, z) => { const [X, Y] = mercatorDeLocal(x, z); return uvOrtofoto(X, Y, g, W, H); });
   // Lambert para que reciba sombras; el gris compensa la luz del cielo y del sol, y la foto se ve con su brillo
   const malla = new THREE.Mesh(geo, conDetalleSuelo(new THREE.MeshLambertMaterial({ map: foto.textura, side: THREE.DoubleSide, color: new THREE.Color(0.7, 0.7, 0.7) }), pistas));
   malla.receiveShadow = sombras;
@@ -4308,15 +4316,15 @@ function construirTerreno(caja, capas, foto) {
   base.position.y = -1.2;
   base.userData.sinRelieve = true;   // el plano de fondo, fuera de la zona: plano
   const pistas = pistasSuelo(caja, capas);
-  grupo.add(base, construirSuelo(caja, capas, foto ? foto.media : SUELO_BASE, pistas));
-  if (foto) grupo.add(mallaFoto(foto, pistas));
+  // con foto, el suelo pintado con el mapa no se pone: quedaba debajo de ella, pero su malla de 20 m asomaba por encima en las dunas
+  // y las lomas (y tapaba la carretera y el coche)
+  grupo.add(base, foto ? mallaFoto(foto, pistas) : construirSuelo(caja, capas, SUELO_BASE, pistas));
   return grupo;
 }
 
 // Suelo pintado con los usos del mapa (praderas, parques, cultivos, agua) sobre la caja de la zona.
 // La luz del juego lo deja muy claro: se oscurece un poco para que los cultivos no salgan blancos
 const LUZ_SUELO = 0.72;
-const PASO_RELIEVE = 20;   // m entre vértices del suelo: lo que se ve de las lomas y las cuestas
 function construirSuelo(caja, capas, colorBase, pistas) {
   const [x0, z0, x1, z1] = caja;
   const W = x1 - x0, H = z1 - z0, esc = 2048 / Math.max(W, H);
@@ -4337,10 +4345,10 @@ function construirSuelo(caja, capas, colorBase, pistas) {
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.anisotropy = 4;
-  const suelo = new THREE.Mesh(new THREE.PlaneGeometry(W, H, Math.max(1, Math.round(W / PASO_RELIEVE)), Math.max(1, Math.round(H / PASO_RELIEVE))), conDetalleSuelo(new THREE.MeshLambertMaterial({ map: tex, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO) }), pistas));
-  suelo.rotation.x = -Math.PI / 2;
+  // la misma rejilla que la foto aérea (cada 7,2 m): con puntos cada 20 m, el suelo pasaba por encima de las calles entre lomas
+  const geo = rejillaSuelo(x0, z0, x1, z1, (x, z) => [(x - x0) / W, 1 - (z - z0) / H], -0.3);
+  const suelo = new THREE.Mesh(geo, conDetalleSuelo(new THREE.MeshLambertMaterial({ map: tex, color: new THREE.Color(LUZ_SUELO, LUZ_SUELO, LUZ_SUELO), side: THREE.DoubleSide }), pistas));
   suelo.userData.normales = true;
-  suelo.position.set((x0 + x1) / 2, -0.6, (z0 + z1) / 2);
   suelo.userData.suelo = true;
   suelo.receiveShadow = sombras;
   return suelo;
