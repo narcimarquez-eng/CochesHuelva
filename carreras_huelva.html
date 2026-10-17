@@ -80,6 +80,12 @@
   #ruletaGiro{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;background:radial-gradient(circle at 50% 38%,#3a4452,#1e242e);border:2.5px solid rgba(255,255,255,.85);box-shadow:0 3px 10px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:900;letter-spacing:2px;will-change:transform}
   #ruletaGiro::before{content:'';position:absolute;top:7px;width:10px;height:10px;border-radius:50%;background:#f5b041;border:1.5px solid #1b1b1b}
   #estado{min-height:20px;color:#ffd166}
+  #progresoRuta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;max-width:640px;font-size:14px;color:#cfe3ff}
+  #progresoRuta[hidden]{display:none}
+  #barraRuta{width:220px;height:12px;border-radius:6px;background:rgba(255,255,255,.18);overflow:hidden}
+  #barraRutaI{display:block;height:100%;width:0;background:var(--ambar);transition:width .4s}
+  #progresoRutaT{font-variant-numeric:tabular-nums}
+  #btnCancelarRuta{padding:4px 10px;font-size:13px;background:#3a4856;color:#fff}
   #pantalla > *{flex-shrink:0}   /* con mucho texto, el menú se desplaza en vez de montar unas líneas sobre otras */
   #faltan{max-width:640px;font-size:13px;line-height:1.4;color:#cfe3ff;background:rgba(30,60,110,.45);border:1px solid rgba(140,180,255,.35);border-radius:10px;padding:6px 10px}
   #faltan button{margin-left:6px;padding:4px 10px;font-size:13px}
@@ -208,6 +214,7 @@
   <div class="opcion"><span>Ruta</span><div class="selector"><input type="file" id="rutaGpx" accept=".gpx" style="color:#fff"> <button id="btnRutaEjemplo" type="button">Ruta de ejemplo</button> <button id="btnSinRuta" type="button" hidden>✕ Quitar ruta</button></div></div>
   <div class="opcion"><span>De → a</span><div class="selector"><input id="origenRuta" list="localidadesRuta" placeholder="Origen" size="14"> → <input id="destinoRuta" list="localidadesRuta" placeholder="Destino" size="14"> <datalist id="localidadesRuta"></datalist> <button id="btnCalcularRuta" type="button">Calcular ruta</button></div></div>
   <div id="estado"></div>
+  <div id="progresoRuta" hidden><div id="barraRuta"><i id="barraRutaI"></i></div><span id="progresoRutaT"></span> <button id="btnCancelarRuta" type="button">Cancelar</button></div>
   <div id="faltan" hidden><span id="faltanTexto"></span> <button id="btnFaltan" type="button">⬇️ Descargar lo que falta</button></div>
   <div class="opcion"><span>Lugar</span><div class="selector" id="lugares"></div></div>
   <div class="opcion"><span>Modo</span><div class="selector" id="modos">
@@ -1885,7 +1892,7 @@ function generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, r
 // raster: la foto reducida ({ w, h, d: RGBA, paso: metros por píxel, aLocal(c, f) → [x, z] }); altura(x, z): cota del terreno o null.
 // Árbol: verde y oscuro, con más verde alrededor (una copa, no una mata de hierba). Mar: azulado, a menos de 1,5 m de cota, unido al
 // borde de la foto y grande (más de 5 ha). Piscina: turquesa claro, de 6 a 150 m². Nada encima de casas, calzadas o el agua que ya está.
-function detectarEnFoto(raster, capas, aguas, rejAguas, edif, rejilla, tramos, altura, rng) {
+function detectarEnFoto(raster, capas, aguas, rejAguas, edif, rejilla, tramos, altura, rng, fino = null) {
   const { w, h, d, paso } = raster, N = w * h, rejSeg = construirRejillaSegmentos(tramos), nada = new Set();
   const anillos = nombres => capas.filter(c => c.anillo && c.anillo.length >= 3 && nombres.includes(c.capa)).map(c => c.anillo);
   const capa = mascaraCapas([[aguas.map(a => a.pts), 1], [anillos(['humedal']), 2]], calcularCaja(tramos, edif));
@@ -1971,36 +1978,52 @@ function detectarEnFoto(raster, capas, aguas, rejAguas, edif, rejilla, tramos, a
     nuevas.push({ pts: [[-a, -b], [a, -b], [a, b], [-a, b]].map(([u, v]) => [rx + ux * u - uz * v, rz + uz * u + ux * v]), capa: 'piscina' });
     piscinas++;
   }
-  // árboles: de los píxeles de copa más oscuros a los más claros, con sitio alrededor
-  const cand = [];
-  for (let f = 1; f < h - 1; f++) for (let c = 1; c < w - 1; c++) {
-    const i = f * w + c;
-    if (clase[i] !== 1) continue;
-    let vec = 0;
-    for (const n of [i - 1, i + 1, i - w, i + w, i - w - 1, i - w + 1, i + w - 1, i + w + 1]) if (clase[n] === 1) vec++;
-    if (vec >= 4) cand.push(i);
-  }
-  cand.sort((p, q) => (d[p * 4] + d[p * 4 + 1] + d[p * 4 + 2]) - (d[q * 4] + d[q * 4 + 1] + d[q * 4 + 2]));
-  const arboles = [], celdas = new Map(), sep = Math.max(4.5, paso * 2.2), C = sep;
-  const cerca = (x, z) => {
-    const cx = Math.floor(x / C), cz = Math.floor(z / C);
-    for (let i = -1; i <= 1; i++) for (let k = -1; k <= 1; k++) for (const [px, pz] of celdas.get((cx + i) + ',' + (cz + k)) || []) if ((px - x) ** 2 + (pz - z) ** 2 < sep * sep) return true;
-    return false;
+  // árboles: de los píxeles de copa más oscuros a los más claros, con sitio alrededor. En una ruta, la foto reducida de todo el
+  // recuadro es muy basta (7 m o más por píxel): se miran ventanas de la foto a su resolución a lo largo de la ruta (fino)
+  const arboles = [], celdas = new Map();
+  const ponerArboles = (R, cl, dentro, max) => {
+    const { w, h, d, paso } = R, sep = Math.max(4.5, paso * 2.2), C = sep, cand = [];
+    for (let f = 1; f < h - 1; f++) for (let c = 1; c < w - 1; c++) {
+      const i = f * w + c;
+      if (cl[i] !== 1) continue;
+      let vec = 0;
+      for (const n of [i - 1, i + 1, i - w, i + w, i - w - 1, i - w + 1, i + w - 1, i + w + 1]) if (cl[n] === 1) vec++;
+      if (vec >= 4) cand.push(i);
+    }
+    cand.sort((p, q) => (d[p * 4] + d[p * 4 + 1] + d[p * 4 + 2]) - (d[q * 4] + d[q * 4 + 1] + d[q * 4 + 2]));
+    const cerca = (x, z) => {
+      const cx = Math.floor(x / C), cz = Math.floor(z / C);
+      for (let i = -1; i <= 1; i++) for (let k = -1; k <= 1; k++) for (const [px, pz] of celdas.get((cx + i) + ',' + (cz + k)) || []) if ((px - x) ** 2 + (pz - z) ** 2 < sep * sep) return true;
+      return false;
+    };
+    for (const i of cand) {
+      if (arboles.length >= max) break;
+      const c = i % w, f = (i - c) / w, [x, z] = R.aLocal(c + rng() - 0.5, f + rng() - 0.5);
+      if ((dentro && !dentro(x, z)) || cerca(x, z) || !libreDeCosas(x, z)) continue;
+      // pino piñonero: copa muy oscura dentro de una masa de árboles (un pinar), no en una fila de árboles de una calle
+      const L = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3, rr = Math.max(2, Math.round(7 / paso));
+      let masa = 0, tot = 0;
+      if (L < 90) for (let df = -rr; df <= rr; df++) for (let dc = -rr; dc <= rr; dc++) { const cc = c + dc, ff = f + df; if (cc < 0 || ff < 0 || cc >= w || ff >= h) continue; tot++; if (cl[ff * w + cc] === 1) masa++; }
+      const tipo = L < 90 && masa > tot * 0.55 ? 'pino' : undefined;
+      arboles.push(tipo ? [x, z, tipo] : [x, z]);
+      const k = Math.floor(x / C) + ',' + Math.floor(z / C);
+      if (!celdas.has(k)) celdas.set(k, []);
+      celdas.get(k).push([x, z]);
+    }
   };
-  for (const i of cand) {
-    if (arboles.length >= 25000) break;
-    const c = i % w, f = (i - c) / w, [x, z] = raster.aLocal(c + rng() - 0.5, f + rng() - 0.5);
-    if (cerca(x, z) || !libreDeCosas(x, z)) continue;
-    // pino piñonero: copa muy oscura dentro de una masa de árboles (un pinar), no en una fila de árboles de una calle
-    const L = (d[i * 4] + d[i * 4 + 1] + d[i * 4 + 2]) / 3, rr = Math.max(2, Math.round(7 / paso));
-    let masa = 0, tot = 0;
-    if (L < 90) for (let df = -rr; df <= rr; df++) for (let dc = -rr; dc <= rr; dc++) { const cc = c + dc, ff = f + df; if (cc < 0 || ff < 0 || cc >= w || ff >= h) continue; tot++; if (clase[ff * w + cc] === 1) masa++; }
-    const tipo = L < 90 && masa > tot * 0.55 ? 'pino' : undefined;
-    arboles.push(tipo ? [x, z, tipo] : [x, z]);
-    const k = Math.floor(x / C) + ',' + Math.floor(z / C);
-    if (!celdas.has(k)) celdas.set(k, []);
-    celdas.get(k).push([x, z]);
-  }
+  if (fino) {
+    for (const V of fino.ventanas()) {   // la clase de cada píxel de la ventana, con las mismas reglas
+      const cl = new Uint8Array(V.w * V.h);
+      for (let i = 0; i < cl.length; i++) {
+        const r = V.d[i * 4], g = V.d[i * 4 + 1], b = V.d[i * 4 + 2], L = (r + g + b) / 3, mx = Math.max(r, g, b), sat = mx ? (mx - Math.min(r, g, b)) / mx : 0;
+        if (b > r + 35 && g > r + 25 && L > 110 && sat > 0.3) continue;
+        if (b > r + 10 && b >= g - 15 && L > 30 && L < 180 && sat > 0.08) continue;
+        if (2 * g - r - b > 10 && g >= r - 2 && L < 115) cl[i] = 1;
+      }
+      ponerArboles(V, cl, fino.dentro, 40000);
+      if (arboles.length >= 40000) break;
+    }
+  } else ponerArboles(raster, clase, null, 25000);
   return { arboles, aguas: nuevas, mar: Math.round(mar), piscinas };
 }
 // --- parques infantiles: los de OpenStreetMap y, en cada parque de 2.000 m² o más que no tenga, uno a unos metros de su borde ---
@@ -2044,17 +2067,18 @@ function generarJuegos(capas, juegosOSM, tramos, edif, rejilla, aguas, rejAguas,
   return out;
 }
 // Todo lo que se dibuja y choca fuera de las calles y de las casas
-function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng, solares = [], raster = null, altura = null) {
+function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng, solares = [], raster = null, altura = null, fino = null) {
   const capas = parsearMapa(mapaGeo);
   const { piscinas, rotondas, juegos } = extraerOSM(osm);
   const aguas = construirAguas(capas, piscinas);
   // con foto aérea: el mar, las piscinas y los árboles que se ven en ella
-  const deFoto = raster ? detectarEnFoto(raster, capas, aguas, construirRejilla(aguas), edif, rejilla, tramos, altura, mulberry32(31)) : null;
+  const deFoto = raster ? detectarEnFoto(raster, capas, aguas, construirRejilla(aguas), edif, rejilla, tramos, altura, mulberry32(31), fino) : null;
   if (deFoto) aguas.push(...deFoto.aguas);
   const rejAguas = construirRejilla(aguas);
   const rejCalles = construirRejillaCalles(tramos);
   const cruces = puntosDeCruce(tramos);
-  const rieles = generarQuitamiedos(tramos, rotondas, cruces);
+  const enSuelo = tramos.filter(t => !t.puente);   // farolas, quitamiedos y árboles de avenida, no en los puentes (quedarían debajo)
+  const rieles = generarQuitamiedos(enSuelo, rotondas, cruces);
   const islas = prepararIslas(rotondas).filter(isla => !cercaDeCalle(rejCalles, isla.cx, isla.cz, isla.ri));   // sin isleta si una calle pasa por ella
   // árboles: con foto, los que se ven en ella (y algunos de los parques, que en la foto pueden no distinguirse); sin foto, por las capas del mapa
   let arboles;
@@ -2066,7 +2090,7 @@ function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng, solares = [], r
   // vallas de los chalets (con su propio azar: así el resto de la zona sale igual que antes)
   const { segs: vallas, chalets, parcelas: jardines } = generarVallas(edif, rejilla, tramos, aguas, rejAguas, mulberry32(777), solares);
   const rejVallas = construirRejillaCalles(vallas.map(v => ({ pts: [[v.ax, v.az], [v.bx, v.bz]] })));
-  arboles.push(...generarArbolesAvenida(tramos, rotondas, cruces, edif, rejilla, aguas, rejAguas));
+  arboles.push(...generarArbolesAvenida(enSuelo, rotondas, cruces, edif, rejilla, aguas, rejAguas));
   for (let k = arboles.length - 1; k >= 0; k--) if (cercaDeCalle(rejVallas, arboles[k][0], arboles[k][1], 0.9)) arboles.splice(k, 1);   // ningún tronco en mitad de una valla
   const juegosParque = generarJuegos(capas, juegos, tramos, edif, rejilla, aguas, rejAguas, mulberry32(55));
   for (let k = arboles.length - 1; k >= 0; k--) if (juegosParque.some(j => enPoligono(j.pts, arboles[k][0], arboles[k][1]))) arboles.splice(k, 1);   // ni árboles en los columpios
@@ -2082,7 +2106,7 @@ function prepararMundo(mapaGeo, osm, tramos, edif, rejilla, rng, solares = [], r
     const a = k * 2 * Math.PI / 3 + 0.4, x = isla.cx + Math.cos(a) * isla.ri * 0.5, z = isla.cz + Math.sin(a) * isla.ri * 0.5;
     if (!cercaDeCalle(rejCalles, x, z, 3) && !dentroDeOtraCasa(edif, rejilla, x, z, -1) && !choca(aguas, rejAguas, x, z, 1)) arboles.push([x, z]);
   }
-  const farolas = generarFarolas(tramos, rotondas, cruces, arboles).filter(f => !choca(aguas, rejAguas, f.x, f.z, 1) && !dentroDeOtraCasa(edif, rejilla, f.x, f.z, -1))
+  const farolas = generarFarolas(enSuelo, rotondas, cruces, arboles).filter(f => !choca(aguas, rejAguas, f.x, f.z, 1) && !dentroDeOtraCasa(edif, rejilla, f.x, f.z, -1))
     .concat(farolasRotondas(islas, arboles));
   const marcas = generarMarcas(tramos, rotondas, cruces).concat(generarPasosCebra(tramos, rotondas, cruces));
   const pasos = puntosPasoCebra(tramos, rotondas, cruces).filter(p => !dentroDeOtraCasa(edif, rejilla, p.x, p.z, -1));
@@ -2150,7 +2174,7 @@ function nuevoCocheTrafico(G, rng, seg, fwd, s) {
 // Siguiente tramo al llegar a un nodo: uno cualquiera, sin volver por donde se venía (si no hay otro, se da la vuelta) y, si
 // se puede, sin meterse en una calle estrecha de sentido supuesto (el mapa no lo dice: podría ir al revés que en la realidad)
 function siguienteArista(G, nodo, desde, rng) {
-  const adj = G.nodos[nodo].adj.filter(e => !G.tramos[e.seg].puente);   // el tráfico no sube a los puentes
+  const adj = G.nodos[nodo].adj;
   const opciones = adj.filter(e => e.to !== desde && G.nodos[e.to].comp), seguras = opciones.filter(e => !G.tramos[e.seg].sentidoSupuesto);
   const lista = seguras.length ? seguras : opciones.length ? opciones : adj;
   return lista.length ? lista[Math.floor(rng() * lista.length)] : null;
@@ -3735,7 +3759,7 @@ function mallaCarreteras(tramos, esq) {
   const enOtra = construirRejillaCalzadas(tramos);
   for (let k = 0; k < tramos.length; k++) {
     const t = tramos[k];
-    if (t.puente) continue;   // los puentes se dibujan aparte, en alto (mallaPuentes)
+    if (t.puente) continue;   // los puentes se dibujan aparte, a la cota de su tablero (mallaPuentes)
     const h = t.ancho / 2;
     const tierra = /tierra|grava/.test(t.dib), adoquin = /adoqu/.test(t.dib);
     const asfalto = tierra ? [0.5, 0.42, 0.3] : adoquin ? [0.52, 0.5, 0.47] : COLOR_CALZADA(t);
@@ -3772,102 +3796,205 @@ function mallaCarreteras(tramos, esq) {
   return conSombra(grupo, false, true);
 }
 
-// Puentes: cada tramo elevado se trocea y cada trozo lleva su altura (rampa suave en los extremos). Los trozos con la misma
-// altura se dibujan juntos y el grupo se sube a esa altura
-function alturaTablero(L, s, alto) {
-  const r = Math.max(1, Math.min(RAMPA_PUENTE, L / 2));
-  const u = Math.max(0, Math.min(1, Math.min(s, L - s) / r));
-  return alto * u * u * (3 - 2 * u);
-}
-function trocearPuente(t) {
-  const cum = acumulados(t.pts), L = cum[cum.length - 1], trozos = [];
-  for (let d = 0; d < L - 0.05;) {
-    const enRampa = alturaTablero(L, d + 0.5, t.puente) < t.puente * 0.999;
-    const d1 = Math.min(L, d + (enRampa ? 0.6 : 4));
-    const p = subPolilinea(t.pts, cum, d, d1);
-    if (p.length >= 2) trozos.push({ p, dy: Math.round(alturaTablero(L, (d + d1) / 2, t.puente) * 10) / 10 });
-    d = d1;
-  }
-  return trozos;
-}
-function mallaPuentes(tramos) {
-  const grupo = new THREE.Group(), porAltura = new Map();
-  for (const t of tramos) {
-    if (!t.puente) continue;
-    for (const { p, dy } of trocearPuente(t)) {
-      if (!porAltura.has(dy)) porAltura.set(dy, []);
-      porAltura.get(dy).push({ ...t, pts: p });
-    }
-  }
-  for (const [dy, lista] of porAltura) {
-    const malla = mallaCarreteras(lista, null);
-    malla.position.y = dy;
-    grupo.add(malla);
-  }
-  return grupo;
-}
-// Datos de cada puente para el coche: su trazado, su largo, su anchura de barandilla y los dos extremos (con el sentido hacia dentro)
+// Puentes. El tablero va en recta entre las cotas del suelo de sus dos extremos (con relieve, los estribos y los terraplenes
+// ya están en el MDT, que no tiene el puente); por debajo, el suelo se hunde si asoma (sueloTerreno). Si pasa una calle por debajo
+// y el tablero no le deja ALTO_TABLERO metros de gálibo, se sube lo que falte con una rampa de RAMPA_PUENTE m en cada extremo
+// (sin relieve, todo está a cota 0 y es lo de antes: 5,5 m sobre la calle de abajo)
 function prepararPuentes(tramos) {
   const dir = (a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l]; };
-  return tramos.filter(t => t.puente && t.pts.length >= 2).map(t => {
-    const pts = t.pts, cum = acumulados(pts), n = pts.length;
-    return { pts, cum, L: cum[cum.length - 1], alto: t.puente, mitad: t.ancho / 2 + (t.acera || 0) + 0.3,
-      ini: pts[0], dIni: dir(pts[0], pts[1]), fin: pts[n - 1], dFin: dir(pts[n - 1], pts[n - 2]) };
+  const lista = [];
+  tramos.forEach((t, k) => {
+    if (!t.puente || t.pts.length < 2) return;
+    const pts = t.pts, cum = acumulados(pts), n = pts.length, mitad = t.ancho / 2 + (t.acera || 0) + 0.3;
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const [x, z] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    lista.push({ tramo: k, pts, cum, L: cum[cum.length - 1], galibo: t.puente, mitad, caja: [x0 - mitad - 2, z0 - mitad - 2, x1 + mitad + 2, z1 + mitad + 2],
+      ini: pts[0], dIni: dir(pts[0], pts[1]), fin: pts[n - 1], dFin: dir(pts[n - 1], pts[n - 2]), g0: 0, g1: 0, extra: 0 });
   });
+  return lista;
+}
+// Las cotas de cada puente, cuando ya se sabe el relieve: los extremos y lo que hay que subirlo por las calles de debajo
+function perfilarPuentes(puentes, tramos) {
+  const cruce = (a, b, c, d) => {   // parámetros (u en ab, v en cd) del cruce de dos segmentos, o null
+    const rx = b[0] - a[0], rz = b[1] - a[1], sx = d[0] - c[0], sz = d[1] - c[1], den = rx * sz - rz * sx;
+    if (Math.abs(den) < 1e-9) return null;
+    const u = ((c[0] - a[0]) * sz - (c[1] - a[1]) * sx) / den, v = ((c[0] - a[0]) * rz - (c[1] - a[1]) * rx) / den;
+    return u > 0 && u < 1 && v > 0 && v < 1 ? { u, v } : null;
+  };
+  for (const P of puentes) {
+    P.g0 = sueloEn(P.ini[0], P.ini[1]); P.g1 = sueloEn(P.fin[0], P.fin[1]); P.extra = 0;
+    for (const t of tramos) {
+      if (t.puente || t.tunel) continue;
+      let dentro = false;
+      for (const [x, z] of t.pts) if (x >= P.caja[0] - 50 && x <= P.caja[2] + 50 && z >= P.caja[1] - 50 && z <= P.caja[3] + 50) { dentro = true; break; }
+      if (!dentro) continue;
+      for (let i = 0; i + 1 < P.pts.length; i++) for (let k = 0; k + 1 < t.pts.length; k++) {
+        const c = cruce(P.pts[i], P.pts[i + 1], t.pts[k], t.pts[k + 1]);
+        if (!c) continue;
+        const sb = P.cum[i] + (P.cum[i + 1] - P.cum[i]) * c.u;
+        if (sb < 3 || sb > P.L - 3) continue;   // en un extremo se junta con la calle: no pasa por debajo
+        const x = t.pts[k][0] + (t.pts[k + 1][0] - t.pts[k][0]) * c.v, z = t.pts[k][1] + (t.pts[k + 1][1] - t.pts[k][1]) * c.v;
+        const base = P.g0 + (P.g1 - P.g0) * sb / (P.L || 1), rampa = alturaRampa(P.L, sb);
+        if (rampa > 0.05) P.extra = Math.max(P.extra, (sueloEn(x, z) + P.galibo - base) / rampa);
+      }
+    }
+    P.extra = Math.min(P.extra, P.galibo * 1.5);   // una calle muy cerca de un extremo no lo convierte en una montaña
+  }
+}
+// De 0 a 1 en los RAMPA_PUENTE metros de cada extremo, suave
+function alturaRampa(L, s) {
+  const r = Math.max(1, Math.min(RAMPA_PUENTE, L / 2)), u = Math.max(0, Math.min(1, Math.min(s, L - s) / r));
+  return u * u * (3 - 2 * u);
+}
+// Cota del tablero a s metros del principio
+function cotaTablero(P, s) {
+  const u = Math.max(0, Math.min(P.L, s));
+  return P.g0 + (P.g1 - P.g0) * u / (P.L || 1) + P.extra * alturaRampa(P.L, u);
 }
 function proyectarEnPuente(P, x, z) {
   let m = null;
   for (let i = 0; i + 1 < P.pts.length; i++) {
     const [ax, az] = P.pts[i], [bx, bz] = P.pts[i + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
     if (l2 < 1e-9) continue;
-    // u sin recortar: si el coche ya ha pasado un extremo, s sale fuera de [0, L] y actualizarPuente lo saca del tablero
     const uRaw = ((x - ax) * dx + (z - az) * dz) / l2, u = Math.max(0, Math.min(1, uRaw));
     const px = ax + dx * u, pz = az + dz * u, d = Math.hypot(x - px, z - pz);
     if (!m || d < m.d) {
       const l = Math.sqrt(l2), nx = -dz / l, nz = dx / l;
-      m = { d, lat: (x - ax) * nx + (z - az) * nz, s: P.cum[i] + l * uRaw, px, pz, nx, nz };
+      // s sin recortar en los extremos: fuera del tablero sale menor que 0 o mayor que L
+      const sR = i === 0 && uRaw < 0 ? l * uRaw : i + 2 === P.pts.length && uRaw > 1 ? P.cum[i] + l * uRaw : P.cum[i] + l * u;
+      m = { d, lat: (x - ax) * nx + (z - az) * nz, s: sR, px, pz, nx, nz, tx: dx / l, tz: dz / l };
     }
   }
   return m;
 }
-// El coche sube al tablero al entrar por un extremo, de frente y a 5 m como mucho. En el tablero no choca con lo de abajo,
-// los costados son una barandilla que lo devuelve al centro y sale por el extremo: el tablero le da la altura
-function actualizarPuente(c) {
+// Rejilla de 100 m con los puentes que tocan cada celda
+function rejillaPuentes(puentes) {
+  const C = 100, m = new Map();
+  puentes.forEach((P, i) => {
+    for (let a = Math.floor(P.caja[0] / C); a <= Math.floor(P.caja[2] / C); a++) for (let b = Math.floor(P.caja[1] / C); b <= Math.floor(P.caja[3] / C); b++) {
+      const k = a + ',' + b;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(i);
+    }
+  });
+  return m;
+}
+// Cada puente cuyo tablero queda bajo (x, z), con margen m de más a los lados: fn(P, q, i)
+function recorrerPuentes(x, z, margen, fn) {
   if (!zona || !zona.puentes || !zona.puentes.length) return;
-  if (c.puente != null) {
-    const P = zona.puentes[c.puente], q = proyectarEnPuente(P, c.x, c.z), fx = Math.sin(c.h), fz = Math.cos(c.h);
-    // sale solo si ya ha pasado un extremo y mira hacia fuera (al entrar desde fuera, s es un poco negativo y mira hacia dentro)
-    const saleIni = q && q.s < -1.5 && fx * P.dIni[0] + fz * P.dIni[1] < 0;
-    const saleFin = q && q.s > P.L + 1.5 && fx * P.dFin[0] + fz * P.dFin[1] < 0;
-    if (!q || saleIni || saleFin) { c.puente = null; c.alto = 0; return; }
-    if (Math.abs(q.lat) > P.mitad) {
-      const sg = Math.sign(q.lat);
-      c.x = q.px + q.nx * sg * P.mitad; c.z = q.pz + q.nz * sg * P.mitad;
-      c.v *= 0.9; c.sx = c.sz = 0;
-    }
-    c.alto = alturaTablero(P.L, Math.max(0, Math.min(P.L, q.s)), P.alto);
-    return;
-  }
-  const fx = Math.sin(c.h), fz = Math.cos(c.h);
-  for (let i = 0; i < zona.puentes.length; i++) {
+  const lista = zona.rejPuentes && zona.rejPuentes.get(Math.floor(x / 100) + ',' + Math.floor(z / 100));
+  if (!lista) return;
+  for (const i of lista) {
     const P = zona.puentes[i];
-    for (const extremo of [0, 1]) {
-      const a = extremo ? P.fin : P.ini, d = extremo ? P.dFin : P.dIni;
-      if (Math.hypot(c.x - a[0], c.z - a[1]) > 5 || fx * d[0] + fz * d[1] < 0.5) continue;
-      const q = proyectarEnPuente(P, c.x, c.z);
-      if (!q || Math.abs(q.lat) > P.mitad) continue;
-      c.puente = i; c.acera = false;
-      c.alto = alturaTablero(P.L, Math.max(0, Math.min(P.L, q.s)), P.alto);
-      return;
+    if (x < P.caja[0] || x > P.caja[2] || z < P.caja[1] || z > P.caja[3]) continue;
+    const q = proyectarEnPuente(P, x, z);
+    if (q && q.s >= -0.5 && q.s <= P.L + 0.5 && Math.abs(q.lat) <= P.mitad + margen) fn(P, q, i);
+  }
+}
+// El puente por el que va algo que está en (x, z) y avanza hacia (dx, dz): el tablero tiene que ir en su misma dirección
+// (una calle que pasa por debajo lo cruza). null si no va por ninguno
+function puenteDe(x, z, dx, dz) {
+  const l = Math.hypot(dx, dz);
+  if (!(l > 1e-6)) return null;
+  let r = null;
+  recorrerPuentes(x, z, 0.3, (P, q, i) => {
+    if (Math.abs((dx * q.tx + dz * q.tz) / l) < 0.8) return;
+    const y = cotaTablero(P, q.s);
+    if (!r || y > r.y) r = { P, q, i, y };
+  });
+  return r;
+}
+// Cota de la calle bajo algo que va por (x, z) hacia (dx, dz): el tablero si va por un puente; si no, el suelo
+function alturaEnCalle(x, z, dx, dz) {
+  const p = puenteDe(x, z, dx, dz);
+  return p ? p.y : sueloEn(x, z);
+}
+// Sube cada vértice de una geometría (en coordenadas de mundo) al tablero del puente P
+function alTablero(geo, P) {
+  const pos = geo.attributes.position;
+  for (let k = 0; k < pos.count; k++) {
+    const q = proyectarEnPuente(P, pos.getX(k), pos.getZ(k));
+    pos.setY(k, pos.getY(k) + cotaTablero(P, q ? q.s : 0));
+  }
+  pos.needsUpdate = true;
+  geo.computeBoundingSphere(); geo.computeBoundingBox();
+}
+// Calzada y aceras de cada puente, a la cota de su tablero, con un pretil de hormigón a cada lado y el canto del tablero
+// hacia abajo. No pasan por el relieve (ya van a su cota)
+function mallaPuentes(tramos, puentes) {
+  const grupo = new THREE.Group(), pretil = nuevaMalla(), HORMIGON = [0.66, 0.64, 0.6];
+  grupo.userData.sinRelieve = true;
+  for (const P of puentes) {
+    const malla = mallaCarreteras([{ ...tramos[P.tramo], puente: 0 }], null);
+    malla.traverse(o => { if (o.isMesh && o.geometry.attributes.position.count) alTablero(o.geometry, P); });
+    grupo.add(malla);
+    const pts = remuestrar(P.pts, 3), i0 = pretil.pos.length / 3;
+    for (const sg of [1, -1]) for (let k = 0; k + 1 < pts.length; k++) {
+      const [ax, az] = pts[k], [bx, bz] = pts[k + 1], dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz);
+      if (L < 1e-6) continue;
+      const nx = -dz / L * sg, nz = dx / L * sg, o = P.mitad;
+      const A = [ax + nx * o, az + nz * o], B = [bx + nx * o, bz + nz * o], Ai = [ax + nx * (o - 0.3), az + nz * (o - 0.3)], Bi = [bx + nx * (o - 0.3), bz + nz * (o - 0.3)];
+      const cara = (p, q, y0, y1, n) => {
+        const v = [[p[0], y0, p[1]], [q[0], y0, q[1]], [q[0], y1, q[1]], [p[0], y1, p[1]]];
+        for (const t of [[0, 1, 2], [0, 2, 3]]) for (const w of t) pretil.v(v[w][0], v[w][1], v[w][2], HORMIGON, 0, 0, n[0], n[1], n[2]);
+      };
+      cara(A, B, -1.2, 0.95, [nx, 0, nz]);                 // por fuera: del canto del tablero a lo alto del pretil
+      cara(Ai, Bi, 0.05, 0.95, [-nx, 0, -nz]);             // por dentro
+      for (const t of [[Ai, Bi, B], [Ai, B, A]]) for (const p of t) pretil.v(p[0], 0.95, p[1], HORMIGON, 0, 0, 0, 1, 0);   // y por arriba, la albardilla
     }
+    const n = pretil.pos.length / 3;
+    if (n > i0) {   // estos vértices, a la cota de su puente
+      for (let k = i0; k < n; k++) {
+        const q = proyectarEnPuente(P, pretil.pos[k * 3], pretil.pos[k * 3 + 2]);
+        pretil.pos[k * 3 + 1] += cotaTablero(P, q ? q.s : 0);
+      }
+    }
+  }
+  if (pretil.pos.length) grupo.add(conSombra(new THREE.Mesh(pretil.geo(), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })), true, true));
+  return grupo;
+}
+// La superficie bajo el coche: el suelo o el tablero de un puente. Se queda en la que está más cerca de la cota que llevaba
+// (así entra en un puente por cualquier sitio de su extremo, sale por el otro y, si pasa por debajo, sigue por el suelo). En el
+// tablero no choca con lo de abajo y los costados son un pretil que lo devuelve hacia el centro
+function actualizarPuente(c) {
+  const suelo = sueloEn(c.x, c.z), antes = c.yCalle ?? alturaEnCalle(c.x, c.z, Math.sin(c.h), Math.cos(c.h));
+  let mejor = null;
+  recorrerPuentes(c.x, c.z, 0.3, (P, q, i) => {
+    const y = cotaTablero(P, q.s);
+    if (y - antes > 1.5) return;   // un tablero que pasa por encima no se sube de un salto
+    if (Math.abs(y - antes) < Math.abs(suelo - antes) + 0.05 && (!mejor || Math.abs(y - antes) < Math.abs(mejor.y - antes))) mejor = { y, P, q, i };
+  });
+  if (!mejor) { c.puente = null; c.alto = suelo; c.yCalle = suelo; return; }
+  const { P, q } = mejor;
+  c.puente = mejor.i; c.acera = false; c.alto = mejor.y; c.yCalle = mejor.y;
+  const lim = P.mitad - 0.9;
+  if (Math.abs(q.lat) > lim && q.s > 0.5 && q.s < P.L - 0.5) {
+    const sg = Math.sign(q.lat);
+    c.x = q.px + q.nx * sg * lim; c.z = q.pz + q.nz * sg * lim;
+    if (Math.abs(c.v) > 3) { c.sacudida = Math.max(c.sacudida || 0, 0.4); c.roce = 0.3; }
+    c.v *= 0.92; c.sx = c.sz = 0;
   }
 }
 // Marcas viales: línea central, bordes y pasos de cebra (franjas blancas sobre la calzada)
+// El relieve se pone aquí: las marcas de un puente (las que van en su dirección por su tablero) van a la cota del tablero
 function mallaMarcas(marcas) {
-  const m = nuevaMalla(), BLANCO = [0.95, 0.95, 0.92];
-  for (const k of marcas) bandasH(m, k.pts, k.s0, k.s1, 0.07, BLANCO);
+  const m = nuevaMalla(), BLANCO = [0.95, 0.95, 0.92], tableros = [];
+  for (const k of marcas) {
+    const i0 = m.pos.length / 3;
+    bandasH(m, k.pts, k.s0, k.s1, 0.07, BLANCO);
+    const n = k.pts.length, a = k.pts[Math.max(0, Math.floor(n / 2) - 1)], b = k.pts[Math.min(n - 1, Math.floor(n / 2) + (n === 2 ? 0 : 1))];
+    const p = puenteDe((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, b[0] - a[0], b[1] - a[1]);
+    if (p) tableros.push([i0, m.pos.length / 3, p.P]);
+  }
+  for (let k = 0, t = 0; k < m.pos.length / 3; k++) {
+    while (t < tableros.length && k >= tableros[t][1]) t++;
+    const P = t < tableros.length && k >= tableros[t][0] ? tableros[t][2] : null, x = m.pos[k * 3], z = m.pos[k * 3 + 2];
+    m.pos[k * 3 + 1] += P ? cotaTablero(P, proyectarEnPuente(P, x, z).s) : sueloEn(x, z);
+  }
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  return new THREE.Mesh(m.geo(), mat);
+  const malla = new THREE.Mesh(m.geo(), mat);
+  malla.userData.sinRelieve = true;
+  return malla;
 }
 
 // Farolas como instancias (una llamada de dibujo por pieza): el báculo con brazo de las calles principales y el farol
@@ -3998,21 +4125,47 @@ function pistasSuelo(caja, capas) {
 }
 
 // Ortofoto (PNOA) de la zona: una malla sobre el rectángulo que cubre la imagen; cada vértice lleva su punto exacto de la foto
+// En una ruta larga la foto cubre un recuadro enorme y la rejilla de 900 × 900 se quedaba en puntos cada 15 m o más: el suelo
+// no seguía a la calzada. Con ruta, la malla va cada PASO_MALLA m en los cuadros (de 6 × 6 celdas) a menos de RADIO_RUTA + 80 m
+// de ella, y cada 6 celdas en el resto, medio metro más abajo (no se pisan donde se tocan)
 function mallaFoto(foto, pistas) {
   const { g, W, H } = foto;
   const esquinas = [[-0.5, -0.5], [W - 0.5, -0.5], [-0.5, H - 0.5], [W - 0.5, H - 0.5]]
     .map(([c, f]) => localDeMercator(g.A * c + g.B * f + g.C, g.D * c + g.E * f + g.F));
   const x0 = Math.min(...esquinas.map(e => e[0])), x1 = Math.max(...esquinas.map(e => e[0]));
   const z0 = Math.min(...esquinas.map(e => e[1])), z1 = Math.max(...esquinas.map(e => e[1]));
-  const NX = Math.min(900, Math.max(8, Math.round((x1 - x0) / PASO_MALLA))), NZ = Math.min(900, Math.max(8, Math.round((z1 - z0) / PASO_MALLA))), pos = [], uv = [], idx = [];
-  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
-    const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ;
-    const [X, Y] = mercatorDeLocal(x, z), [u, v] = uvOrtofoto(X, Y, g, W, H);
-    pos.push(x, -0.3, z); uv.push(u, v);   // bajo la calzada (+0,05 m) y las aceras, con margen para lo que queda entre vértices
-  }
-  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
-    const a = j * (NX + 1) + i, b = a + 1, c = a + NX + 1, d = c + 1;
-    idx.push(a, c, b, b, c, d);
+  const pos = [], uv = [], idx = [];
+  const rejilla = (NX, NZ, usar, y) => {   // celdas (i, j) de una rejilla NX × NZ sobre la foto; usar(i, j) dice cuáles se ponen
+    const indice = new Map(), vertice = (i, j) => {
+      const k = j * (NX + 1) + i;
+      let n = indice.get(k);
+      if (n === undefined) {
+        const x = x0 + (x1 - x0) * i / NX, z = z0 + (z1 - z0) * j / NZ, [X, Y] = mercatorDeLocal(x, z), [u, v] = uvOrtofoto(X, Y, g, W, H);
+        n = pos.length / 3; indice.set(k, n);
+        pos.push(x, y, z); uv.push(u, v);   // bajo la calzada (+0,05 m) y las aceras, con margen para lo que queda entre vértices
+      }
+      return n;
+    };
+    for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+      if (!usar(i, j)) continue;
+      const a = vertice(i, j), b = vertice(i + 1, j), c = vertice(i, j + 1), d = vertice(i + 1, j + 1);
+      idx.push(a, c, b, b, c, d);
+    }
+  };
+  if (!RUTA_LOCAL) {
+    const NX = Math.min(900, Math.max(8, Math.round((x1 - x0) / PASO_MALLA))), NZ = Math.min(900, Math.max(8, Math.round((z1 - z0) / PASO_MALLA)));
+    rejilla(NX, NZ, () => true, -0.3);
+  } else {
+    const B = 6, NX = Math.max(B, Math.ceil((x1 - x0) / PASO_MALLA / B) * B), NZ = Math.max(B, Math.ceil((z1 - z0) / PASO_MALLA / B) * B);
+    const bx = NX / B, bz = NZ / B, cerca = new Uint8Array(bx * bz), wb = (x1 - x0) / bx, hb = (z1 - z0) / bz, R = RADIO_RUTA + 80 + Math.hypot(wb, hb) / 2;
+    for (let k = 0; k + 1 < RUTA_LOCAL.length; k++) {   // los cuadros cuyo centro queda a menos de R de la ruta
+      const [ax, az] = RUTA_LOCAL[k], [cx, cz] = RUTA_LOCAL[k + 1];
+      for (let q = Math.max(0, Math.floor((Math.min(az, cz) - R - z0) / hb)); q <= Math.min(bz - 1, Math.floor((Math.max(az, cz) + R - z0) / hb)); q++)
+        for (let p = Math.max(0, Math.floor((Math.min(ax, cx) - R - x0) / wb)); p <= Math.min(bx - 1, Math.floor((Math.max(ax, cx) + R - x0) / wb)); p++)
+          if (!cerca[q * bx + p] && distSeg2(x0 + (p + 0.5) * wb, z0 + (q + 0.5) * hb, ax, az, cx, cz) < R * R) cerca[q * bx + p] = 1;
+    }
+    rejilla(NX, NZ, (i, j) => cerca[Math.floor(j / B) * bx + Math.floor(i / B)] === 1, -0.3);
+    rejilla(bx, bz, (p, q) => cerca[q * bx + p] === 0, -0.8);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -4023,6 +4176,7 @@ function mallaFoto(foto, pistas) {
   const malla = new THREE.Mesh(geo, conDetalleSuelo(new THREE.MeshLambertMaterial({ map: foto.textura, side: THREE.DoubleSide, color: new THREE.Color(0.7, 0.7, 0.7) }), pistas));
   malla.receiveShadow = sombras;
   malla.userData.normales = true;
+  malla.userData.suelo = true;   // sube con sueloTerreno: por debajo de las calles y del agua
   return malla;
 }
 // Suelo: la ortofoto donde hay; fuera de ella, el color medio de la foto (o el verde de siempre si no hay foto)
@@ -4044,15 +4198,93 @@ function alRelieveMalla(o) {
   if (!o.geometry || !o.geometry.attributes.position) return;
   o.geometry = o.geometry.clone();   // las geometrías de caché se comparten: nunca se tocan en su sitio
   const M = o.matrixWorld, Mi = new THREE.Matrix4().copy(M).invert(), pos = o.geometry.attributes.position, v = new THREE.Vector3();
+  const cota = o.userData.suelo && SUELO_TERRENO ? SUELO_TERRENO : sueloEn;   // el suelo que se ve: bajo las calles y el agua (sueloTerreno)
   for (let i = 0; i < pos.count; i++) {
     v.set(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(M);
-    v.y += sueloEn(v.x, v.z);
+    v.y += cota(v.x, v.z);
     v.applyMatrix4(Mi);
     pos.setXYZ(i, v.x, v.y, v.z);
   }
   pos.needsUpdate = true;
   if (o.userData.normales) o.geometry.computeVertexNormals();
   o.geometry.computeBoundingSphere(); o.geometry.computeBoundingBox();
+}
+// El suelo que se ve (la foto aérea y el mapa, userData.suelo) no sigue sueloEn tal cual: la calzada y el suelo no comparten
+// vértices, y entre dos puntos de cada malla el terreno quedaba a veces por encima del asfalto (sobre todo con el relieve basto
+// de una ruta larga). Bajo cada calle (y un poco a sus lados) el suelo baja 0,6 m por debajo de la calzada; bajo un puente, por
+// debajo de su tablero; y bajo el agua, por debajo de su nivel (si no, el agua plana quedaba tapada por el terreno)
+let SUELO_TERRENO = null;
+function prepararSueloTerreno(z) {
+  const tramos = z.tramos, rejSeg = z.rejSeg, nivel = rejillaNiveles((z.mundo.aguas || []).filter(a => a.capa !== 'piscina' && a.pts && a.pts.length >= 3), z.caja);
+  return (x, y) => {
+    const h0 = sueloEn(x, y);
+    let h = h0, junto = false;
+    const cx = Math.floor(x / TAM_CELDA), cz = Math.floor(y / TAM_CELDA);
+    for (let i = cx - 1; i <= cx + 1; i++) for (let j = cz - 1; j <= cz + 1; j++) {
+      const arr = rejSeg.get(i + ',' + j);
+      if (!arr) continue;
+      for (let n = 0; n < arr.length; n += 2) {
+        const t = tramos[arr[n]];
+        if (t.puente) continue;
+        const p = t.pts, k = arr[n + 1], m = t.ancho / 2 + Math.max(t.acera || 0, /con arcén/.test(t.dib) ? 1.2 : 0) + 0.8;
+        const ax = p[k][0], az = p[k][1], dx = p[k + 1][0] - ax, dz = p[k + 1][1] - az, L = dx * dx + dz * dz;
+        const u = L ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - az) * dz) / L)) : 0, ex = ax + dx * u - x, ez = az + dz * u - y, d2 = ex * ex + ez * ez;
+        if (d2 < (m + 5) * (m + 5)) junto = true;
+        if (d2 < m * m) h = Math.min(h, h0 - 0.6, sueloEn(ax + dx * u, az + dz * u) - 0.6);
+      }
+    }
+    recorrerPuentes(x, y, 1, (P, q) => { h = Math.min(h, cotaTablero(P, q.s) - 1.6); });
+    if (!junto) { const n = nivel(x, y); if (n < h + 0.45) h = n - 0.45; }
+    return h;
+  };
+}
+// El nivel del agua en cada punto de la caja, en una rejilla (de 2 m o más: unos 8 millones de celdas como mucho) rellenada
+// por filas como mascaraCapas: devuelve nivel(x, z), Infinity donde no hay agua. Mirar cada punto del suelo contra los
+// polígonos de las marismas, de miles de vértices, tardaba minutos
+function rejillaNiveles(aguas, caja) {
+  const [x0, z0, x1, z1] = caja, paso = Math.max(2, Math.sqrt((x1 - x0) * (z1 - z0) / 8e6));
+  const W = Math.max(1, Math.ceil((x1 - x0) / paso)), H = Math.max(1, Math.ceil((z1 - z0) / paso)), m = new Float32Array(W * H).fill(Infinity);
+  for (const a of aguas) {
+    const pts = a.pts, nv = nivelAgua(a);
+    let a0 = Infinity, a1 = -Infinity;
+    for (const p of pts) { a0 = Math.min(a0, p[1]); a1 = Math.max(a1, p[1]); }
+    const j0 = Math.max(0, Math.ceil((a0 - z0) / paso - 0.5)), j1 = Math.min(H - 1, Math.floor((a1 - z0) / paso - 0.5));
+    if (j1 < j0) continue;
+    const filas = Array.from({ length: j1 - j0 + 1 }, () => []);
+    for (let k = 0, l = pts.length - 1; k < pts.length; l = k++) {
+      const [xa, za] = pts[l], [xb, zb] = pts[k];
+      if (za === zb) continue;
+      const lo = Math.max(j0, Math.ceil((Math.min(za, zb) - z0) / paso - 0.5)), hi = Math.min(j1, Math.ceil((Math.max(za, zb) - z0) / paso - 0.5) - 1);
+      for (let j = lo; j <= hi; j++) { const zc = z0 + (j + 0.5) * paso; filas[j - j0].push(xa + (zc - za) * (xb - xa) / (zb - za)); }
+    }
+    filas.forEach((xs, f) => {
+      xs.sort((p, q) => p - q);
+      const fila = (j0 + f) * W;
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const i0 = Math.max(0, Math.ceil((xs[k] - x0) / paso - 0.5)), i1 = Math.min(W - 1, Math.floor((xs[k + 1] - x0) / paso - 0.5));
+        for (let i = i0; i <= i1; i++) if (nv < m[fila + i]) m[fila + i] = nv;
+      }
+    });
+  }
+  return (x, z) => {
+    const i = Math.floor((x - x0) / paso), j = Math.floor((z - z0) / paso);
+    return i < 0 || j < 0 || i >= W || j >= H ? Infinity : m[j * W + i];
+  };
+}
+// Nivel del agua de un lago, río, humedal o mar: el mar a cota 0; los demás, a la cota de su orilla (la quinta parte más baja
+// de los puntos del borde, para que un borde alto no la suba); las piscinas, sobre el suelo de su sitio
+function nivelAgua(a) {
+  if (a.nivel !== undefined) return a.nivel;
+  if (a.capa === 'mar') return (a.nivel = 0);
+  if (a.capa === 'piscina') {
+    let cx = 0, cz = 0;
+    for (const [x, z] of a.pts) { cx += x; cz += z; }
+    return (a.nivel = sueloEn(cx / a.pts.length, cz / a.pts.length));
+  }
+  const paso = Math.max(1, Math.floor(a.pts.length / 200)), cotas = [];
+  for (let k = 0; k < a.pts.length; k += paso) cotas.push(sueloEn(a.pts[k][0], a.pts[k][1]));
+  cotas.sort((p, q) => p - q);
+  return (a.nivel = cotas.length ? cotas[Math.floor((cotas.length - 1) * 0.2)] : 0);
 }
 // Recorre la zona: cada malla sube al relieve, salvo las marcadas con userData.sinRelieve (agua, plano base)
 function alRelieveZona(raiz) {
@@ -4109,6 +4341,7 @@ function construirSuelo(caja, capas, colorBase, pistas) {
   suelo.rotation.x = -Math.PI / 2;
   suelo.userData.normales = true;
   suelo.position.set((x0 + x1) / 2, -0.6, (z0 + z1) / 2);
+  suelo.userData.suelo = true;
   suelo.receiveShadow = sombras;
   return suelo;
 }
@@ -4143,8 +4376,8 @@ function mallaAguas(aguas) {
   for (const a of aguas) {
     if (a.capa === 'mar') { mar.push(a.pts); continue; }   // el mar, hecho de muchos rectángulos: en una sola malla
     const geo = mallaPoligono(a.pts, a.capa === 'piscina' ? 0.06 : 0.03);
-    if (geo) grupo.add(new THREE.Mesh(geo, materialAgua));
-    if (a.capa === 'piscina' && a.pts.length >= 3) borde.push(a.pts);
+    if (geo) { const w = new THREE.Mesh(geo, materialAgua); w.position.y = nivelAgua(a); grupo.add(w); }   // cada agua, a su nivel
+    if (a.capa === 'piscina' && a.pts.length >= 3) borde.push(a);
   }
   if (mar.length) {
     const pos = [];
@@ -4157,14 +4390,15 @@ function mallaAguas(aguas) {
   // piscinas: un borde de piedra clara de 40 cm alrededor del agua
   if (borde.length) {
     const pos = [];
-    for (const p of borde) {
+    for (const a of borde) {
+      const p = a.pts, y = 0.07 + nivelAgua(a);
       let cx = 0, cz = 0;
       for (const q of p) { cx += q[0]; cz += q[1]; }
       cx /= p.length; cz /= p.length;
       const fuera = p.map(([x, z]) => { const dx = x - cx, dz = z - cz, l = Math.hypot(dx, dz) || 1; return [x + dx / l * 0.55, z + dz / l * 0.55]; });
       for (let i = 0; i < p.length; i++) {
         const j = (i + 1) % p.length;
-        for (const q of [p[i], fuera[i], fuera[j], p[i], fuera[j], p[j]]) pos.push(q[0], 0.07, q[1]);
+        for (const q of [p[i], fuera[i], fuera[j], p[i], fuera[j], p[j]]) pos.push(q[0], y, q[1]);
       }
     }
     const g = new THREE.BufferGeometry();
@@ -5296,6 +5530,27 @@ function pixelesFoto(foto) {
   };
   return foto.px;
 }
+// Ventanas de la foto aérea, a su resolución (o a 1 m por píxel si es más fina), de unos 600 m de lado, que tocan el corredor de
+// la ruta (a RADIO_RUTA m): para buscar árboles en una ruta larga. Cada una, con lo mismo que pixelesFoto
+function ventanasFotoRuta(foto, ruta) {
+  const { g, W, H } = foto, img = foto.textura.image, nativo = Math.abs(g.A) * Math.cos(ORIGEN.lat * Math.PI / 180);
+  const S = Math.max(64, Math.round(600 / nativo)), lado = S * nativo, pasoV = Math.max(nativo, 1), w = Math.max(16, Math.round(S * nativo / pasoV));
+  const R = RADIO_RUTA + lado * 0.75, cv = document.createElement('canvas'), cg = cv.getContext('2d', { willReadFrequently: true });
+  cv.width = cv.height = w;
+  const centro = (c, f) => localDeMercator(g.C + g.A * c + g.B * f, g.F + g.D * c + g.E * f);
+  return function* () {
+    for (let f0 = 0; f0 < H; f0 += S) for (let c0 = 0; c0 < W; c0 += S) {
+      const [x, z] = centro(c0 + S / 2, f0 + S / 2);
+      let cerca = false;
+      for (let k = 0; k + 1 < ruta.length && !cerca; k++) cerca = distSeg2(x, z, ruta[k][0], ruta[k][1], ruta[k + 1][0], ruta[k + 1][1]) < R * R;
+      if (!cerca) continue;
+      cg.clearRect(0, 0, w, w);
+      cg.drawImage(img, c0, f0, S, S, 0, 0, w, w);
+      const d = cg.getImageData(0, 0, w, w).data, k = w / S;
+      yield { w, h: w, d, paso: S * nativo / w, aLocal: (c, f) => centro(c0 + (c + 0.5) / k - 0.5, f0 + (f + 0.5) / k - 0.5) };
+    }
+  };
+}
 // Color medio del tejado de cada casa en la foto aérea; si los datos no dicen si es de teja o azotea, lo dice la foto
 // (teja: rojiza y de brillo medio). Las casas simuladas no lo miran: en la foto, ahí no hay su tejado
 function tejadosDeFoto(edif, foto) {
@@ -6060,11 +6315,12 @@ function construirMallaZona() {
   matsNoche = []; fuentes = []; bloquesFarolas = [];
   mallaZona = new THREE.Group();
   const m = zona.mundo;
-  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos, zona.esq), mallaPuentes(zona.tramos), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif, zona.porches || []));
+  mallaZona.add(construirTerreno(zona.caja, m.capas, zona.foto), mallaCarreteras(zona.tramos, zona.esq), mallaPuentes(zona.tramos, zona.puentes), mallaMarcas(m.marcas), mallaEdificiosPorBloques(zona.edif, zona.porches || []));
   mallaZona.add(mallaAguas(m.aguas), mallaArboles(m.arboles), mallaFarolas(m.farolas), mallaLucesFarolas(m.farolas), mallaQuitamiedos(m.rieles), mallaIslas(m.islas),
     mallaQuioscos(m.quioscos), mallaTermometros(m.termometros), mallaVallas(m.vallas), mallaJuegos(m.juegos || []));
   if (!zona.foto && m.jardines.length) mallaZona.add(mallaJardines(m.jardines));
   mallaZona.add(mallaSolerias(zona));
+  SUELO_TERRENO = prepararSueloTerreno(zona);   // el suelo que se ve, por debajo de las calles, los puentes y el agua
   alRelieveZona(mallaZona);   // el suelo, las calles y lo que hay sobre ellas, a la altura del terreno
   scene.add(mallaZona);
   aplicarHora(horaElegida);   // ventanas, farolas y quioscos encendidos según la hora
@@ -6122,6 +6378,33 @@ function verdeDeFoto(foto) {
 }
 
 // Cotas del terreno (alturas.asc, en Web Mercator): una función (x, z) → metros, o null fuera; null si el zip no las trae
+// Rellena las celdas sin dato (nd o no numéricas) desde sus vecinas, capa a capa hacia dentro de cada hueco
+function rellenarHuecos(v, W, H, nd) {
+  const falta = new Uint8Array(W * H);
+  let cola = [];
+  for (let k = 0; k < v.length; k++) if (v[k] === nd || !isFinite(v[k])) falta[k] = 1;
+  for (let k = 0; k < v.length; k++) if (falta[k]) {
+    const c = k % W, f = (k - c) / W;
+    if ((c > 0 && !falta[k - 1]) || (c < W - 1 && !falta[k + 1]) || (f > 0 && !falta[k - W]) || (f < H - 1 && !falta[k + W])) cola.push(k);
+  }
+  while (cola.length) {
+    const sig = [], hechos = [];
+    for (const k of cola) {
+      if (!falta[k]) continue;
+      const c = k % W, f = (k - c) / W;
+      let s = 0, n = 0;
+      for (const q of [c > 0 ? k - 1 : -1, c < W - 1 ? k + 1 : -1, f > 0 ? k - W : -1, f < H - 1 ? k + W : -1]) if (q >= 0 && !falta[q]) { s += v[q]; n++; }
+      if (n) { v[k] = s / n; hechos.push(k); }
+    }
+    for (const k of hechos) falta[k] = 0;
+    for (const k of hechos) {
+      const c = k % W, f = (k - c) / W;
+      for (const q of [c > 0 ? k - 1 : -1, c < W - 1 ? k + 1 : -1, f > 0 ? k - W : -1, f < H - 1 ? k + W : -1]) if (q >= 0 && falta[q]) sig.push(q);
+    }
+    if (!hechos.length) break;
+    cola = sig;
+  }
+}
 async function leerAlturas(zip) {
   const f = zip.file('alturas.asc');
   if (!f) return null;
@@ -6133,6 +6416,7 @@ async function leerAlturas(zip) {
   const v = new Float32Array(W * H);
   let k = 0;
   for (; i < lineas.length && k < v.length; i++) for (const t of lineas[i].trim().split(/\s+/)) if (t !== '') v[k++] = +t;
+  rellenarHuecos(v, W, H, nd);   // sin dato (bloques que no llegaron): la media de lo que hay alrededor, no un escalón a cota 0
   // bilineal entre los cuatro centros de celda que rodean el punto (la malla va en celdas de unos 7 m)
   return (x, z) => {
     const [X, Y] = mercatorDeLocal(x, z), cx = (X - x0) / dx - 0.5, fy = H - 0.5 - (Y - y0) / dy;
@@ -6295,7 +6579,8 @@ async function cargarZona(archivo) {
   }
   $('estado').textContent = 'Construyendo la zona…';
   await new Promise(r => setTimeout(r, 0));
-  zona = { nombre: nombreLugar, tramos, G, puentes: prepararPuentes(tramos), edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan, simuladas,
+  const puentes = prepararPuentes(tramos);
+  zona = { nombre: nombreLugar, tramos, G, puentes, rejPuentes: rejillaPuentes(puentes), edif, rejilla, enCalzadaAjena: construirRejillaCalzadas(tramos), rejSeg: construirRejillaSegmentos(tramos), casasQuitadas: cortan, simuladas,
     datos: { zip, meta, catastro, parcelas: parcelasDatos || (parcelasGeo ? { tiles: {}, failed: [] } : null) } };
   zona.porRef = new Map();
   for (const e of edif) if (e.ref) { if (!zona.porRef.has(e.ref)) zona.porRef.set(e.ref, []); zona.porRef.get(e.ref).push(e); }
@@ -6312,7 +6597,10 @@ async function cargarZona(archivo) {
   decidirTejados(edif, zona.parcelas);   // teja o azotea: por la parcela y, si ya se miró, por la foto de fachada
   const altura = await leerAlturas(zip);
   SUELO_ZONA = altura;   // el relieve de la zona: sueloEn(x, z) lo lee al colocar cada cosa
-  zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas, pixelesFoto(foto), altura);
+  perfilarPuentes(zona.puentes, tramos);   // la cota de cada tablero, con el relieve ya puesto
+  // en una ruta, los árboles de la foto se buscan a lo largo de ella, con la foto a su resolución
+  const fino = corredor && foto ? { ventanas: ventanasFotoRuta(foto, RUTA_LOCAL), dentro: corredor } : null;
+  zona.mundo = prepararMundo(mapa, osm, tramos, edif, zona.rejilla, mulberry32(4242), zona.parcelas, pixelesFoto(foto), altura, fino);
   if (corredor) filtrarPaisaje(zona.mundo, corredor);
   ponerPilares(zona.mundo, zona.porches);
   medirAceras(tramos, edif, zona.rejilla, zona.mundo.rejVallas, zona.enCalzadaAjena);   // hasta las fachadas y las vallas
@@ -6450,7 +6738,7 @@ function franjaDeRuta(pts, r) {
 // La ruta de OSRM y su franja se guardan en este navegador y se abre el Paseo, que prepara la franja y vuelve al juego
 // con ?zona=…&ruta=1; entonces arrancarLugar() pone la ruta
 const CLAVE_RUTA = 'cochesHuelva.rutaPendiente';
-const KM_CATASTRO_INICIAL = 5;   // casas del Catastro que trae el Paseo al entrar; el resto, mientras se conduce
+const KM_CATASTRO_INICIAL = 2;   // casas del Catastro que trae el Paseo al entrar; el resto, mientras se conduce
 async function calcularRuta(origen, destino) {
   $('estado').textContent = 'Calculando la ruta (OSRM)…';
   const ruta = await pedirRutaOSRM(origen, destino);
@@ -6465,8 +6753,60 @@ async function calcularRuta(origen, destino) {
   const poligonoCatastro = primeros.length < ruta.pts.length ? franjaDeRuta(primeros, ANCHO_FRANJA) : poligono;
   try { localStorage.setItem(CLAVE_RUTA, JSON.stringify({ ruta: ruta.pts, poligono, poligonoCatastro, geo, nombre: `${origen.nombre} a ${destino.nombre}`, t: Date.now() })); }
   catch (err) { throw new Error('no se puede guardar la ruta en este navegador (' + err.message + ')'); }
-  $('estado').textContent = `Ruta de ${ruta.km.toFixed(1).replace('.', ',')} km. Abriendo el Paseo para preparar la franja (casas del Catastro, foto aérea, árboles y relieve)…`;
-  location.href = 'paseo.html?jugar=1&ruta=1';
+  $('estado').textContent = `Ruta de ${ruta.km.toFixed(1).replace('.', ',')} km. Preparando la franja (relieve, foto aérea, mapa, árboles y casas del Catastro de los primeros ${KM_CATASTRO_INICIAL} km; el resto, mientras conduces). Puedes elegir el coche mientras tanto.`;
+  prepararRutaEnMarco();
+}
+// La franja la prepara el Paseo en un marco escondido: el menú sigue a la vista con el avance y, al terminar, la zona se guarda con
+// su ruta y se abre aquí, sin salir del juego. Si el Paseo deja de dar señales 4 minutos, se da por parado
+let marcoRuta = null, ultimaSenalRuta = 0, vigiaRuta = 0;
+function ponerProgresoRuta(pct, texto) {
+  $('progresoRuta').hidden = false;
+  $('barraRutaI').style.width = Math.max(0, Math.min(100, pct)) + '%';
+  $('progresoRutaT').textContent = `${Math.round(pct)} %${texto ? ' · ' + texto : ''}`;
+  ultimaSenalRuta = performance.now();
+}
+function quitarMarcoRuta() {
+  if (marcoRuta) { marcoRuta.remove(); marcoRuta = null; }
+  clearInterval(vigiaRuta);
+  $('progresoRuta').hidden = true;
+}
+function prepararRutaEnMarco() {
+  quitarMarcoRuta();
+  const f = document.createElement('iframe');
+  f.src = 'paseo.html?jugar=1&ruta=1&embebido=1';
+  f.title = 'Preparando la ruta';
+  f.setAttribute('aria-hidden', 'true');
+  f.tabIndex = -1;
+  f.style.cssText = 'position:fixed;left:-5000px;top:0;width:480px;height:360px;border:0;opacity:0;pointer-events:none';
+  document.body.appendChild(f);
+  marcoRuta = f;
+  ponerProgresoRuta(0, 'Abriendo el Paseo…');
+  vigiaRuta = setInterval(() => {
+    if (performance.now() - ultimaSenalRuta < 240000) return;
+    quitarMarcoRuta();
+    $('estado').textContent = 'La preparación de la ruta se ha quedado parada. Vuelve a pulsar «Calcular ruta».';
+  }, 10000);
+}
+addEventListener('message', async e => {
+  const m = e.data;
+  if (!marcoRuta || e.source !== marcoRuta.contentWindow || !m || typeof m !== 'object') return;
+  if (m.tipo === 'cochesHuelva.progreso') ponerProgresoRuta(+m.pct || 0, String(m.texto || ''));
+  else if (m.tipo === 'cochesHuelva.error') { quitarMarcoRuta(); $('estado').textContent = 'No se ha podido preparar la ruta: ' + String(m.texto || 'error desconocido'); }
+  else if (m.tipo === 'cochesHuelva.lista' && m.clave) {
+    quitarMarcoRuta();
+    await guardarRutaEnZona(String(m.clave));
+    await pintarLugares();
+    await elegirLugar(String(m.clave));
+  }
+});
+$('btnCancelarRuta').addEventListener('click', () => { quitarMarcoRuta(); localStorage.removeItem(CLAVE_RUTA); $('estado').textContent = 'Ruta cancelada.'; });
+// La ruta que espera en este navegador queda guardada con su zona, para volver a jugarla desde Lugares
+async function guardarRutaEnZona(clave) {
+  try {
+    const p = JSON.parse(localStorage.getItem(CLAVE_RUTA) || 'null'), z = p && p.ruta ? await Zonas.leer(clave) : null;
+    if (z) await Zonas.guardar({ ...z, ruta: p.ruta });
+  } catch (err) { /* sin la ruta, la zona se abre entera */ }
+  try { localStorage.removeItem(CLAVE_RUTA); } catch (err) { /* nada */ }
 }
 // Una localidad: de la lista de centros o cualquiera de España, que busca Nominatim (OpenStreetMap)
 const sinAcentos = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
@@ -6759,7 +7099,7 @@ function callesCerca(R, cumple) {
 }
 // Un coche de tráfico nuevo en una calle cercana, a más de 60 m del jugador
 function colocarCoche(c) {
-  const candidatos = segmentosCerca(RADIO_TRAFICO, t => t.ancho >= 5 && !t.puente);
+  const candidatos = segmentosCerca(RADIO_TRAFICO, t => t.ancho >= 5);
   if (!candidatos.length) return;
   for (let k = 0; k < 20; k++) {
     const seg = candidatos[Math.floor(rngTrafico() * candidatos.length)];
@@ -7087,7 +7427,7 @@ function actualizarTrafico(dt) {
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), eje = new THREE.Vector3(0, 1, 0), uno = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
   const parpadeo = Math.sin(performance.now() / 1000 * 9) > 0, luz = lucesTrafico && lucesTrafico.instanceColor;
   trafico.forEach((c, n) => {
-    const gt = sueloEn(c.x, c.z);   // la cota del suelo bajo el coche
+    const gt = c.hp === undefined ? sueloEn(c.x, c.z) : alturaEnCalle(c.x, c.z, Math.sin(c.hp), Math.cos(c.hp));   // la cota de la calle bajo el coche (o del puente)
     // frena si tiene a alguien delante; tras un golpe se queda parado unos segundos
     // a más velocidad (en carretera), mira más lejos y empieza a frenar antes
     const vMax = zona.G.tramos[c.seg].velocidad / 3.6 * c.k, { dMin, jugador } = distanciaDelante(c, Math.max(20, vMax * 2.2));
@@ -7517,8 +7857,9 @@ function crearFlechas(pts, color) {
   const mA = new Float32Array(16 * n), mC = new Float32Array(16 * n);
   flechas.forEach((f, i) => {
     const r = q.setFromAxisAngle(eje, f.h);
-    m.compose(new THREE.Vector3(f.x, sueloEn(f.x, f.z) + 0.09, f.z), r, uno).toArray(mC, i * 16);
-    m.compose(new THREE.Vector3(f.x, sueloEn(f.x, f.z) + 0.095, f.z), r, uno).toArray(mA, i * 16);
+    const y = alturaEnCalle(f.x, f.z, Math.sin(f.h), Math.cos(f.h));   // en un puente, sobre el tablero
+    m.compose(new THREE.Vector3(f.x, y + 0.09, f.z), r, uno).toArray(mC, i * 16);
+    m.compose(new THREE.Vector3(f.x, y + 0.095, f.z), r, uno).toArray(mA, i * 16);
   });
   color_.count = contorno.count = 0;
   // línea fina y luminosa por el centro del camino
@@ -7526,9 +7867,27 @@ function crearFlechas(pts, color) {
   bandasH(linea, pts, -0.16, 0.16, 0.085, [1, 1, 1]);
   const matLinea = new THREE.MeshBasicMaterial({ color: new THREE.Color(...color), transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
   const mLinea = new THREE.Mesh(linea.geo(), matLinea);
-  alRelieveMalla(mLinea);   // la línea sigue el suelo entre sus puntos
+  alRelieveRuta(mLinea, pts);   // la línea sigue el suelo entre sus puntos (o el tablero de los puentes)
   for (const o of [color_, contorno, mLinea]) { o.frustumCulled = false; grupo.add(o); }
   return { grupo, pts, flechas, mA, mC, color_, contorno, matLinea, color, prog: 0 };
+}
+// Como alRelieveMalla, pero un vértice sobre un puente que la ruta recorre a lo largo va a la cota de su tablero
+function alRelieveRuta(malla, ruta) {
+  const pos = malla.geometry.attributes.position;
+  const direccion = (x, z) => {   // la dirección de la ruta en su punto más cercano a (x, z)
+    let m = Infinity, d = [1, 0];
+    for (let k = 0; k + 1 < ruta.length; k++) { const e = distSeg2(x, z, ruta[k][0], ruta[k][1], ruta[k + 1][0], ruta[k + 1][1]); if (e < m) { m = e; d = [ruta[k + 1][0] - ruta[k][0], ruta[k + 1][1] - ruta[k][1]]; } }
+    return d;
+  };
+  for (let k = 0; k < pos.count; k++) {
+    const x = pos.getX(k), z = pos.getZ(k);
+    let y = null;
+    recorrerPuentes(x, z, 0.3, () => { y = 0; });
+    if (y !== null) { const [dx, dz] = direccion(x, z); y = alturaEnCalle(x, z, dx, dz); } else y = sueloEn(x, z);
+    pos.setY(k, pos.getY(k) + y);
+  }
+  pos.needsUpdate = true;
+  malla.geometry.computeBoundingSphere();
 }
 function borrarFlechas(F) {
   if (!F) return;
@@ -7970,7 +8329,7 @@ function colocarRival(r, dt) {
     r.x = e.x - e.tz * r.off + r.ex; r.z = e.z + e.tx * r.off + r.ez;
     const hx = ad.x - ad.tz * r.off - (e.x - e.tz * r.off), hz = ad.z + ad.tx * r.off - (e.z + e.tx * r.off);
     r.h = Math.atan2(hx, hz) + r.giro;
-    r.malla.position.set(r.x, sueloEn(r.x, r.z), r.z);
+    r.malla.position.set(r.x, alturaEnCalle(r.x, r.z, Math.sin(r.h), Math.cos(r.h)), r.z);
     r.malla.rotation.y = r.h;
     r.cuerpo.rotation.z = Math.max(-0.06, Math.min(0.06, (r.v * (r.dh || 0)) * 0.006));
     r.etiqueta.visible = Math.hypot(r.x - camara.position.x, r.z - camara.position.z) < 90;
@@ -8279,7 +8638,7 @@ async function nuevaCarrera() {
     x: plan.inicio.x, z: plan.inicio.z, h: plan.inicio.h, v: 0, dir: 0, acera: false, golpe: 0, rpm: FISICA.ralenti, marcha: 1, cambio: 0, gas: 0, freno: 0, tFreno: 0,
     atrasAuto: false, sx: 0, sz: 0, wGolpe: 0, exceso: 0, derrape: 0, roce: 0, sacudida: 0, aLong: 0, aLat: 0, vPrev: 0, ultimoGolpe: 0,
     dano: { delante: 0, detras: 0, izq: 0, der: 0, total: 0 }, destrozado: false, potencia: 1, agarreDano: 1,
-    puente: null, alto: 0,
+    puente: null, alto: 0, yCalle: null,
   };
   if (carrera.modo === 'circuito') {
     Object.assign(carrera, { cps: plan.checkpoints, siguiente: 0, vueltas: 0, tVuelta: 0, tiempos: [], longitud: plan.longitud });
@@ -8795,7 +9154,9 @@ function actualizarMalla(dt) {
   cocheMesh.position.set(coche.x, suelo, coche.z);
   cocheMesh.rotation.y = coche.h;
   // la carrocería cabecea al acelerar y frenar, se inclina hacia fuera en las curvas y sigue la cuesta (delante y detrás)
-  const cuesta = (sueloEn(coche.x + hx * 2, coche.z + hz * 2) - sueloEn(coche.x - hx * 2, coche.z - hz * 2)) / 4;
+  const cuesta = coche.puente != null && zona.puentes[coche.puente]
+    ? (() => { const P = zona.puentes[coche.puente], q = proyectarEnPuente(P, coche.x, coche.z), sg = Math.sign(hx * q.tx + hz * q.tz) || 1; return (cotaTablero(P, q.s + 2 * sg) - cotaTablero(P, q.s - 2 * sg)) / 4; })()
+    : (sueloEn(coche.x + hx * 2, coche.z + hz * 2) - sueloEn(coche.x - hx * 2, coche.z - hz * 2)) / 4;
   cuerpoCoche.position.y = salto + tiemble;
   cuerpoCoche.rotation.x = Math.max(-0.05, Math.min(0.05, -coche.aLong * 0.0045)) - Math.max(-0.25, Math.min(0.25, cuesta));
   cuerpoCoche.rotation.z = Math.max(-0.07, Math.min(0.07, coche.aLat * 0.007));
@@ -9829,13 +10190,7 @@ async function guardarZipComoLugar(archivo) {
 // Al abrir: la zona que trae el Paseo (?zona=…) o la última elegida
 async function arrancarLugar() {
   const q = new URLSearchParams(location.search), pedida = q.get('zona');
-  if (pedida && q.has('ruta')) {   // la franja de una ruta, preparada en el Paseo: la ruta queda guardada con la zona para volver a jugarla
-    try {
-      const p = JSON.parse(localStorage.getItem(CLAVE_RUTA) || 'null'), z = p && p.ruta ? await Zonas.leer(pedida) : null;
-      if (z) await Zonas.guardar({ ...z, ruta: p.ruta });
-    } catch (err) { /* sin la ruta, la zona se abre entera */ }
-    localStorage.removeItem(CLAVE_RUTA);
-  }
+  if (pedida && q.has('ruta')) await guardarRutaEnZona(pedida);   // la franja de una ruta, preparada en el Paseo (abierto aparte)
   if (pedida) { lugarActual = pedida; history.replaceState(null, '', location.pathname); }
   await pintarLugares();
   await elegirLugar(lugarActual);

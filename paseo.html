@@ -974,7 +974,11 @@ const smooth=(a,b,x)=>{const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
 const fmt=(n,d=0)=>Number(n).toLocaleString('es-ES',{minimumFractionDigits:d,maximumFractionDigits:d});
 const IS_TOUCH=matchMedia('(pointer:coarse)').matches;
 const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
-const frame=()=>new Promise(r=>requestAnimationFrame(()=>r()));
+/* Dentro del juego (paseo.html?…&embebido=1, en un marco escondido): sin dibujar la escena; el avance, los avisos y el final se
+   mandan al juego. En un marco fuera de la vista el navegador puede no dar fotogramas: frame() no espera más de 50 ms */
+const EMBEBIDO=new URLSearchParams(location.search).has('embebido')&&window.parent!==window;
+const avisarJuego=m=>{try{window.parent.postMessage(m,'*');}catch(e){}};
+const frame=()=>new Promise(r=>{let hecho=false;const fin=()=>{if(!hecho){hecho=true;r();}};requestAnimationFrame(fin);setTimeout(fin,50);});
 const V3=THREE.Vector3;
 function hash2(i,j,s){let h=(Math.imul(i|0,374761393)+Math.imul(j|0,668265263)+Math.imul(s|0,982451653))|0;h=Math.imul(h^(h>>>13),1274126177);h^=h>>>16;return (h>>>0)/4294967296;}
 
@@ -3569,10 +3573,16 @@ function modeUI(){document.querySelectorAll('.seg button').forEach(b=>b.setAttri
   canvas.classList.toggle('walk',ctl.mode!=='orbita');}
 document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
 let busyOn=false;
-function busy(msg,frac){const el=$('#busy');if(!msg){el.hidden=true;busyOn=false;return;}busyOn=true;el.hidden=false;$('#toast').hidden=true;$('#busyT').textContent=msg;const bar=$('#busyBar');
+/* Avance total para el juego: cada mensaje cae en su etapa (por su texto) y el porcentaje solo sube */
+const ETAPAS_JUEGO=[[/alturas/i,2,22],[/foto aérea|teselas/i,22,45],[/OpenStreetMap|mapa/i,45,55],[/Catastro|casas|parcelas|edificios/i,55,72],[/Comprimiendo/i,92,97],[/Llevando|juego/i,97,99]];
+let avanceJuego=0;
+function avisarAvance(msg,frac){const e=ETAPAS_JUEGO.find(([r])=>r.test(msg)),a=e?e[1]:72,b=e?e[2]:91;
+  avanceJuego=Math.min(99,Math.max(avanceJuego,a+(frac==null?0:clamp(frac,0,1))*(b-a)));avisarJuego({tipo:'cochesHuelva.progreso',pct:Math.round(avanceJuego),texto:msg});}
+function busy(msg,frac){if(EMBEBIDO&&msg)avisarAvance(msg,frac);const el=$('#busy');if(!msg){el.hidden=true;busyOn=false;return;}busyOn=true;el.hidden=false;$('#toast').hidden=true;$('#busyT').textContent=msg;const bar=$('#busyBar');
   if(frac==null){bar.classList.add('indet');bar.firstElementChild.style.width='';}else{bar.classList.remove('indet');bar.firstElementChild.style.width=Math.round(clamp(frac,0,1)*100)+'%';}}
 let toastTimer=0;
-function toast(html,ms=7000){if(busyOn)return;const el=$('#toast');$('#toastT').innerHTML=html;el.hidden=false;clearTimeout(toastTimer);if(ms)toastTimer=setTimeout(()=>el.hidden=true,ms);}
+function toast(html,ms=7000){if(EMBEBIDO&&/^<p><b>No (he podido|se pudo)/.test(html)){const d=document.createElement('div');d.innerHTML=html;avisarJuego({tipo:'cochesHuelva.error',texto:d.textContent.trim().slice(0,400)});}
+  if(busyOn)return;const el=$('#toast');$('#toastT').innerHTML=html;el.hidden=false;clearTimeout(toastTimer);if(ms)toastTimer=setTimeout(()=>el.hidden=true,ms);}
 $('#toastX').addEventListener('click',()=>$('#toast').hidden=true);
 $('#toastT').addEventListener('click',e=>{if(e.target.closest('[data-act="log"]'))openLog();});
 /* Informe: qué ha llegado de cada fuente y qué ha fallado */
@@ -3790,19 +3800,19 @@ async function fetchIGN(g,cols,rows,cell,onProg){
   for(const c of order){try{const a=parseAsc(await ignGet(ignURL(c[0],g.w,g.s,g.e,g.n,8,8)),8,8);if(a.some(v=>!isNaN(v))){cov=c;break;}repLog('alt',`${c[2]} del IGN: no tiene datos en esta zona.`);}
     catch(e){err=e;repLog('alt',`${c[2]} del IGN (${hostDe(IGN_WCS)}): ${errTxt(e)}.`);}}
   if(!cov)throw new Error(err?errTxt(err):'no tiene datos de esta zona');
-  const CH=512,grid=new Float32Array(cols*rows).fill(NaN),jobs=[],dLon=g.e-g.w,dLat=g.n-g.s;
+  const CH=512,grid=new Float32Array(cols*rows).fill(NaN),falta=new Uint8Array(cols*rows),jobs=[],dLon=g.e-g.w,dLat=g.n-g.s;   // falta: celdas de bloques que no llegaron
   for(let y0=0;y0<rows;y0+=CH)for(let x0=0;x0<cols;x0+=CH)jobs.push([x0,y0,Math.min(cols,x0+CH),Math.min(rows,y0+CH)]);
   let k=0,done=0,fails=0;const errs=new Map();
   onProg(0,`Descargando las alturas del IGN (${cov[2]})…`);
   async function worker(){while(k<jobs.length){const [x0,y0,x1,y1]=jobs[k++],cw=x1-x0,ch=y1-y0;let ok=false,last=null;
     for(let a=0;a<2&&!ok;a++){try{const part=parseAsc(await ignGet(ignURL(cov[0],g.w+x0/cols*dLon,g.n-y1/rows*dLat,g.w+x1/cols*dLon,g.n-y0/rows*dLat,cw,ch)),cw,ch);
       for(let r=0;r<ch;r++)grid.set(part.subarray(r*cw,(r+1)*cw),(y0+r)*cols+x0);ok=true;}catch(e){last=e;}}
-    if(!ok){fails++;cuenta(errs,errTxt(last));}done++;onProg(done/jobs.length,`Descargando las alturas del IGN (${cov[2]}): ${done} de ${jobs.length}`);}}
+    if(!ok){fails++;cuenta(errs,errTxt(last));for(let r=y0;r<y1;r++)falta.fill(1,r*cols+x0,r*cols+x1);}done++;onProg(done/jobs.length,`Descargando las alturas del IGN (${cov[2]}): ${done} de ${jobs.length}`);}}
   await Promise.all(Array.from({length:4},worker));
   repLog('alt',`${cov[2]} del IGN (malla de ${cov[1]} m, ${hostDe(IGN_WCS)}): ${jobs.length-fails} de ${jobs.length} bloques.`);
   for(const t of agrupa(errs))repLog('alt',`Bloques que fallaron tras 2 intentos: ${t}.`);
   if(fails===jobs.length)throw new Error(`no ha dado ningún bloque (${[...errs.keys()][0]})`);
-  return {grid,cols,rows,cov,fails,total:jobs.length};
+  return {grid,cols,rows,cov,fails,total:jobs.length,falta};
 }
 async function fetchTerr(g,W,H){
   const tr=z=>{const x0=Math.floor(lon2px(g.w,z)/256),x1=Math.floor(lon2px(g.e,z)/256),y0=Math.floor(lat2px(g.n,z)/256),y1=Math.floor(lat2px(g.s,z)/256);return {x0,x1,y0,y1,n:(x1-x0+1)*(y1-y0+1)};};
@@ -3842,7 +3852,9 @@ async function fetchDEM(g,onProg){
         const q=[[grid[r0*cols+c0],(1-tc)*(1-tr)],[grid[r0*cols+c1],tc*(1-tr)],[grid[r1*cols+c0],(1-tc)*tr],[grid[r1*cols+c1],tc*tr]];
         let s=0,w=0;for(const [v,wt] of q)if(!isNaN(v)){s+=v*wt;w+=wt;}
         let v=w>0.01?s/w:NaN;
-        if(isNaN(v)){const tv=terr?terr[j*W+i]:NaN;v=isNaN(tv)?NaN:(tv>3?tv:Math.min(tv,-0.8));}   // sin dato del IGN: mar, o tierra fuera de España
+        // sin dato del IGN: mar, o tierra fuera de España (el modelo global, y lo bajo, mar). Si es que el bloque no llegó, es tierra
+        // como cualquier otra: el modelo global tal cual (antes, una marisma a 1 m quedaba a -0,8 y el coche se hundía de golpe)
+        if(isNaN(v)){const tv=terr?terr[j*W+i]:NaN,noLlego=ign.falta[r0*cols+c0]||ign.falta[r1*cols+c1];v=isNaN(tv)?NaN:(noLlego||tv>3?tv:Math.min(tv,-0.8));}
         h[j*W+i]=v;}}}
   else h=terr;
   fillHolesNaN(h,W,H);
@@ -4159,6 +4171,7 @@ async function zoneExport(opts={}){
     if(opts.jugar){
       busy('Llevando la zona al juego…',0.95);
       const clave=await guardarParaCarreras(zip,zid||slug,nm,g);busy('');loading=false;
+      if(EMBEBIDO){avisarJuego({tipo:'cochesHuelva.lista',clave});return;}   // el juego la abre él mismo
       location.href='carreras_huelva.html?zona='+encodeURIComponent(clave)+(RUTA_JUEGO?'&ruta=1':'');return;}
     if(await download(zip,`zona-${slug}.zip`))toast(`<p>Descargado <b>zona-${esc(slug)}.zip</b> (${fmtMB(zip.size)}): cotas, alturas, ortofoto, ${fmt(calles.length)} calles, ${fmt(casas.length)} casas, mapa, curvas cada ${fmt(cv.eq)} m e informe. Para volver a verla aquí, ábrelo con <b>Abrir archivo del visor</b>.</p>`,9000);
   }catch(err){busy('');console.error(err);toast(`<p><b>No he podido preparar el archivo de la zona.</b></p><p>${esc(err.message||err)}</p>`,0);}
@@ -4436,7 +4449,7 @@ function loop(now){
     const alt=ctl.pos.y-groundH(ctl.pos.x,ctl.pos.z);grass.visible=alt<Q[S.quality].grassR*2.2;U.uCam.value.copy(camera.position);
     fotoAuto(now);fotoFlush(now);
     U.uTreeR.value=Q[S.quality].nearR*1.25;scene.fog.density=fogBase*lerp(1,0.42,smooth(0,W.ext*1.1,alt));updateLabels();drawMini();if(now-hudT>120){hudT=now;updateHUD();}}
-  renderer.render(scene,camera);
+  if(!EMBEBIDO)renderer.render(scene,camera);   // dentro del juego, nadie la ve
   acc+=dt;frames++;if(acc>2){const fps=frames/acc;acc=0;frames=0;if(fps<26&&pixelRatio>0.8){slowT++;if(slowT>=2){pixelRatio=Math.max(0.75,pixelRatio*0.85);renderer.setPixelRatio(pixelRatio);resize();slowT=0;}}else slowT=0;}
 }
 resize();modeUI();applyTime();
