@@ -7509,6 +7509,9 @@ async function iniciarTrafico() {
       const im = new THREE.InstancedMesh(m.geo, m.materiales, Math.max(1, cuenta[k]));
       im.frustumCulled = false;
       trafico.forEach(c => { if (c.modelo === k) im.setColorAt(c.idx, new THREE.Color(COLORES_COCHE[Math.floor(c.color * COLORES_COCHE.length)])); });
+      // siempre con colores: los materiales se reutilizan entre carreras y three.js r128 falla si una malla sin colores usa un
+      // material que ya se preparó con ellos (pasa cuando a un modelo no le toca ningún coche)
+      if (!im.instanceColor) im.setColorAt(0, new THREE.Color(1, 1, 1));
       im.castShadow = sombras;
       scene.add(im);
       return im;
