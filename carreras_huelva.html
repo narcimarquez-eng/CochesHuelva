@@ -6474,6 +6474,7 @@ function prepararCabina(modelo) {
     cristal.material = new THREE.MeshBasicMaterial({ map: texturaEspejo() });
     modelo.updateMatrixWorld(true);
     modelo.userData.espejo = new THREE.Box3().setFromObject(cristal).getCenter(new THREE.Vector3());
+    modelo.userData.cristalEspejo = cristal;
   }
 }
 // Retrovisor: una imagen pequeña (256 × 64) que se rehace cada pocos fotogramas, solo con la cámara dentro
@@ -6491,18 +6492,20 @@ function texturaEspejo() {
 function pintarEspejo() {
   if (!cabina.espejo || ++fotogramaEspejo % (sombras ? 2 : 3)) return;   // en el móvil, uno de cada tres fotogramas
   const sombrasAuto = renderer.shadowMap.autoUpdate;
-  cuerpoCoche.updateMatrixWorld(true);
+  cocheMesh.updateMatrixWorld(true);   // el coche entero: tras saltar a la salida, sin un fotograma de retraso
   // un poco por detrás del cristal, mirando hacia atrás (la cámara mira a su -Z, que en el coche es hacia atrás)
   camaraEspejo.position.set(cabina.espejo.x, cabina.espejo.y, cabina.espejo.z - 0.03).applyMatrix4(cuerpoCoche.matrixWorld);
   cuerpoCoche.getWorldQuaternion(camaraEspejo.quaternion);
   camaraEspejo.quaternion.multiply(MIRA_ESPEJO);
   cabina.cristales.forEach(c => { c.m.opacity = 0.18; });
+  cabina.cristalEspejo.visible = false;   // su propio cristal no: usaría la imagen que se está pintando (error de la tarjeta gráfica)
   try {
     renderer.shadowMap.autoUpdate = false;
     renderer.setRenderTarget(espejoRT);
     renderer.render(scene, camaraEspejo);
   } finally {
     renderer.setRenderTarget(null);
+    cabina.cristalEspejo.visible = true;
     renderer.shadowMap.autoUpdate = sombrasAuto;
     cabina.cristales.forEach(c => { c.m.opacity = c.opacidad; });
   }
@@ -6578,7 +6581,7 @@ async function montarCoche(clave) {
   colocarLucesCoche(caja);
   if (salpicaderoCoche) salpicaderoCoche.position.y = caja.max.y * 0.665;   // la base del parabrisas, más o menos a esa altura
   const u = modelo.userData;
-  cabina = u.ojos ? { ojos: u.ojos, aro: u.aroVolante, cristales: u.cristales, reflejos: u.reflejos, cuadro: u.cuadro, espejo: u.espejo } : null;
+  cabina = u.ojos ? { ojos: u.ojos, aro: u.aroVolante, cristales: u.cristales, reflejos: u.reflejos, cuadro: u.cuadro, espejo: u.espejo, cristalEspejo: u.cristalEspejo } : null;
   Abolladuras.preparar(modelo);
   // si el modelo trae sus propias luces (materiales «ledRojo» y «led»), el juego las enciende al frenar y de noche
   lucesCoche.leds = { rojo: [], faro: [] };
@@ -9566,7 +9569,7 @@ function actualizarCamara(dt) {
   coche.sacudida *= Math.exp(-5 * dt);
   const sk = coche.sacudida * 0.35, sac = () => (Math.random() - 0.5) * sk;
   if (camaraCabina) {   // dentro de un coche con cabina: los ojos van fijos al asiento y se mueven con la carrocería
-    cuerpoCoche.updateMatrixWorld(true);
+    cocheMesh.updateMatrixWorld(true);   // el coche entero: tras saltar a la salida, sin un fotograma de retraso
     const o = cabina.ojos;
     const sc = () => sac() * 0.3;   // dentro, la sacudida de los golpes, más suave
     camara.position.set(o.x + sc(), o.y + sc(), o.z + sc()).applyMatrix4(cuerpoCoche.matrixWorld);
