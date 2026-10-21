@@ -6314,6 +6314,7 @@ function prepararModeloCoche(modelo, giro, largo = 4.2, medidas = null) {
 function cargarCoche(clave) {
   if (!cochesCargados[clave]) {
     const datos = CATALOGO_COCHES[clave];
+    if (datos.interior) soltarInteriores(clave);   // solo uno o dos coches con interior a la vez en la memoria
     cochesCargados[clave] = clave === 'basico'
       ? Promise.resolve(construirCoche(0xe74c3c))
       : new Promise((res, rej) => new THREE.GLTFLoader().load(datos.archivo,
@@ -6321,6 +6322,28 @@ function cargarCoche(clave) {
     cochesCargados[clave].catch(() => { delete cochesCargados[clave]; });   // si falla la descarga, se puede reintentar
   }
   return cochesCargados[clave];
+}
+// Los coches con interior ocupan mucho en la tarjeta gráfica (texturas y 160.000-270.000 triángulos): al cargar otro, se
+// sueltan los que no se usan. Si se acumulan, el móvil se queda sin memoria gráfica y deja de dibujarlos sin avisar
+let cocheMontado = null;
+function soltarInteriores(salvo) {
+  for (const k of Object.keys(cochesCargados)) {
+    if (k === salvo || k === cocheMontado || !CATALOGO_COCHES[k].interior) continue;
+    const promesa = cochesCargados[k];
+    delete cochesCargados[k];
+    promesa.then(m => { if (!m.parent) liberarModelo(m); }, () => {});
+  }
+}
+function liberarModelo(raiz) {
+  const fijas = [entornoCabinaTex, espejoRT && espejoRT.texture];   // compartidas por todos los coches con interior
+  raiz.traverse(o => {
+    if (!o.isMesh) return;
+    o.geometry.dispose();
+    for (const m of [].concat(o.material)) {
+      for (const v of Object.values(m)) if (v && v.isTexture && !fijas.includes(v)) v.dispose();
+      m.dispose();
+    }
+  });
 }
 // Coche con interior: a su tamaño real, en espejo (volante a la izquierda), centrado y con las ruedas en el suelo
 function prepararCocheInterior(modelo) {
@@ -6546,6 +6569,8 @@ async function montarCoche(clave) {
   try { modelo = await cargarCoche(clave); }
   catch (err) { modelo = await cargarCoche('basico'); }   // si no se puede descargar, se usa el básico
   if (modelo.parent) modelo.parent.remove(modelo);
+  cocheMontado = cochesCargados[clave] ? clave : 'basico';
+  soltarInteriores(cocheMontado);
   const caja = new THREE.Box3().setFromObject(modelo);    // suelto, su caja queda en el espacio del coche
   recortarMorro(false);   // el modelo que se quita, sin el recorte del morro (se puede volver a montar)
   cuerpoCoche.clear();
