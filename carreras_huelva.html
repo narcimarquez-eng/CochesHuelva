@@ -9580,19 +9580,22 @@ function bucle() {
 // cercano muy corto (el volante queda a medio metro de los ojos). Así la ciudad lejana no pierde precisión de profundidad.
 function dibujar() {
   if (!(coche && cabina && camaraCabina && estado !== 'podio')) { renderer.render(scene, camara); return; }
-  camara.layers.set(0);
-  renderer.render(scene, camara);
   const { near, far } = camara, fondo = scene.background, sombrasAuto = renderer.shadowMap.autoUpdate;
-  camara.layers.set(CAPA_CABINA);
-  camara.near = 0.03; camara.far = 50; camara.updateProjectionMatrix();
-  renderer.autoClear = false; renderer.shadowMap.autoUpdate = false; scene.background = null;
-  renderer.clearDepth();
-  cabina.cristales.forEach(c => { c.m.opacity = 0.18; });
-  renderer.render(scene, camara);
-  cabina.cristales.forEach(c => { c.m.opacity = c.opacidad; });
-  renderer.autoClear = true; renderer.shadowMap.autoUpdate = sombrasAuto; scene.background = fondo;
-  camara.near = near; camara.far = far; camara.updateProjectionMatrix();
-  camara.layers.set(0); camara.layers.enable(CAPA_CABINA);
+  try {
+    camara.layers.set(0);
+    renderer.render(scene, camara);
+    camara.layers.set(CAPA_CABINA);
+    camara.near = 0.03; camara.far = 50; camara.updateProjectionMatrix();
+    renderer.autoClear = false; renderer.shadowMap.autoUpdate = false; scene.background = null;
+    renderer.clearDepth();
+    cabina.cristales.forEach(c => { c.m.opacity = 0.18; });
+    renderer.render(scene, camara);
+  } finally {   // pase lo que pase en un fotograma, la cámara y el render vuelven a quedar como estaban
+    cabina.cristales.forEach(c => { c.m.opacity = c.opacidad; });
+    renderer.autoClear = true; renderer.shadowMap.autoUpdate = sombrasAuto; scene.background = fondo;
+    camara.near = near; camara.far = far; camara.updateProjectionMatrix();
+    camara.layers.set(0); camara.layers.enable(CAPA_CABINA);
+  }
 }
 
 // Carga la zona que va junto a la página; si no está (p. ej. abriendo el HTML desde el disco), pide el zip.
