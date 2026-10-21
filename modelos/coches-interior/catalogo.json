@@ -1,0 +1,86 @@
+[
+  {
+    "id": "compacto",
+    "nombre": "Compacto negro",
+    "archivo": "modelos/coches-interior/compacto.glb",
+    "autor": "por confirmar",
+    "licencia": "por confirmar",
+    "origen": "aportado por el propietario del repositorio",
+    "interior": true,
+    "espejo": true,
+    "triangulos": 161372,
+    "bytes": 3462400
+  },
+  {
+    "id": "compacto-2",
+    "nombre": "Compacto rojo",
+    "archivo": "modelos/coches-interior/compacto-2.glb",
+    "autor": "por confirmar",
+    "licencia": "por confirmar",
+    "origen": "aportado por el propietario del repositorio",
+    "interior": true,
+    "espejo": true,
+    "triangulos": 266302,
+    "bytes": 5622896
+  },
+  {
+    "id": "coupe",
+    "nombre": "Coupé gris",
+    "archivo": "modelos/coches-interior/coupe.glb",
+    "autor": "por confirmar",
+    "licencia": "por confirmar",
+    "origen": "aportado por el propietario del repositorio",
+    "interior": true,
+    "espejo": true,
+    "triangulos": 228604,
+    "bytes": 4686572
+  },
+  {
+    "id": "sedan-int",
+    "nombre": "Berlina azul",
+    "archivo": "modelos/coches-interior/sedan.glb",
+    "autor": "por confirmar",
+    "licencia": "por confirmar",
+    "origen": "aportado por el propietario del repositorio",
+    "interior": true,
+    "espejo": true,
+    "triangulos": 234313,
+    "bytes": 4396064
+  },
+  {
+    "id": "suv-int",
+    "nombre": "SUV verde",
+    "archivo": "modelos/coches-interior/suv.glb",
+    "autor": "por confirmar",
+    "licencia": "por confirmar",
+    "origen": "aportado por el propietario del repositorio",
+    "interior": true,
+    "espejo": true,
+    "triangulos": 178242,
+    "bytes": 3796704
+  },
+  {
+    "id": "suv-2",
+    "nombre": "SUV rojo",
+    "archivo": "modelos/coches-interior/suv-2.glb",
+    "autor": "por confirmar",
+    "licencia": "por confirmar",
+    "origen": "aportado por el propietario del repositorio",
+    "interior": true,
+    "espejo": true,
+    "triangulos": 166063,
+    "bytes": 3654140
+  },
+  {
+    "id": "limusina",
+    "nombre": "Limusina blanca",
+    "archivo": "modelos/coches-interior/limusina.glb",
+    "autor": "por confirmar",
+    "licencia": "por confirmar",
+    "origen": "aportado por el propietario del repositorio",
+    "interior": true,
+    "espejo": true,
+    "triangulos": 192149,
+    "bytes": 3991808
+  }
+]

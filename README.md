@@ -305,7 +305,7 @@ Todo el sonido se sintetiza en el navegador (Web Audio, sin archivos): el motor 
 
 ### Controles
 
-Teclado: flechas o WASD. `H` toca el claxon. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro. La de dentro tiene los ojos de un conductor alto (1,85 m sobre el suelo, en su asiento) y mira un poco hacia abajo: abajo se ven el capó y las aletas del coche que llevas, y el salpicadero. La carrocería se recorta por la base del parabrisas, así que el techo y los montantes no tapan la calle. `M` (o **Menú**) pausa la partida; **Continuar** vuelve a ella.
+Teclado: flechas o WASD. `H` toca el claxon. `C` (o el botón **Cámara**) cambia entre la vista de detrás del coche, la de cerca y la de dentro. La de dentro tiene los ojos de un conductor alto (1,85 m sobre el suelo, en su asiento) y mira un poco hacia abajo: abajo se ven el capó y las aletas del coche que llevas, y el salpicadero. La carrocería se recorta por la base del parabrisas, así que el techo y los montantes no tapan la calle. En los coches con interior, en cambio, se ve su cabina entera desde el asiento del conductor. `M` (o **Menú**) pausa la partida; **Continuar** vuelve a ella.
 
 **Mando** (Bluetooth o de cable: Xbox, PlayStation o cualquiera que el navegador reconozca, en el móvil y en el ordenador). Se conecta al teléfono u ordenador como siempre y el juego lo ve en cuanto se pulsa uno de sus botones (los navegadores no lo enseñan antes); sale el aviso «Mando conectado». Con él, la ruleta y los pedales de la pantalla se esconden (vuelven al tocar la pantalla).
 
@@ -340,7 +340,16 @@ Activa GitHub Pages en Settings → Pages, eligiendo la rama del juego y la carp
 
 ## Coches
 
-En la pantalla de inicio se elige el coche: el básico, el **SUV compacto**, uno de la galería, CarConcept o ToyCar.
+En la pantalla de inicio se elige el coche en una fila de tarjetas con su miniatura; encima se ve una vista previa grande del elegido. Hay el básico, siete coches con interior, el **SUV compacto**, uno de la galería, CarConcept o ToyCar. Las miniaturas están en `modelos/coches/miniaturas/` y se hicieron con el propio motor del juego.
+
+### Coches con interior
+
+Siete coches traen cabina completa (salpicadero con cuadro y pantalla, volante, asientos, pedales, retrovisor): Compacto negro, Compacto rojo, Coupé gris, Berlina azul, SUV verde, SUV rojo y Limusina blanca. Están en `modelos/coches-interior/`, con sus datos en `catalogo.json`.
+
+- Van a su tamaño real (de 4,8 a 6,3 m), no a 4,2 m como los demás, para que la cabina tenga sus medidas. El choque sigue siendo el mismo para todos.
+- Vienen con el volante a la derecha. El juego los refleja en espejo para que se conduzcan a la izquierda, como en España, y da la vuelta a las texturas del cuadro, la pantalla y la matrícula para que los textos se lean bien.
+- Con la cámara de dentro se ve la cabina del modelo, sin recortar la carrocería ni poner el salpicadero simple: los ojos van en el asiento del conductor, la vista se mueve con la carrocería y el volante gira con la dirección. La cabina se dibuja en una segunda pasada con el plano cercano muy corto, para que el volante no se corte y la ciudad lejana no pierda precisión. Desde dentro, los cristales tintados se aclaran para ver bien la calle.
+- Pesan de 3 a 6 MB y tienen de 160.000 a 270.000 triángulos, así que solo se usan para el coche del jugador, no en el tráfico. Se descargan al elegirlos.
 
 El básico es un turismo a escala real (4,5 m de largo, 1,8 m de ancho, 1,46 m de alto y ejes a 2,7 m) hecho en el propio juego, sin archivo de modelo. La carrocería es una superficie suave que se construye con anillos transversales a lo largo del coche, así que el techo, la cintura y los hombros salen redondeados. La pintura es metálica con barniz, con reflejos de un entorno que se genera en el juego; los cristales son oscuros y brillantes, una moldura negra recorre la cintura y líneas oscuras marcan puertas, capó y maletero. Las texturas `texturas/coche-*.jpg` (pintura, rejilla, neumáticos, llantas y matrícula) se generaron con un script de Python (Pillow) para este proyecto.
 

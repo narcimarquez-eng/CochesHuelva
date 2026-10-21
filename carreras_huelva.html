@@ -89,7 +89,6 @@
   #pantalla > *{flex-shrink:0}   /* con mucho texto, el menú se desplaza en vez de montar unas líneas sobre otras */
   #faltan{max-width:640px;font-size:13px;line-height:1.4;color:#cfe3ff;background:rgba(30,60,110,.45);border:1px solid rgba(140,180,255,.35);border-radius:10px;padding:6px 10px}
   #faltan button{margin-left:6px;padding:4px 10px;font-size:13px}
-  #coches{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;max-width:620px}
   .opcion{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center}
   .opcion>span{font-size:13px;opacity:.75;min-width:44px;text-align:right}
   .selector{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
@@ -136,8 +135,16 @@
   #podioPanel p{margin:0;font-size:12px;opacity:.8}
   body.podio #hud,body.podio #controles,body.podio #carrera,body.podio #aviso{display:none}
   #posicion{display:inline-block;background:var(--ambar);color:#1b1b1b;font-weight:900;border-radius:6px;padding:0 6px;margin-right:4px}
-  #coches button{font-size:15px;padding:8px 14px;background:#4a5a6a;color:#fff}
-  #coches button.activo{background:var(--ambar);color:#1b1b1b}
+  #coches{display:flex;gap:8px;overflow-x:auto;max-width:min(680px,calc(100vw - 24px));padding:2px 2px 8px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+  #coches button{flex:0 0 auto;width:118px;padding:4px 4px 6px;font-size:13px;line-height:1.2;background:#4a5a6a;color:#fff;border:2px solid transparent;scroll-snap-align:center}
+  #coches button img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;margin-bottom:4px;background:#3a4756}
+  #coches button.activo{background:var(--ambar);color:#1b1b1b;border-color:#fff}
+  #coches .etiqueta{display:block;font-size:10px;font-weight:700;letter-spacing:.4px;opacity:.8;margin-top:1px}
+  #vistaPrevia{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;max-width:680px}
+  #vistaPrevia figure{margin:0;width:min(320px,44vw);font-size:12px;opacity:.9}
+  #vistaPrevia img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:10px;border:1px solid var(--borde);margin-bottom:3px}
+  #vistaPrevia figure.cabina img{aspect-ratio:16/9}
+  @media (max-height:520px){#vistaPrevia figure{width:min(200px,36vw)}#coches button{width:100px;font-size:12px}}
   @media (max-height:520px){#ruleta{width:204px;height:78px}#ruletaGiro{width:62px;height:62px;margin:-31px 0 0 -31px}.pedal{width:74px;height:94px}#btnFreno{height:80px}#btnSentido{width:54px;height:54px}#vel{font-size:36px}}
 </style>
 </head>
@@ -226,6 +233,7 @@
   <div class="opcion"><span>Casas</span><div class="selector" id="fichas">
     <button data-ficha="no">Sin ficha</button><button data-ficha="si">🏠 Al tocar una casa, su plano y su foto del Catastro</button>
   </div></div>
+  <div id="vistaPrevia"></div>
   <div id="coches"></div>
   <div id="botonesMenu"><button id="btnSeguir" style="display:none">Continuar</button><button id="btnNueva" disabled>Nueva partida</button></div>
   <p class="teclas" style="font-size:13px;opacity:.75">Teclas: flechas o WASD. Parado, mantén ↓ para ir marcha atrás y ↑ para volver adelante (o R). H toca el claxon, C cambia de cámara, F pone o quita la pantalla completa, N quita el sonido y M abre el menú.<br>Mando: gatillo derecho o A acelera, gatillo izquierdo o X frena (y marcha atrás), stick izquierdo o cruceta para girar, B claxon, Y cámara, LB marcha, Start menú. En el menú, cruceta y A.</p>
@@ -3209,9 +3217,12 @@ function iniciarRender() {
   scene.background = new THREE.Color(COLOR_HORIZONTE);
   scene.fog = new THREE.Fog(COLOR_HORIZONTE, 700, 3200);
   camara = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 4000);
+  camara.layers.enable(CAPA_CABINA);   // fuera, los coches con cabina se ven como los demás
   hemi = new THREE.HemisphereLight(0xe4f0ff, 0x5b5847, 0.82);
+  hemi.layers.enable(CAPA_CABINA);
   scene.add(hemi);
   sol = new THREE.DirectionalLight(0xfff1dc, 0.82);
+  sol.layers.enable(CAPA_CABINA);
   sol.position.set(300, 500, 200);
   if (sombras) {
     // sombras solo alrededor del coche: la cámara de la luz lo sigue
@@ -6252,14 +6263,32 @@ const GALERIA = [
   { id: 'policia', nombre: 'Patrulla', archivo: 'modelos/coches/policia.glb' },
   { id: 'furgoneta', nombre: 'Furgoneta', archivo: 'modelos/coches/furgoneta.glb' },
 ];
+// Coches con interior (salpicadero, volante, asientos): a tamaño real y, dentro, se ve su cabina de verdad.
+// Vienen con el volante a la derecha, así que se reflejan en espejo para conducir a la izquierda, como en España.
+// Pesan 3-6 MB y 160.000-270.000 triángulos: solo se usan para el coche del jugador, no en el tráfico.
+const GALERIA_INTERIOR = [
+  { id: 'compacto', nombre: 'Compacto negro', archivo: 'modelos/coches-interior/compacto.glb' },
+  { id: 'compacto-2', nombre: 'Compacto rojo', archivo: 'modelos/coches-interior/compacto-2.glb' },
+  { id: 'coupe', nombre: 'Coupé gris', archivo: 'modelos/coches-interior/coupe.glb' },
+  { id: 'sedan-int', nombre: 'Berlina azul', archivo: 'modelos/coches-interior/sedan.glb' },
+  { id: 'suv-int', nombre: 'SUV verde', archivo: 'modelos/coches-interior/suv.glb' },
+  { id: 'suv-2', nombre: 'SUV rojo', archivo: 'modelos/coches-interior/suv-2.glb' },
+  { id: 'limusina', nombre: 'Limusina blanca', archivo: 'modelos/coches-interior/limusina.glb' },
+];
 const CATALOGO_COCHES = Object.fromEntries([
   ['basico', { nombre: 'Coche básico' }],
+  ...GALERIA_INTERIOR.map(g => [g.id, { nombre: g.nombre, archivo: g.archivo, giro: 0, interior: true }]),
   ...GALERIA.map(g => [g.id, { nombre: g.nombre, archivo: g.archivo, giro: 0 }]),
   ['concept', { nombre: 'CarConcept', archivo: 'modelos/carconcept.glb', giro: 0 }],   // su frontal ya mira a +Z, hacia donde avanza el juego
   ['toy', { nombre: 'ToyCar', archivo: 'modelos/toycar.glb', giro: 0 }],
 ]);
+// Miniatura de cada coche para el menú y, en los que tienen interior, la vista desde el asiento
+const miniaturaCoche = clave => `modelos/coches/miniaturas/${clave}.jpg`;
+const vistaCabina = clave => `modelos/coches/miniaturas/${clave}-cabina.jpg`;
 let cocheElegido = 'basico';
 const cochesCargados = {};
+const GIRO_VOLANTE_CABINA = 140 * Math.PI / 180;   // giro del volante de la cabina con la dirección a tope
+const CAPA_CABINA = 1;   // capa de render de los coches con interior: se dibujan aparte para verlos de cerca sin cortes
 // Escala, gira y apoya el modelo: 4,2 m de largo, centrado en el coche y con las ruedas sobre el suelo
 // Anchura y altura (m) de cada modelo de turismo a 4,2 m de largo, como un coche real. Si el modelo es más ancho o más alto,
 // se estrecha o se baja (nunca se agranda): así no quedan cajas anchas y altas
@@ -6284,13 +6313,106 @@ function prepararModeloCoche(modelo, giro, largo = 4.2, medidas = null) {
 }
 function cargarCoche(clave) {
   if (!cochesCargados[clave]) {
+    const datos = CATALOGO_COCHES[clave];
     cochesCargados[clave] = clave === 'basico'
       ? Promise.resolve(construirCoche(0xe74c3c))
-      : new Promise((res, rej) => new THREE.GLTFLoader().load(CATALOGO_COCHES[clave].archivo,
-          g => res(prepararModeloCoche(g.scene, CATALOGO_COCHES[clave].giro, 4.2, MEDIDAS_COCHE[CATALOGO_COCHES[clave].archivo])), undefined, rej));
+      : new Promise((res, rej) => new THREE.GLTFLoader().load(datos.archivo,
+          g => res(datos.interior ? prepararCocheInterior(g.scene) : prepararModeloCoche(g.scene, datos.giro, 4.2, MEDIDAS_COCHE[datos.archivo])), undefined, rej));
+    cochesCargados[clave].catch(() => { delete cochesCargados[clave]; });   // si falla la descarga, se puede reintentar
   }
   return cochesCargados[clave];
 }
+// Coche con interior: a su tamaño real, en espejo (volante a la izquierda), centrado y con las ruedas en el suelo
+function prepararCocheInterior(modelo) {
+  modelo.scale.x = -1;
+  modelo.updateMatrixWorld(true);
+  const caja = new THREE.Box3().setFromObject(modelo), c = caja.getCenter(new THREE.Vector3());
+  modelo.position.set(-c.x, -caja.min.y, -c.z);
+  prepararCabina(modelo);
+  return modelo;
+}
+// Cabina: quita las luces que trae el modelo, da la vuelta a los textos, separa el aro del volante para girarlo,
+// aclara los cristales vistos desde dentro y calcula dónde van los ojos del conductor
+function prepararCabina(modelo) {
+  const luces = [];
+  modelo.traverse(o => { if (o.isLight) luces.push(o); });
+  luces.forEach(l => l.parent.remove(l));
+  modelo.updateMatrixWorld(true);
+  const volante = modelo.getObjectByName('SteeringWheel');
+  const centro = new THREE.Box3().setFromObject(volante || modelo).getCenter(new THREE.Vector3());
+  if (volante) {   // el aro, los radios y el centro giran alrededor del centro del aro; la columna y las palancas, no
+    const piezaAro = volante.children.find(h => /_rim$/.test(h.name));
+    const eje = volante.worldToLocal(new THREE.Box3().setFromObject(piezaAro || volante).getCenter(new THREE.Vector3()));
+    eje.z = 0;   // el volante gira sobre el eje Z de su nodo, que es el de la columna
+    const aro = new THREE.Group();
+    aro.position.copy(eje);
+    volante.children.filter(h => !/column|stalks/.test(h.name)).forEach(h => { h.position.sub(eje); aro.add(h); });
+    volante.add(aro);
+    modelo.userData.aroVolante = aro;
+  }
+  // los ojos: un poco por delante del reposacabezas del conductor y unos 30 cm por encima del centro del volante
+  const ojos = new THREE.Vector3(centro.x, centro.y + 0.32, centro.z - 0.55);
+  let cabezal = null, dx = Infinity;
+  modelo.traverse(o => {
+    if (o.name !== 'part_seat_front_headrest') return;
+    const c = new THREE.Box3().setFromObject(o);
+    const d = Math.abs(c.getCenter(new THREE.Vector3()).x - centro.x);
+    if (d < dx) { dx = d; cabezal = c; }
+  });
+  if (cabezal) ojos.z = Math.max(cabezal.max.z + 0.05, centro.z - 0.6);
+  modelo.userData.ojos = ojos;
+  // con el espejo, los textos del cuadro, la pantalla y la matrícula salen al revés: se les da la vuelta a sus texturas
+  modelo.traverse(o => {
+    if (!/^part_dash_\w+_(cluster|center)$|^part_license_plate_face$/.test(o.name)) return;
+    o.traverse(m => {
+      if (!m.isMesh || !m.geometry.attributes.uv) return;
+      m.geometry = m.geometry.clone();
+      // vienen comprimidas en enteros (gltfpack): se pasan a 0-1, como las lee la tarjeta gráfica
+      const U = m.geometry.attributes.uv, a = U.array;
+      const k = !U.normalized ? 1 : a instanceof Uint8Array ? 255 : a instanceof Uint16Array ? 65535 : a instanceof Int8Array ? 127 : a instanceof Int16Array ? 32767 : 1;
+      const us = [];
+      for (let i = 0; i < U.count; i++) us.push(U.getX(i) / k);
+      const suma = Math.min(...us) + Math.max(...us), uv = [];
+      for (let i = 0; i < U.count; i++) uv.push(suma - us[i], U.getY(i) / k);
+      m.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    });
+  });
+  // los cristales vienen tintados (50-70 % opacos): desde dentro se aclaran para ver bien la calle
+  const cristales = new Set();
+  modelo.traverse(o => {
+    if (/^(Windshield|SideWin_\w+|RearWindow|PanoramicRoof)$/.test(o.name)) o.traverse(m => { if (m.isMesh && m.material.transparent && !m.material.map) cristales.add(m.material); });
+  });
+  modelo.userData.cristales = [...cristales].map(m => ({ m, opacidad: m.opacity }));
+  // reflejos de cielo y suelo: sin ellos, el salpicadero oscuro y la pintura metálica se ven negros
+  const entorno = entornoCabina(), metales = new Set();
+  modelo.traverse(o => {
+    if (!o.isMesh) return;
+    o.layers.set(CAPA_CABINA);
+    o.frustumCulled = false;
+    for (const m of [].concat(o.material)) if (m.isMeshStandardMaterial) { m.envMap = entorno; m.envMapIntensity = 1; m.needsUpdate = true; metales.add(m); }
+  });
+  modelo.userData.reflejos = [...metales];
+}
+let entornoCabinaTex = null;
+function entornoCabina() {
+  if (entornoCabinaTex) return entornoCabinaTex;
+  // una esfera con un degradado por vértices (un material normal: el generador de reflejos de esta versión lo necesita así)
+  const geo = new THREE.SphereGeometry(10, 32, 16), P = geo.attributes.position, col = [];
+  const cielo1 = new THREE.Color(0.85, 0.9, 0.95), cielo2 = new THREE.Color(0.45, 0.62, 0.85), suelo1 = new THREE.Color(0.55, 0.53, 0.5), suelo2 = new THREE.Color(0.3, 0.29, 0.27);
+  for (let i = 0; i < P.count; i++) {
+    const h = P.getY(i) / 10, c = h > 0 ? cielo1.clone().lerp(cielo2, h) : suelo1.clone().lerp(suelo2, -h);
+    col.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const esc = new THREE.Scene();
+  esc.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  const pm = new THREE.PMREMGenerator(renderer);
+  entornoCabinaTex = pm.fromScene(esc, 0.02).texture;
+  pm.dispose();
+  return entornoCabinaTex;
+}
+let cabina = null;   // datos de la cabina del coche montado (null si no tiene interior)
+let camaraCabina = false;   // la cámara está en el asiento de un coche con cabina (se dibuja en dos pasadas)
 async function montarCoche(clave) {
   let modelo;
   try { modelo = await cargarCoche(clave); }
@@ -6302,6 +6424,8 @@ async function montarCoche(clave) {
   cuerpoCoche.add(conSombra(modelo, true, false), lucesCoche.grupo);
   colocarLucesCoche(caja);
   if (salpicaderoCoche) salpicaderoCoche.position.y = caja.max.y * 0.665;   // la base del parabrisas, más o menos a esa altura
+  const u = modelo.userData;
+  cabina = u.ojos ? { ojos: u.ojos, aro: u.aroVolante, cristales: u.cristales, reflejos: u.reflejos } : null;
   Abolladuras.preparar(modelo);
   // si el modelo trae sus propias luces (materiales «ledRojo» y «led»), el juego las enciende al frenar y de noche
   lucesCoche.leds = { rojo: [], faro: [] };
@@ -8733,22 +8857,33 @@ function siguienteDestino(rng = Math.random) {
   Ruta.poner(r ? r.pts : (D.camino.length ? polilinea(zona.G, D.camino) : RUTA_LOCAL), D.nodo);
 }
 $('btnNueva').addEventListener('click', nuevaCarrera);
-// Botones para elegir coche, uno por cada entrada del catálogo
+// Tarjetas para elegir coche, una por cada entrada del catálogo, con su miniatura; encima, la vista previa del elegido
+function pintarVistaPrevia() {
+  const datos = CATALOGO_COCHES[cocheElegido];
+  const figura = (src, texto, clase = '') => `<figure class="${clase}"><img src="${src}" alt="">${texto}</figure>`;
+  $('vistaPrevia').innerHTML = figura(miniaturaCoche(cocheElegido), datos.nombre)
+    + (datos.interior ? figura(vistaCabina(cocheElegido), 'Así se ve desde el asiento (cámara «dentro»)', 'cabina') : '');
+}
 function pintarSelectorCoches() {
   const cont = $('coches');
   cont.innerHTML = '';
   for (const [clave, datos] of Object.entries(CATALOGO_COCHES)) {
     const b = document.createElement('button');
     b.dataset.coche = clave;
-    b.textContent = datos.nombre;
+    const img = document.createElement('img');
+    img.src = miniaturaCoche(clave); img.alt = ''; img.loading = 'lazy';
+    b.append(img, datos.nombre);
+    if (datos.interior) { const e = document.createElement('span'); e.className = 'etiqueta'; e.textContent = 'CON INTERIOR'; b.appendChild(e); }
     b.classList.toggle('activo', clave === cocheElegido);
     b.addEventListener('click', () => {
       cocheElegido = clave;
       cont.querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b));
+      pintarVistaPrevia();
       cargarCoche(cocheElegido).catch(() => {});   // empieza a descargarlo ya
     });
     cont.appendChild(b);
   }
+  pintarVistaPrevia();
 }
 pintarSelectorCoches();
 // Modo de juego y hora del día: se recuerdan para la próxima vez
@@ -9181,6 +9316,7 @@ function efectosConduccion(c, dt) {
 // Dentro del coche, si hay una pared a menos de 2,5 m de frente, se ve el coche desde fuera: si no, la pared llena la pantalla y queda en blanco
 function modoVisto() {
   if (modoCamara !== 2) return modoCamara;
+  if (cabina) return 2;   // con cabina de verdad, la pared se ve por el parabrisas
   return obstaculo(coche.x + Math.sin(coche.h) * 2.5, coche.z + Math.cos(coche.h) * 2.5, 1.2) ? 1 : 2;
 }
 function actualizarMalla(dt) {
@@ -9200,8 +9336,13 @@ function actualizarMalla(dt) {
   // dentro del coche, de la carrocería solo queda lo que está por delante del parabrisas: el capó y las aletas, abajo en la pantalla
   const dentro = modoVisto() === 2;
   sombraCoche.visible = lucesCoche.grupo.visible = !dentro;
-  salpicaderoCoche.visible = dentro;   // los pilotos y destellos de los faros, desde dentro, sobran (el haz sigue)
-  recortarMorro(dentro, hx, hz);
+  salpicaderoCoche.visible = dentro && !cabina;   // los pilotos y destellos de los faros, desde dentro, sobran (el haz sigue)
+  recortarMorro(dentro && !cabina, hx, hz);   // un coche con cabina se ve entero: su salpicadero ya tapa el morro
+  if (cabina) {
+    if (cabina.aro) cabina.aro.rotation.z = coche.dir * GIRO_VOLANTE_CABINA;   // el volante gira con la dirección
+    const luz = hemi.intensity / 0.82;   // de noche, los reflejos se apagan con el cielo
+    if (cabina.luz !== luz) { cabina.luz = luz; for (const m of cabina.reflejos) m.envMapIntensity = luz; }
+  }
   // luces: con la trasera o el morro muy tocados, se rompen (primero una y luego las dos)
   const d = coche.dano, rotasAtras = d.detras > 85 ? 2 : d.detras > 55 ? 1 : 0, rotasDelante = d.delante > 85 ? 2 : d.delante > 55 ? 1 : 0;
   const frena = coche.freno > 0.2 || (coche.marcha === 0 && coche.atrasAuto && (controles.acel || mando.gas > 0.1)), atras = coche.marcha === 0;
@@ -9237,23 +9378,34 @@ function recortarMorro(si, hx, hz) {
 }
 // --- cámaras: detrás, cerca y dentro del coche (la tecla C o el botón Cámara pasan de una a otra) ---
 const NOMBRES_CAMARA = ['detrás del coche', 'cerca del coche', 'dentro del coche'];
+// la cámara mira a -Z y el coche avanza hacia +Z: media vuelta y la vista un poco hacia abajo, a la carretera
+const MIRA_ADELANTE = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.13, Math.PI, 0, 'YXZ'));
 function cambiarCamara() {
   modoCamara = (modoCamara + 1) % 3;
-  document.body.classList.toggle('dentro', modoCamara === 2);
+  document.body.classList.toggle('dentro', modoCamara === 2 && !cabina);
   mostrarAviso('Cámara ' + NOMBRES_CAMARA[modoCamara], 1.2);
 }
 function actualizarCamara(dt) {
   const fx = Math.sin(coche.h), fz = Math.cos(coche.h), izq = [fz, -fx];   // en España el conductor va a la izquierda
   const modo = modoVisto(), g = coche.puente != null ? 0.05 + coche.alto : sueloEn(coche.x, coche.z);   // la cámara va sobre el suelo del coche (o el tablero)
-  document.body.classList.toggle('dentro', modo === 2);
+  document.body.classList.toggle('dentro', modo === 2 && !cabina);   // el salpicadero dibujado, solo si el coche no trae el suyo
+  camaraCabina = modo === 2 && !!cabina;
   // más ángulo de visión a más velocidad: da sensación de rapidez
   const rapido = Math.min(1, Math.abs(coche.v) / 50);
-  const fov = [60, 68, 74][modo] + rapido * [12, 9, 6][modo];
+  const fov = (camaraCabina ? 66 : [60, 68, 74][modo]) + rapido * [12, 9, 6][modo];
   if (Math.abs(camara.fov - fov) > 0.05) { camara.fov += (fov - camara.fov) * Math.min(1, dt * 4); camara.updateProjectionMatrix(); }
   const salto = coche.golpe > 0 ? Math.sin(coche.golpe / 0.5 * Math.PI) * 0.22 : 0;      // bote al subir al bordillo
   const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
   coche.sacudida *= Math.exp(-5 * dt);
   const sk = coche.sacudida * 0.35, sac = () => (Math.random() - 0.5) * sk;
+  if (camaraCabina) {   // dentro de un coche con cabina: los ojos van fijos al asiento y se mueven con la carrocería
+    cuerpoCoche.updateMatrixWorld(true);
+    const o = cabina.ojos;
+    camara.position.set(o.x + sac(), o.y + sac(), o.z + sac()).applyMatrix4(cuerpoCoche.matrixWorld);
+    cuerpoCoche.getWorldQuaternion(camara.quaternion);
+    camara.quaternion.multiply(MIRA_ADELANTE);
+    return;
+  }
   if (modo === 2) {   // dentro: los ojos de un conductor alto, a la izquierda del eje y en su asiento, mirando un poco hacia abajo: el capó, a la vista
     camara.position.set(coche.x - fx * 0.45 + izq[0] * 0.36 + sac(), g + 1.85 + salto + tiemble + sac(), coche.z - fz * 0.45 + izq[1] * 0.36 + sac());
     camara.lookAt(coche.x + fx * 40, g - 0.3 + coche.aLong * 0.02, coche.z + fz * 40);
@@ -9422,7 +9574,25 @@ function bucle() {
   Restos.actualizar(dt);
   cielo.position.copy(camara.position);
   if (estado === 'menu' && guardandoZona) return;   // mientras se rehace el zip de la zona, el fondo del menú no se pinta (el móvil va más desahogado)
+  dibujar();
+}
+// Dentro de un coche con cabina se dibuja en dos pasadas: primero la ciudad y luego, sobre ella, la cabina con un plano
+// cercano muy corto (el volante queda a medio metro de los ojos). Así la ciudad lejana no pierde precisión de profundidad.
+function dibujar() {
+  if (!(coche && cabina && camaraCabina && estado !== 'podio')) { renderer.render(scene, camara); return; }
+  camara.layers.set(0);
   renderer.render(scene, camara);
+  const { near, far } = camara, fondo = scene.background, sombrasAuto = renderer.shadowMap.autoUpdate;
+  camara.layers.set(CAPA_CABINA);
+  camara.near = 0.03; camara.far = 50; camara.updateProjectionMatrix();
+  renderer.autoClear = false; renderer.shadowMap.autoUpdate = false; scene.background = null;
+  renderer.clearDepth();
+  cabina.cristales.forEach(c => { c.m.opacity = 0.18; });
+  renderer.render(scene, camara);
+  cabina.cristales.forEach(c => { c.m.opacity = c.opacidad; });
+  renderer.autoClear = true; renderer.shadowMap.autoUpdate = sombrasAuto; scene.background = fondo;
+  camara.near = near; camara.far = far; camara.updateProjectionMatrix();
+  camara.layers.set(0); camara.layers.enable(CAPA_CABINA);
 }
 
 // Carga la zona que va junto a la página; si no está (p. ej. abriendo el HTML desde el disco), pide el zip.
