@@ -6350,9 +6350,11 @@ function prepararCabina(modelo) {
     volante.add(aro);
     modelo.userData.aroVolante = aro;
   }
-  // los ojos: unos 40 cm detrás del centro del volante y 33 cm por encima, como un conductor con los brazos algo
-  // doblados al volante (sin meterse en el reposacabezas)
-  const ojos = new THREE.Vector3(centro.x, centro.y + 0.33, centro.z - 0.42);
+  // los ojos: unos 30 cm detrás del centro del volante y 35 cm por encima: cerca del parabrisas y por encima del
+  // volante, para ver bien la carretera (sin meterse en el reposacabezas)
+  const ojos = new THREE.Vector3(centro.x, centro.y + 0.35, centro.z - 0.3);
+  const parabrisas = modelo.getObjectByName('Windshield');   // en los coches de techo bajo, los ojos por debajo del borde de arriba
+  if (parabrisas) ojos.y = Math.min(ojos.y, new THREE.Box3().setFromObject(parabrisas).max.y - 0.12);
   let cabezal = null, dx = Infinity;
   modelo.traverse(o => {
     if (o.name !== 'part_seat_front_headrest') return;
@@ -9458,9 +9460,14 @@ function actualizarMalla(dt) {
   const cuesta = coche.puente != null && zona.puentes[coche.puente]
     ? (() => { const P = zona.puentes[coche.puente], q = proyectarEnPuente(P, coche.x, coche.z), sg = Math.sign(hx * q.tx + hz * q.tz) || 1; return (cotaTablero(P, q.s + 2 * sg) - cotaTablero(P, q.s - 2 * sg)) / 4; })()
     : (sueloEn(coche.x + hx * 2, coche.z + hz * 2) - sueloEn(coche.x - hx * 2, coche.z - hz * 2)) / 4;
-  cuerpoCoche.position.y = salto + tiemble;
-  cuerpoCoche.rotation.x = Math.max(-0.05, Math.min(0.05, -coche.aLong * 0.0045)) - Math.max(-0.25, Math.min(0.25, cuesta));
-  cuerpoCoche.rotation.z = Math.max(-0.07, Math.min(0.07, coche.aLat * 0.007));
+  // con la cámara en la cabina, los ojos van pegados a la carrocería: se le quita casi todo el cabeceo y la inclinación, y la
+  // cuesta y la altura del suelo se suavizan (el relieve da saltitos de un fotograma a otro y desde dentro parecía que temblaba)
+  const enCabina = !!cabina && modoVisto() === 2, k = enCabina ? 0.25 : 1, fs = Math.min(1, dt * 5);
+  coche.cuestaS = coche.cuestaS === undefined || !enCabina ? cuesta : coche.cuestaS + (cuesta - coche.cuestaS) * fs;
+  coche.sueloS = coche.sueloS === undefined || !enCabina || Math.abs(suelo - coche.sueloS) > 1.5 ? suelo : coche.sueloS + (suelo - coche.sueloS) * Math.min(1, dt * 10);
+  cuerpoCoche.position.y = (salto + tiemble) * k + (coche.sueloS - suelo);
+  cuerpoCoche.rotation.x = Math.max(-0.05, Math.min(0.05, -coche.aLong * 0.0045)) * k - Math.max(-0.25, Math.min(0.25, coche.cuestaS));
+  cuerpoCoche.rotation.z = Math.max(-0.07, Math.min(0.07, coche.aLat * 0.007)) * k;
   sombraCoche.position.y = coche.acera ? 0.18 : 0.08;
   // dentro del coche, de la carrocería solo queda lo que está por delante del parabrisas: el capó y las aletas, abajo en la pantalla
   const dentro = modoVisto() === 2;
@@ -9513,7 +9520,7 @@ function recortarMorro(si, hx, hz) {
 // --- cámaras: detrás, cerca y dentro del coche (la tecla C o el botón Cámara pasan de una a otra) ---
 const NOMBRES_CAMARA = ['detrás del coche', 'cerca del coche', 'dentro del coche'];
 // la cámara mira a -Z y el coche avanza hacia +Z: media vuelta y la vista un poco hacia abajo, a la carretera
-const MIRA_ADELANTE = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.08, Math.PI, 0, 'YXZ'));
+const MIRA_ADELANTE = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.13, Math.PI, 0, 'YXZ'));
 function cambiarCamara() {
   modoCamara = (modoCamara + 1) % 3;
   document.body.classList.toggle('dentro', modoCamara === 2 && !cabina);
@@ -9527,7 +9534,7 @@ function actualizarCamara(dt) {
   // más ángulo de visión a más velocidad: da sensación de rapidez
   const rapido = Math.min(1, Math.abs(coche.v) / 50);
   // en la cabina, el ángulo no cambia: abrirlo con la velocidad hacía parecer que los ojos se iban hacia atrás
-  const fov = camaraCabina ? 60 : [60, 68, 74][modo] + rapido * [12, 9, 6][modo];
+  const fov = camaraCabina ? 72 : [60, 68, 74][modo] + rapido * [12, 9, 6][modo];
   if (Math.abs(camara.fov - fov) > 0.05) { camara.fov += (fov - camara.fov) * Math.min(1, dt * 4); camara.updateProjectionMatrix(); }
   const salto = coche.golpe > 0 ? Math.sin(coche.golpe / 0.5 * Math.PI) * 0.22 : 0;      // bote al subir al bordillo
   const tiemble = coche.acera ? Math.sin(performance.now() / 1000 * 30) * 0.03 : 0;
@@ -9536,7 +9543,8 @@ function actualizarCamara(dt) {
   if (camaraCabina) {   // dentro de un coche con cabina: los ojos van fijos al asiento y se mueven con la carrocería
     cuerpoCoche.updateMatrixWorld(true);
     const o = cabina.ojos;
-    camara.position.set(o.x + sac(), o.y + sac(), o.z + sac()).applyMatrix4(cuerpoCoche.matrixWorld);
+    const sc = () => sac() * 0.3;   // dentro, la sacudida de los golpes, más suave
+    camara.position.set(o.x + sc(), o.y + sc(), o.z + sc()).applyMatrix4(cuerpoCoche.matrixWorld);
     cuerpoCoche.getWorldQuaternion(camara.quaternion);
     camara.quaternion.multiply(MIRA_ADELANTE);
     return;
